@@ -25,6 +25,7 @@ wheels/
 .pulse/audit.jsonl
 .pulse/changes/
 .pulse/archive/
+.pulse/memory/
 
 # Serena
 .serena/cache/
