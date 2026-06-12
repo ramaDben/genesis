@@ -1,0 +1,78 @@
+{
+  "_comentario": "Config sugerida adaptada de Bajmein/pulse. Para activarla: revisa los hooks y permisos, y renombra este archivo a settings.json (decisión manual tuya). El hook UserPromptSubmit inyecta la fase SDD actual leyendo .pulse/ vía .agents/hooks/sdd_context_injector.py.",
+  "enableAllProjectMcpServers": true,
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(uv *)",
+      "Bash(ty *)",
+      "Bash(mise *)",
+      "mcp__serena__*",
+      "mcp__sequential-thinking__*",
+      "Bash(eza *)",
+      "Bash(lsd *)",
+      "Bash(rg *)",
+      "Bash(fd *)",
+      "Bash(ast-grep *)",
+      "Bash(mkdir *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(gh pr create *)",
+      "Bash(git worktree add *)",
+      "Bash(git worktree remove *)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run .agents/hooks/sdd_context_injector.py --client claude",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash(grep *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'DeterministicToolEnforcement: Use rg instead of grep for better performance' && exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(find *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'DeterministicToolEnforcement: Use fd instead of find' && exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(sed *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'DeterministicToolEnforcement: Use rg/fd/ast-grep or targeted file edits instead of sed' && exit 2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(awk *)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'DeterministicToolEnforcement: Use rg/fd/ast-grep or structured tooling instead of awk' && exit 2"
+          }
+        ]
+      }
+    ]
+  }
+}

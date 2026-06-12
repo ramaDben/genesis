@@ -1,0 +1,97 @@
+[project]
+name = "genesis"
+version = "0.1.0"
+description = "Pipeline de validación institucional para prop firms: torneo de candidatos de estrategia bajo gates mecánicos (Spec Génesis v1.1)."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "bandit>=1.9.4",
+  "deptry>=0.25.1",
+  "hypothesis>=6.155.1",
+  "pydantic>=2",
+  "pytest>=9.0.3",
+  "pytest-cov>=7.1.0",
+  "pytest-mock>=3.15.1",
+  "pytest-timeout>=2.4.0",
+  "ruff>=0.15.14",
+  "tokei-pie>=1.2.2",
+  "ty>=0.0.38",
+  "vulture>=2.16",
+]
+
+[build-system]
+requires = ["uv_build>=0.6.0,<0.7.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+extend-exclude = [
+  ".venv",
+  "venv",
+  ".git",
+  "__pycache__",
+  ".pytest_cache",
+  ".ruff_cache",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF", "S"]
+ignore = ["N802", "N805", "RUF001", "RUF002"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S603", "S607"]
+".agents/hooks/_lib/tests/**/*.py" = ["S101", "S603", "S607", "S108"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+  "-v",
+  "--strict-markers",
+  "--tb=short",
+  "--disable-warnings",
+  "-x",
+  "--timeout=30",
+]
+markers = [
+  "unit: Unit tests (isolated, no I/O, < 100ms each)",
+  "integration: Integration tests (2+ components, may use filesystem)",
+  "e2e: End-to-end tests (full system, runs just commands)",
+  "statistical: Tests estadísticos (dsr_pbo, purged_cv contra casos publicados)",
+  "slow: Slow running tests",
+]
+
+[tool.vulture]
+min_confidence = 80
+paths = ["src", "tests", "tests/whitelist_vulture.py"]
+ignore_names = ["cls", "app", "prompt", "model"]
+
+[tool.ty]
+environment = { python-version = "3.14", root = ["src", ".agents/hooks/_lib"] }
+
+[tool.ty.rules]
+possibly-unresolved-reference = "error"
+unresolved-attribute = "error"
+invalid-argument-type = "error"
+invalid-return-type = "error"
+
+[tool.deptry]
+extend_exclude = [".venv", "venv", ".git"]
+known_first_party = ["genesis", "pulse_hooks_lib"]
+package_module_name_map = { "pyyaml" = "yaml", "gitpython" = "git", "MetaTrader5" = "MetaTrader5" }
+
+[tool.bandit]
+exclude_dirs = ["tests", ".agents/hooks/_lib/tests", ".venv", "venv"]
+skips = ["B101", "B105", "B404", "B603", "B607"]

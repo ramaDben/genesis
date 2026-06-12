@@ -1,0 +1,54 @@
+# Git
+.git/
+.gitignore
+
+# Virtual Environments
+.venv/
+**/.venv/
+env/
+venv/
+
+# Python caches
+__pycache__/
+*.py[oc]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# Build artifacts
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Pulse FSM State (Runtime data)
+.pulse/
+
+# Serena Cache
+.serena/cache/
+
+# Markdown/Docs not needed for runtime engine execution
+docs/
+.claude/
+.gemini/
+.codex/
+.copilot/
+.github/
+.agents/
+
+# Node
+node_modules/
+
+# Local env
+.env
+.env.*
+
+# Tests
+tests/
+
+# Misc
+.vscode/
+.idea/
+*.swp
+*.swo

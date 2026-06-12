@@ -1,0 +1,35 @@
+# ==========================================
+# 1. Normalización estricta de finales de línea
+# ==========================================
+# Fuerza LF en todos los archivos de texto. Crítico para Bash hooks y Python.
+* text=auto eol=lf
+
+# ==========================================
+# 2. Optimización de Ventana de Contexto (Diffs)
+# ==========================================
+# Tratar lockfiles y coberturas como binarios para excluirlos de 'git diff'.
+# Evita que los MCPs consuman miles de tokens leyendo hashes.
+uv.lock binary -diff
+.coverage binary -diff
+
+# Archivos estáticos
+.pulse/assets/* binary
+
+# ==========================================
+# 3. Base de Datos FSM y Auditoría
+# ==========================================
+# El estado y los logs transaccionales mutan en cada paso. Ignorarlos de git diff.
+.pulse/state.sqlite* binary -diff
+.pulse/audit.jsonl binary -diff
+
+# ==========================================
+# 4. Exclusión Analítica (Linguist)
+# ==========================================
+# Evita que cachés y entornos afecten las estadísticas del repo
+.serena/cache/** linguist-generated=true -diff
+.agents/hooks/_lib/.venv/** linguist-generated=true -diff
+.pulse/archive/** linguist-generated=true -diff
+.pulse/changes/** linguist-generated=true -diff
+.pulse/memory/** linguist-generated=true -diff
+
+.github/workflows/*.lock.yml linguist-generated=true merge=ours

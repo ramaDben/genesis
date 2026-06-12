@@ -1,0 +1,26 @@
+["yq:read"]
+description = "Lee un valor de un archivo YAML/JSON/XML/TOML"
+usage = '''
+arg "<query>" help="Consulta jq-like (ej. '.a.b[0].c')"
+arg "<file>" help="Archivo a leer"
+'''
+run = "yq eval ${usage_query?} ${usage_file?}"
+hide = true
+
+["yq:write"]
+description = "Modifica un archivo YAML/JSON/XML/TOML in-place"
+usage = '''
+arg "<query>" help="Consulta de asignación (ej. '.a.b = \"nuevo\"')"
+arg "<file>" help="Archivo a modificar"
+'''
+run = "yq eval -i ${usage_query?} ${usage_file?}"
+hide = true
+
+["yq:format"]
+description = "Convierte formato (ej. yaml -> json)"
+usage = '''
+flag "--to <format>" help="Formato de salida (yaml, json, xml, props, toml)" required=#true
+arg "<file>" help="Archivo de entrada"
+'''
+run = "yq eval -o=${usage_to?} ${usage_file?}"
+hide = true

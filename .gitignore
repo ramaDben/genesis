@@ -1,0 +1,49 @@
+# Virtual Environments
+.venv/
+**/.venv/
+env/
+venv/
+ENV/
+
+# Python Caches
+__pycache__/
+*.py[oc]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+wheels/
+
+# Pulse FSM State (Runtime data)
+.pulse/state.sqlite*
+.pulse/audit.jsonl
+.pulse/changes/
+.pulse/archive/
+
+# Serena
+.serena/cache/
+
+# Node
+node_modules/
+
+# OS / Editors
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Configs / Secrets
+.env
+.env.*
+
+# Scratch
+prompt.md
+todo.md
+scratch.md

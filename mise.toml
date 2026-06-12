@@ -1,0 +1,132 @@
+# mise.toml — Configuración del Entorno y Tareas de Genesis
+# Adaptado de Bajmein/pulse para Windows (las run-strings se ejecutan con bash de Git for Windows).
+
+min_version = "2024.1.0"
+
+[settings]
+experimental = true
+jobs = 4
+task.source_freshness_hash_contents = true
+windows_default_inline_shell_args = "bash -c"
+
+[task_config]
+includes = [
+  "mise-tasks/docker.toml",
+  "mise-tasks/mcp.toml",
+  "mise-tasks/yq.toml",
+  "mise-tasks/omega.toml",
+  "mise-tasks/lsp.toml",
+  "mise-tasks/utils.toml",
+]
+
+[deps.uv]
+auto = true
+
+[env]
+VIRTUAL_ENV = "{{config_root}}/.venv"
+UV_PROJECT_ENVIRONMENT = "{{config_root}}/.venv"
+_.python.venv = { path = ".venv", create = true }
+_.file = ".env"
+PYTHONPATH = "src"
+PULSE_ENVIRONMENT = "development"
+DISABLE_THOUGHT_LOGGING = "true"
+
+[tools]
+# --- Core ---
+python = "3.14"
+uv = "latest"
+gh = "2.92.0"
+
+# --- LSPs ---
+# (en pulse vienen vía cargo:*; aquí se usan binarios precompilados — no requieren toolchain Rust)
+taplo = "latest"
+"github:Feel-ix-343/markdown-oxide" = "latest"
+"npm:yaml-language-server" = "latest"
+"npm:vscode-json-languageserver" = "latest"
+
+# --- CLI Utils ---
+ast-grep = "latest"
+ripgrep = "latest"
+# eza no publica binarios para Windows — lsd cumple el mismo rol
+fd = "latest"
+lsd = "latest"
+"github:XAMPPRocky/tokei" = "v12.1.2"
+"github:mikefarah/yq" = "4.53.2"
+
+[tasks."tool:install-mdq"]
+description = "Instala mdq vía cargo git"
+run = "cargo install --git https://github.com/yshavit/mdq"
+
+# -----------------------------------------------------
+# VALIDACIÓN Y TESTS (DAG en paralelo & Caché con Sources)
+# -----------------------------------------------------
+
+[tasks.default]
+description = "Lista todas las tasks disponibles"
+run = "mise tasks"
+
+[tasks.setup]
+alias = "s"
+description = "Inicializa el entorno de desarrollo"
+run = "uv sync --all-groups"
+
+[tasks.install]
+alias = "i"
+description = "Instala dependencias del proyecto"
+run = "uv sync --all-groups"
+
+[tasks.ci]
+description = "Pipeline completo: lint + ty + test (paralelo donde se puede)"
+depends = ["lint", "ty", "test"]
+
+[tasks.lint]
+description = "Ejecuta todos los linters en paralelo"
+depends = ["lint:ruff-check", "lint:bandit", "lint:vulture", "lint:deptry"]
+
+[tasks."lint:ruff-check"]
+description = "Ejecuta ruff check"
+sources = ["src/**/*.py", "tests/**/*.py", "pyproject.toml"]
+run = "uv run ruff check ."
+
+[tasks."lint:fix"]
+description = "Ejecuta ruff check con fix"
+run = "uv run ruff check . --fix"
+
+[tasks."lint:bandit"]
+description = "Ejecuta bandit"
+sources = ["src/**/*.py"]
+run = "uv run bandit -r src/"
+
+[tasks."lint:vulture"]
+description = "Ejecuta vulture"
+sources = ["src/**/*.py", "tests/**/*.py", "pyproject.toml"]
+run = "uv run vulture"
+
+[tasks."lint:deptry"]
+description = "Ejecuta deptry"
+sources = ["src/**/*.py", "pyproject.toml"]
+run = "uv run deptry src/"
+
+[tasks."format"]
+alias = "f"
+description = "Ejecuta ruff fix y ruff format"
+run = "uv run ruff check . --fix && uv run ruff format ."
+
+[tasks."test"]
+alias = "t"
+description = "Ejecuta tests con pytest"
+sources = ["src/**/*.py", "tests/**/*.py"]
+run = "uv run pytest"
+
+[tasks."ty"]
+alias = "tc"
+description = "Ejecuta ty check"
+sources = ["src/**/*.py", "pyproject.toml"]
+run = "uv run ty check"
+
+[tasks."clean"]
+description = "Limpia cachés de herramientas y artefactos de build (no toca .pulse/ ni .venv/)"
+run = """
+fd -H -t d '(__pycache__|\\.ruff_cache|\\.pytest_cache|.+\\.egg-info)$' . \
+  --exclude .venv --exec-batch rm -rf
+"""

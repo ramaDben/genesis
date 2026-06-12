@@ -1,0 +1,15 @@
+["docker:pull"]
+description = "Ejecuta pull de la imagen del servidor MCP de Pulse"
+usage = '''
+flag "--latest" help="Usa tag latest"
+arg "[version]" help="Version a usar (ej. 0.12.1)"
+'''
+run = '''
+tag="${usage_version:-latest}"
+if [ "${usage_latest}" = "true" ]; then tag="latest"; fi
+docker pull ghcr.io/bajmein/pulse/mcp-pulse:${tag}
+'''
+
+["docker:run"]
+description = "Ejecuta el servidor MCP de Pulse en modo interactivo (requerido para MCP stdio)"
+run = "docker run -i --rm -v 'C:/Users/bbrav/genesis:/work' -w /work -e PULSE_WORKSPACE_ROOT=/work -e PULSE_SQLITE_PATH=/work/.pulse/state.sqlite ghcr.io/bajmein/pulse/mcp-pulse:latest"

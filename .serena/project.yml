@@ -1,0 +1,66 @@
+# the name by which the project can be referenced within Serena
+project_name: genesis
+language: python
+
+# list of languages for which language servers are started
+languages:
+  - python
+
+# the encoding used by text files in the project
+encoding: "utf-8"
+
+# The language backend to use for this project (LSP or JetBrains)
+language_backend: "LSP"
+
+# whether to use project's .gitignore files to ignore files
+ignore_all_files_in_gitignore: true
+
+# list of additional paths to ignore in this project (gitignore syntax)
+ignored_paths:
+  - ".venv/**"
+  - ".pytest_cache/**"
+  - ".ruff_cache/**"
+  - ".pulse/state.sqlite*"
+
+# whether the project is in read-only mode
+read_only: false
+
+base_modes:
+  - "editing"
+  - "interactive"
+
+default_modes:
+  - "planning"
+
+# initial prompt for the project — always given to the LLM upon activating the project
+initial_prompt: "You are working on genesis, a Python 3.14 systematic-trading validation pipeline for prop firms (Spec Génesis v1.1, the SSoT at docs/SPEC_GENESIS_v1.1_PropTrading_TorneoCandidatos.md). The system runs a tournament of strategy candidates (A: CT sweep-fade, B: intraday ORB on indices — priority, C: TSMOM — deferred) through identical mechanical gates (G/C/P/T). Architecture is four strategy-agnostic layers under src/genesis/: data/ (MT5 export, calendar, sessions, quality, store), strategy/ (plugin contract + shared Inspector funnel + candidates), backtest/ (event-driven M1 simulator, costs, ledger, metrics), validation/ (WFA, Monte Carlo, purged K-fold, DSR/PBO, prop_sim, verdict). Design invariants: forward-only incremental state (anti-lookahead by construction, LookaheadError), institutional reproducibility (config_version + dataset hash + firm profile + seeds + commit in every artifact), fail-fast with context (never silent degradation), total determinism. All risk metrics are expressed in units of the prop firm's budget. Use `uv` for deps (uv sync, uv add, uv run) and `mise` as task runner (`mise run ci` = lint(ruff+bandit+vulture+deptry) + ty + test(pytest)). Prefer rg/fd/ast-grep over grep/find. Commit format `<type>(<domain>): <subject>` ending with `Refs #<issue>` when closing an issue. The SDD lifecycle is orchestrated by the pulse-engine MCP (8 phases: explore, propose, specify, design, break-to-tasks, apply, review, close) via the /pulse:* plugin skills; the human gate before apply is mandatory: only a human calls approve_design, never auto-approve. Spanish is the working language for docs and docstrings."
+
+initial_instructions: "Integrate the available MCP toolchain: serena for LSP-backed symbol navigation and integrity, pulse-engine for SDD state machine transitions, memory for persistent knowledge graph context, filesystem for codebase navigation, plus the user-scope github, context7 and sequential-thinking servers. GitHub issues/labels encode the SDD phases (state:1-explore … state:8-close); hydrate context from issues before implementing. Honor docs/SPEC_GENESIS_v1.1_PropTrading_TorneoCandidatos.md as the single source of truth; gates are never relaxed."
+
+excluded_tools: []
+
+included_optional_tools:
+  - "restart_language_server"
+  - "delete_lines"
+  - "insert_at_line"
+  - "replace_lines"
+  - "search_for_pattern"
+  - "switch_modes"
+  - "replace_symbol_body"
+  - "insert_after_symbol"
+  - "insert_before_symbol"
+  - "execute_shell_command"
+
+fixed_tools: []
+
+symbol_info_budget:
+
+line_ending:
+
+read_only_memory_patterns: []
+
+ignored_memory_patterns: []
+
+added_modes:
+
+additional_workspace_folders: []

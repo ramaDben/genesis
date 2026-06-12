@@ -1,0 +1,16 @@
+["metrics"]
+description = "Genera CodeMetricsSnapshot del codebase con tokei"
+run = "tokei --output json ."
+
+["metrics:pie"]
+description = "Genera un gráfico PNG de la distribución de código usando tokei-pie"
+run = "tokei -o json | tokei-pie"
+
+["find:tests"]
+description = "Encontrar archivos de tests"
+run = "fd -t f . tests"
+
+["mise-trust-root"]
+description = "pendiente"
+run = 'mise settings set trusted_config_paths "/"'
+hide = true

@@ -1,0 +1,17 @@
+--smart-case
+--hidden
+--follow
+--glob=!.git
+--glob=!__pycache__
+--glob=!.venv
+--glob=!**/.venv
+--glob=!.dmux
+--glob=!node_modules
+--glob=!.pytest_cache
+--glob=!.ruff_cache
+--glob=!.serena/cache
+--glob=!.pulse/archive
+--glob=!.pulse/changes
+--glob=!.pulse/audit.jsonl
+--glob=!.pulse/state.sqlite*
+--glob=!.pulse/memory

@@ -1,0 +1,14 @@
+["lsp:ty"]
+description = "Ejecuta el Ty language server usado por Serena"
+run = ".serena/ty-lsp.sh"
+hide = true
+
+["lsp:ty:check"]
+description = "Verifica que el comando Ty language server esté disponible"
+run = "uv run ty server --help"
+hide = true
+
+["serena:ty-lsp"]
+description = "Alias explícito para el Ty LSP configurado en .serena/project.yml"
+depends = ["lsp:ty"]
+hide = true

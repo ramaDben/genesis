@@ -1,0 +1,13 @@
+{
+  "name": "genesis",
+  "owner": {
+    "name": "bbenja11"
+  },
+  "plugins": [
+    {
+      "name": "pulse",
+      "source": "./.claude/plugins/pulse",
+      "description": "Plugin SDD de Pulse: skills /pulse:explore … /pulse:close, agentes por fase y hooks de validación/auditoría contra el engine."
+    }
+  ]
+}

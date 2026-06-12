@@ -1,0 +1,45 @@
+{
+  "mcpServers": {
+    "pulse-engine": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "C:/Users/bbrav/genesis:/work",
+        "-w",
+        "/work",
+        "-e",
+        "PULSE_WORKSPACE_ROOT=/work",
+        "-e",
+        "PULSE_SQLITE_PATH=/work/.pulse/state.sqlite",
+        "ghcr.io/bajmein/pulse/mcp-pulse:latest"
+      ]
+    },
+    "filesystem": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx -y @modelcontextprotocol/server-filesystem C:/Users/bbrav/genesis"
+      ]
+    },
+    "memory": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx -y @modelcontextprotocol/server-memory"
+      ],
+      "env": {
+        "MEMORY_FILE_PATH": "C:/Users/bbrav/genesis/.pulse/memory/knowledge-graph.jsonl"
+      }
+    },
+    "serena": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "uvx --from git+https://github.com/oraios/serena serena start-mcp-server --context claude-code --project C:/Users/bbrav/genesis"
+      ]
+    }
+  }
+}

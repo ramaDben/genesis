@@ -1,0 +1,10 @@
+ruleDirs:
+  - .agents/rules
+reportStyle: compact
+ignore:
+  - "**/.venv/**"
+  - ".pulse/archive/**"
+  - ".pulse/changes/**"
+# Configuración específica para el proyecto Pulse
+# Permite búsquedas semánticas estructurales de DDD
+# y validación de reglas de pipeline

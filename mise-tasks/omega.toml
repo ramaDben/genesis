@@ -1,0 +1,17 @@
+["memory:init"]
+description = "Inicializa el directorio de memoria del knowledge graph"
+run = "mkdir -p .pulse/memory && touch .pulse/memory/knowledge-graph.jsonl"
+hide = true
+
+["omega:doctor"]
+description = "Verifica la instalación de OMEGA Memory"
+run = "omega doctor"
+hide = true
+
+["omega:status"]
+description = "Estado de la base de memoria OMEGA"
+run = "omega status"
+
+["omega:consolidate"]
+description = "Consolida y optimiza la base de memoria"
+run = "omega consolidate"

@@ -1,0 +1,17 @@
+["mcp:add"]
+description = "Añade el servidor MCP de Pulse a Claude Code vía Docker (scope: project, repo montado en /work)"
+run = 'claude mcp add pulse-engine -- docker run -i --rm -v "C:/Users/bbrav/genesis:/work" -w /work -e PULSE_WORKSPACE_ROOT=/work -e PULSE_SQLITE_PATH=/work/.pulse/state.sqlite ghcr.io/bajmein/pulse/mcp-pulse:latest'
+
+["mcp:list"]
+description = "Lista MCPs configurados en Claude Code"
+run = "claude mcp list"
+
+["mcp:get:claude"]
+description = "Muestra detalle de un MCP en Claude Code"
+usage = 'arg "<name>" help="Nombre del servidor MCP"'
+run = "claude mcp get ${usage_name?}"
+
+["mcp:inspect-image"]
+description = "Verifica que la imagen Docker del MCP de Pulse exista localmente"
+run = "docker image inspect ghcr.io/bajmein/pulse/mcp-pulse:latest"
+hide = true

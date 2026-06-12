@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "pulse-engine": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "C:/Users/bbrav/genesis:/work",
+        "-w",
+        "/work",
+        "-e",
+        "PULSE_WORKSPACE_ROOT=/work",
+        "-e",
+        "PULSE_SQLITE_PATH=/work/.pulse/state.sqlite",
+        "ghcr.io/bajmein/pulse/mcp-pulse:latest"
+      ]
+    }
+  }
+}
