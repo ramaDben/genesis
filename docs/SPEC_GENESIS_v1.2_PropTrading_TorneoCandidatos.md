@@ -1,19 +1,20 @@
-# Spec Génesis v1.1 — Sistema de Trading Sistemático para Prop Firms (Torneo de Candidatos)
+# Spec Génesis v1.2 — Sistema de Trading Sistemático para Prop Firms (Torneo de Candidatos)
 
-**Fecha**: 2026-06-10
-**Estado**: superado por v1.2 (histórico). El SSoT vigente es `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md`.
-**Estado anterior**: génesis — documento fundacional del repositorio y SSoT v1.1. Reemplazaba íntegramente al v1.0.
+**Fecha**: 2026-06-13
+**Estado**: definitivo (SSoT vigente). Reemplaza íntegramente al v1.1.
 **Objetivo de negocio**: construir un pipeline de validación institucional que adjudique, mediante gates mecánicos, cuál de varios candidatos de estrategia (si alguno) rentabiliza bajo las reglas reales de una prop firm — y autorizar capital solo sobre esa evidencia.
 
-### Changelog v1.0 → v1.1
+### Changelog v1.1 → v1.2
 
-1. El proyecto deja de validar **una** estrategia y pasa a ejecutar un **torneo de candidatos** bajo gates idénticos. La capa de estrategia se formaliza como contrato plugin.
-2. VWAP+SMC se reduce a su pierna defendible: **Candidato A = CT sweep-fade**. La pierna PRO sale de la v1 y queda archivada como hipótesis futura (A2).
-3. Se incorpora el **Candidato B: momentum intradía / Opening Range Breakout en índices** — la familia con mejor evidencia pública y mejor encaje prop — como prioridad de implementación.
-4. **Candidato C (TSMOM H4/D1)** queda definido pero diferido a post-veredicto, solo para fichas de firma que permitan swing.
-5. Nuevo **diagnóstico de señal desnuda** como kill-switch barato del Candidato A, previo a construir su capa de riesgo/gatillos.
-6. Nuevos gates **T (torneo)**: deflación del DSR por selección entre candidatos y criterio de ensemble.
-7. Cadena de issues reestructurada (A–K) con paralelismo entre candidatos.
+Los 7 puntos normativos que el v1.1 dejaba pendientes quedan cerrados en esta versión:
+
+1. **§1.3 — Base del `daily_loss_limit`**: el v1.1 marcaba este campo como *verificar en Issue A si la base es equity, balance o el mayor de ambos*. El v1.2 lo cierra: base = el mayor de (equity flotante intradía) y (balance al cierre del día anterior); el gate P3 se evalúa sobre equity flotante.
+2. **§1.3 — `daily_reset_time`**: el v1.1 no especificaba la zona horaria explícita. El v1.2 lo fija en `00:00 America/New_York` (default conservador — confirmar contra términos vigentes de The5ers en Issue B).
+3. **§1.3 — Tabla de símbolos MT5**: el v1.1 no listaba los símbolos MT5 exactos de The5ers. El v1.2 añade la tabla de correspondencias nombre-convencional ↔ símbolo esperado en The5ers, a confirmar en Issue B.
+4. **§2.1 — Contrato plugin normativo**: el v1.1 describía el contrato en términos breves. El v1.2 lo expande a especificación normativa completa: método `on_bar`, invariante forward-only, `LookaheadError`, campos de `EntryIntent`, regla de aislamiento, namespace de parámetros.
+5. **§2.3 — Candidato B**: el v1.1 marcaba la tabla de definición normativa como *a fijar en Issue A*. El v1.2 cierra todos los campos: N, criterio de entrada, stop, sizing, sesiones de contado UTC, cierre forzado, noticias.
+6. **§6 / §7 — Presupuesto de grid y umbrales**: el v1.1 marcaba los umbrales como *valores iniciales* y el presupuesto de grid como pendiente. El v1.2 los fija como definitivos: N_trials_IS = 27, DSR-IS como métrica de selección, sanity-checks de alcanzabilidad.
+7. **§10 — Bandas de incubación**: el v1.1 dejaba las métricas de consistencia sin umbrales. El v1.2 las fija: 8 semanas, slippage/rechazo/Sharpe rolling con umbrales numéricos, criterio de violación de firma como invariante.
 
 ---
 
@@ -38,16 +39,18 @@ Contrato de datos versionado, análogo a la ficha del símbolo. Campos mínimos:
 | Campo | Descripción |
 |---|---|
 | `phases` | Fases del challenge: target de profit, días mínimos, plazo (o ilimitado) por fase |
-| `daily_loss_limit` | Límite de pérdida diaria (% y base de cálculo: balance del día anterior vs equity) |
+| `daily_loss_limit` | Límite de pérdida diaria (% y base de cálculo: el mayor de equity flotante intradía y balance del día anterior) |
 | `max_loss_limit` | DD máximo (% y tipo: estático o trailing; ancla del trailing) |
 | `daily_reset_time` | Hora y zona horaria del corte diario |
-| `equity_basis` | Si el DD diario se evalúa sobre equity flotante (lo habitual) o solo balance |
+| `equity_basis` | Base de evaluación del DD diario: `equity` (equity flotante — valor resuelto para The5ers v1); el corte diario también aplica la cota adicional de balance del día anterior |
 | `consistency_rule` | Si existe: % máximo del profit total atribuible a un solo día |
 | `news_restrictions` | Ventanas prohibidas alrededor de noticias de alto impacto (por fase) |
 | `weekend_holding` | Permitido o no — **determina la elegibilidad del Candidato C** |
 | `profit_split`, `payout_cycle` | Reparto y cadencia de retiros |
 | `challenge_cost` | Coste de cada intento |
 | `max_lots`, `max_positions` | Límites de exposición si existen |
+
+Nota: el campo `equity_basis` queda resuelto como `equity` para The5ers v1. La evaluación del gate P3 de `prop_sim` usa equity flotante intradía como base primaria; adicionalmente, el límite se considera violado si la pérdida medida contra el balance al cierre del día anterior también lo cruza (cota más estricta de las dos). Ver §1.3 y §7.3.
 
 ### 1.2. Economía del embudo
 
@@ -58,13 +61,15 @@ E[negocio] = −coste_challenges × E[intentos]
 
 La probabilidad de pasar es función del **Sharpe** de la trayectoria de equity, no de la expectancy por trade; sin límite de tiempo, reducir la volatilidad a Sharpe constante aumenta P(pasar) monótonamente. Corolarios de diseño que rigen todo el spec: (a) el Sharpe se fabrica con amplitud — muchas apuestas pequeñas poco correlacionadas; (b) el riesgo por trade se calibra contra los gates P, con política distinta por fase (challenge vs fondeado); (c) la diversificación entre candidatos no correlacionados (ensemble) es la vía más barata de subir el Sharpe del portafolio.
 
-### 1.3. Firma objetivo v1: The5ers (borrador de ficha — Issue A la verifica contra los términos vigentes)
+### 1.3. Firma objetivo v1: The5ers — ficha definitiva
 
-| Campo | Valor preliminar |
+| Campo | Valor definitivo |
 |---|---|
 | Plataformas | MT5 (hedge) y cTrader; el export usa MT5 |
 | Programa de referencia | High Stakes: target 8% (fase 1) / 5% (fase 2) |
-| `daily_loss_limit` | 5% del cierre del día anterior — **verificar en Issue A si la base es equity, balance o el mayor de ambos** (cambia `prop_sim`) |
+| `daily_loss_limit` | **5%** — base de evaluación: **el mayor de** (a) la pérdida medida contra el equity flotante intradía y (b) la pérdida medida contra el balance al cierre del día anterior. El límite se considera violado en cuanto cualquiera de las dos bases lo cruza. El gate P3 de `prop_sim` evalúa sobre equity flotante (base que dispara primero). La cota de balance del día anterior es la cota adicional. Default conservador — confirmar contra términos vigentes de The5ers en Issue B (cuenta demo / web). |
+| `daily_reset_time` | **`00:00 America/New_York`** (medianoche hora de Nueva York, zona horaria explícita). Alineado al servidor MT5 de The5ers. Equivalencia UTC: 05:00 UTC en horario estándar (EST), 04:00 UTC en horario de verano (EDT). Default conservador — confirmar contra términos vigentes de The5ers en Issue B. |
+| `equity_basis` | `equity` (equity flotante intradía, con cota adicional de balance del día anterior — ver §1.1) |
 | `max_loss_limit` | 10% |
 | `min_profitable_days` | **3 días con profit ≥ 0.5% por fase** — restricción activa para `prop_sim`: no basta cruzar el target, hay que cruzarlo con la distribución diaria correcta |
 | Plazo | Sin límite de tiempo; cuentas inactivas >30 días expiran |
@@ -73,26 +78,73 @@ La probabilidad de pasar es función del **Sharpe** de la trayectoria de equity,
 | EAs | Permitidos **si el trader posee el código fuente**; el sistema propio cumple por construcción. Prohibidos: HFT, tick scalping, arbitraje de latencia/reverso, EAs que exploten el feed en el rollover, copy trading, hedge arbitrage entre cuentas, "one-sided betting" sin análisis |
 | Otras | Residentes de EE. UU. excluidos; payouts quincenales |
 
+#### Símbolos MT5 esperados en The5ers
+
+La siguiente tabla lista la correspondencia nombre-convencional ↔ símbolo esperado en la plataforma The5ers. Los nombres canónicos internos del pipeline son los de la columna *Nombre convencional*; `mt5_export.py` resuelve el alias real en Issue B contra la lista de símbolos del terminal MT5.
+
+| Nombre convencional | Símbolo MT5 esperado en The5ers | Alias posibles | Subyacente |
+|---|---|---|---|
+| US500 | `US500` | `SP500`, `SPX500` | S&P 500 |
+| NAS100 | `US100` | `NAS100`, `USTEC` | Nasdaq 100 |
+| US30 | `US30` | `DJ30`, `DJIA` | Dow Jones 30 |
+| GER40 | `GER40` | `DE40`, `DAX40` | DAX 40 |
+
+Nota: los símbolos MT5 de la columna *Símbolo MT5 esperado* son los nombres esperados a confirmar en Issue B (cuenta demo de The5ers). Si el nombre real difiere, `mt5_export.py` usa el alias confirmado y actualiza esta tabla en Issue B.
+
 ---
 
 ## 2. Capa de estrategia: torneo de candidatos
 
-### 2.1. Contrato plugin
+### 2.1. Contrato plugin — especificación normativa
 
-Todo candidato implementa la misma interfaz:
+Todo candidato implementa la misma interfaz. Esta sección especifica el contrato normativamente; la firma Python ejecutable (Protocol o clase abstracta) se fija en Issue C.
 
-- `on_bar(bar) → list[EntryIntent]` — incremental, forward-only, estructuralmente incapaz de mirar adelante.
-- Esquema de parámetros propio bajo un namespace de `inspector_config.json` (`candidates.A.*`, `candidates.B.*`, …).
-- Todo `EntryIntent` atraviesa el **embudo del Inspector compartido** (viabilidad R:R, lotaje contra fichas de símbolo y firma, restricciones de la firma) y produce `AUTHORIZED` o motivo de rechazo tipificado. El embudo, el ledger, el simulador y los gates son **idénticos** para todos los candidatos.
-- Cada candidato corre el pipeline completo de forma aislada: su propio WFA, su propio conteo de trials, su propio DSR. **Sin contaminación entre candidatos.**
+#### Método mínimo requerido
+
+`on_bar(bar) → list[EntryIntent]`
+
+- **Semántica incremental**: el método solo puede consumir el estado de barras con `confirmed_time ≤ t_actual` (tiempo de confirmación de la barra en curso). Queda explícitamente prohibido acceder a barras con `confirmed_time > t_actual`.
+- **Invariante forward-only** (contrato normativo): ningún output de `on_bar(t)` puede depender, directa o indirectamente, de barras con `confirmed_time > t`. Esta invariante es de diseño, no de disciplina del implementador.
+- **`LookaheadError`** (enforcement → Issue C): cualquier intento de acceder a una barra con `confirmed_time > t_actual` durante la ejecución de `on_bar(t)` lanza `LookaheadError`. El mecanismo de enforcement se implementa en el simulador y/o el store de datos en Issue C; su existencia es normativa desde este spec.
+
+El invariante forward-only se aplica a nivel de simulador: el reloj interno del simulador garantiza que ningún candidato puede observar el futuro, independientemente de si el candidato viola la invariante intencionalmente o por error.
+
+#### Campos mínimos de `EntryIntent`
+
+Cada `EntryIntent` producido por `on_bar` debe incluir como mínimo:
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `direction` | `long` \| `short` | Dirección de la entrada deseada |
+| `sizing_hint` | fracción de riesgo o lotes | Indicación de tamaño (el Inspector puede ajustar o rechazar) |
+| `candidate_id` | identificador del candidato (`A`, `B`, `C`, …) | Trazabilidad en el ledger |
+| `config_version` | cadena de versión del config activo | Reproducibilidad institucional |
+
+El `EntryIntent` es una **intención**, no una orden ejecutada. El embudo del Inspector puede rechazarla por cualquier motivo normativo (R:R insuficiente, lotaje fuera de límites, ventana de noticias, etc.) y registra el motivo de rechazo tipificado en el ledger. Un rechazo no es un error; es información del embudo.
+
+#### Regla de aislamiento entre candidatos
+
+Cada candidato registra sus propios trials de forma completamente aislada:
+
+- No existe estado compartido entre candidatos (ni parámetros, ni ledger, ni contador de trials).
+- El DSR de cada candidato se calcula exclusivamente con la historia de trials de ese candidato; ningún trial de otro candidato entra en su cómputo.
+- La corrección de selección del gate T1 (deflación por el número de candidatos del torneo) se aplica al veredicto final, no contamina el DSR individual de cada candidato.
+
+#### Namespace de parámetros
+
+Cada candidato declara sus propios parámetros bajo el namespace `candidates.<letra>.*` en `inspector_config.json`:
+
+- `candidates.A.*` — parámetros del Candidato A (CT sweep-fade)
+- `candidates.B.*` — parámetros del Candidato B (ORB)
+- `candidates.C.*` — parámetros del Candidato C (TSMOM)
+
+No existen parámetros globales de señal compartidos entre candidatos. El Inspector sí tiene parámetros globales de embudo (umbrales de R:R, límites de lotaje) bajo `inspector.*`.
 
 ### 2.2. Candidato A — CT sweep-fade (VWAP+SMC, pierna CT)
 
 **Hipótesis**: tras la confirmación de un barrido de liquidez (sweep de EQH/EQL) con `|Z| ≥ ct_zscore_min` respecto al VWAP anclado, el precio revierte hacia el VWAP con magnitud suficiente para superar los costes. Mecanismo: cascadas de stops agrupados en niveles salientes + reversión de inventario (Osler 2003/2005).
 
 **Componentes**: `vwap_engine` (portado con sus tests), `smc_engine` (fractales con doble timestamp, agregación M1→TF, EQH/EQL, máquina de estados de sweep, camino libre), `zones` (PRO/MID/CT por VWAP + z-score), `risk` (SL banda vs swing + buffer ATR+spread; TP `FIXED_RR`/`STRUCT_TRAIL`/`STATIC`/`DYNAMIC`), gatillo CT.
-
-**Universo reducido por mecanismo** (no canasta amplia): índices en horario de contado, oro, y majors solo en ventana de solapamiento Londres–NY. Filtro de sesión como parámetro de primera clase.
 
 **La pierna PRO queda archivada (A2)**: hipótesis sin grounding diferenciado y con grados de libertad que encarecen el DSR de todo el sistema. Podrá presentarse a un torneo futuro con sección normativa propia.
 
@@ -108,23 +160,84 @@ Antes de construir la capa de riesgo y gatillos del Candidato A, se ejecuta un e
 
 **Hipótesis**: el impulso direccional de la apertura de contado persiste intradía (continuación del rango de apertura). Evidencia: Zarattini & Aziz 2023 (ORB QQQ, alfa ~33% anualizado neto, 2016–2023); Zarattini, Barbon & Aziz 2024 (Sharpe 2.81 en universo amplio; replicado independientemente por QuantConnect con Sharpe 2.4 y robustez paramétrica); mecanismo emparentado con revisión por pares en Gao, Han, Li & Zhou 2018 (momentum intradía de mercado, *JFE*). Las cifras publicadas se descuentan 30–60% por decay post-publicación: el descuento no cambia la prioridad, los gates emiten el veredicto.
 
-**Definición normativa (a fijar en Issue A):**
+**Definición normativa:**
 
 | Elemento | Regla |
 |---|---|
-| Universo | CFDs de índices: US500, NAS100, US30, GER40 (apertura de contado de cada uno) |
-| Rango de apertura | Primeros N minutos de la sesión de contado (N ∈ {5, 15, 30}, parámetro del WFA) |
-| Entrada | Ruptura del extremo del rango en la dirección de la primera vela de la sesión |
-| Stop | Extremo opuesto del rango (o fracción ATR, parámetro) |
-| Sizing | Vol-targeting: riesgo fijo en % de cuenta por trade ⇒ lotes = riesgo / distancia de stop |
-| Salida | Cierre forzado al fin de la sesión de contado (sin overnight, sin swap, sin weekend) |
-| Noticias | Sin entrada en ventanas restringidas por la ficha de la firma (calendario, capa 1) |
+| Universo | CFDs de índices: US500, NAS100, US30, GER40 (apertura de contado de cada uno) — ver §2.x para símbolos MT5 |
+| Rango de apertura | Primeros N minutos de la sesión de contado, con **N ∈ {5, 15, 30}** como espacio de búsqueda IS (parámetro del WFA) |
+| Entrada | Ruptura **confirmada** con cierre de vela M1 fuera del extremo del rango (no ruptura intrabar), en la dirección de la primera vela de la sesión |
+| Stop | Extremo opuesto del rango (regla primaria); parámetro alternativo `atr_stop_frac ∈ {0.5, 1.0, 1.5}` en el espacio de búsqueda IS |
+| Sizing | Vol-targeting: riesgo fijo `risk_pct ∈ {0.25%, 0.375%, 0.5%}` (espacio de búsqueda IS) → lotes = riesgo / distancia de stop |
+| Salida | Cierre forzado al **último tick de precio disponible antes del cierre de sesión de contado**; `SessionBoundaryError` si la posición sobrevive al corte |
+| Noticias | Sin entrada en ventanas restringidas por la ficha de la firma según el calendario económico (`calendar.py`, capa 1) |
+
+#### Tabla de sesiones de contado por índice (UTC, horario estándar)
+
+| Índice | Apertura contado (UTC) | Cierre contado (UTC) | Nota DST |
+|---|---|---|---|
+| US500 | 14:30 | 21:00 | DST US (NY): en horario de verano (EDT) las horas UTC se desplazan −1 h (13:30–20:00 UTC) |
+| NAS100 | 14:30 | 21:00 | DST US (NY): igual que US500 |
+| US30 | 14:30 | 21:00 | DST US (NY): igual que US500 |
+| GER40 | 08:00 | 16:30 | DST EU (Frankfurt): en horario de verano (CEST) las horas UTC se desplazan −1 h (07:00–15:30 UTC) |
+
+Los horarios exactos, incluyendo el desplazamiento DST, se materializan en `sessions.py` (Issue B) usando `zoneinfo`. La tabla anterior es la referencia normativa en horario estándar (UTC sin DST).
 
 **Propiedades estructurales**: ~700–1.000 apuestas/año en 4 índices (amplitud → G1 rápido, Sharpe por diversificación), riesgo definido desde la entrada (compatible con presupuesto diario), no usa volumen (inmune a la fragilidad del `tick_volume`), P6 trivial por construcción.
 
 ### 2.4. Candidato C — TSMOM H4/D1 multi-activo (diferido)
 
 Momentum de serie temporal con vol-targeting sobre FX+metales+índices. La evidencia más longeva del quant sistemático (Moskowitz/Ooi/Pedersen 2012; un siglo+ en estudios posteriores). Encaje prop medio: overnight/weekend (elegible solo en firmas que lo permitan), DD largos en tensión con consistency rules, acumulación lenta de trades. **Rol**: sleeve diversificador post-veredicto de A/B; su correlación estructuralmente baja con estrategias intradía es su valor.
+
+### 2.x. Universos por candidato
+
+#### Universo del Candidato B (cerrado, sin extensión en v1)
+
+| Nombre convencional | Símbolo MT5 esperado en The5ers | Alias posibles | Subyacente |
+|---|---|---|---|
+| US500 | `US500` | `SP500`, `SPX500` | S&P 500 |
+| NAS100 | `US100` | `NAS100`, `USTEC` | Nasdaq 100 |
+| US30 | `US30` | `DJ30`, `DJIA` | Dow Jones 30 |
+| GER40 | `GER40` | `DE40`, `DAX40` | DAX 40 |
+
+Los cuatro índices son el universo completo del Candidato B en v1. No se añaden símbolos adicionales en esta versión. Los símbolos MT5 esperados coinciden con la tabla de §1.3; la correspondencia explícita se documenta allí y se reutiliza aquí.
+
+#### Universo del Candidato A (CT sweep-fade)
+
+El universo del Candidato A está restringido por el mecanismo de sweeps: requiere sesiones con liquidez suficiente para generar estructuras de sweep válidas.
+
+| Nombre convencional | Símbolo MT5 esperado en The5ers | Sesión aplicable | Nota |
+|---|---|---|---|
+| US500 | `US500` | Contado (14:30–21:00 UTC est.) | Índice US, misma tabla que B |
+| NAS100 | `US100` | Contado (14:30–21:00 UTC est.) | Índice US |
+| US30 | `US30` | Contado (14:30–21:00 UTC est.) | Índice US |
+| GER40 | `GER40` | Contado (08:00–16:30 UTC est.) | Índice EU |
+| XAUUSD | `XAUUSD` | Solapamiento Londres–NY (12:00–17:00 UTC aprox.) | Oro spot |
+| EURUSD | `EURUSD` | Solapamiento Londres–NY (12:00–17:00 UTC aprox.) | Major FX |
+| GBPUSD | `GBPUSD` | Solapamiento Londres–NY (12:00–17:00 UTC aprox.) | Major FX |
+| USDJPY | `USDJPY` | Solapamiento Londres–NY (12:00–17:00 UTC aprox.) | Major FX |
+
+El universo definitivo del Candidato A se cierra en Issue F (post-diagnóstico de señal desnuda en Issue D). Los símbolos MT5 de oro y majors son los nombres convencionales esperados en The5ers; a confirmar en Issue B.
+
+#### Universo del Candidato C (TSMOM — implementación diferida a Issue K)
+
+El universo del Candidato C se fija aquí para que el DSR de torneo sea calculable aunque la implementación esté diferida. El universo es FX + metales + índices para TSMOM multi-activo.
+
+| Nombre convencional | Símbolo MT5 esperado en The5ers | Clase de activo |
+|---|---|---|
+| EURUSD | `EURUSD` | FX major |
+| GBPUSD | `GBPUSD` | FX major |
+| USDJPY | `USDJPY` | FX major |
+| AUDUSD | `AUDUSD` | FX major |
+| USDCHF | `USDCHF` | FX major |
+| USDCAD | `USDCAD` | FX major |
+| XAUUSD | `XAUUSD` | Metal |
+| XAGUSD | `XAGUSD` | Metal |
+| US500 | `US500` | Índice |
+| GER40 | `GER40` | Índice |
+| US30 | `US30` | Índice |
+
+El universo definitivo del Candidato C (TSMOM) se confirma en Issue K. La lista anterior es la referencia normativa para calcular el DSR de torneo en Issue J. Los símbolos MT5 son los nombres esperados en The5ers; a confirmar en Issue B.
 
 ### 2.5. Higiene del torneo
 
@@ -258,15 +371,45 @@ mt5_export ──► quality ──► Parquet versionado (hash)
 
 Reglas sin excepción: solo trades OOS alimentan la validación; trials contados mecánicamente por candidato; gates P a nivel de cuenta, nunca por símbolo; manifest reproducible con un comando.
 
+### 6.2. Presupuesto de grid IS y métrica de selección (definitivos)
+
+#### Presupuesto de trials IS por candidato por ventana WFA
+
+**`N_trials_IS = 27`** (grid completo 3×3×3) por candidato por ventana WFA.
+
+Derivación para el Candidato B (3 parámetros libres):
+
+| Parámetro | Espacio de búsqueda IS | Niveles |
+|---|---|---|
+| `N` (minutos del rango) | {5, 15, 30} | 3 |
+| `atr_stop_frac` (fracción ATR del stop) | {0.5, 1.0, 1.5} | 3 |
+| `risk_pct` (% de riesgo por trade) | {0.25%, 0.375%, 0.5%} | 3 |
+
+Grid completo: 3 × 3 × 3 = **27 combinaciones**. Este es el presupuesto máximo de trials IS por candidato por ventana WFA. El diseño concreto del muestreo IS (grid lineal, log-lineal, Sobol) se decide en Issue H dentro de este presupuesto.
+
+Nota: `risk_pct` es un parámetro de sizing que no altera la señal ni el conteo de trades; las configuraciones de señal distintas son 3 × 3 = 9. Para el conteo de trials del DSR (que penaliza la búsqueda sobre la **forma** de la señal) lo relevante son las 9 configuraciones de señal. Esta distinción se documenta aquí como restricción de diseño; el cálculo exacto del DSR se implementa en Issue I.
+
+El techo de **N_trials_IS = 27** es una restricción de diseño del WFA que Issue H debe honrar. No se puede superar el presupuesto añadiendo parámetros o niveles sin actualizar este spec.
+
+#### Métrica de selección IS: DSR-IS
+
+La métrica de selección IS del WFA es **DSR-IS** (Deflated Sharpe Ratio calculado sobre los trials IS del candidato). Esta elección coincide con la que ya señalaba §6 del v1.1 y se confirma aquí como definitiva.
+
+Justificación: DSR-IS penaliza la multiplicidad de comparaciones IS directamente en la métrica de selección, reduciendo el sesgo de overfitting IS antes de que llegue al OOS. Es coherente con el gate G4 (DSR OOS ≥ 0.95) al usar la misma familia de correcciones.
+
+#### Coherencia presupuesto de trials con DSR ≥ 0.95
+
+Con N_trials_IS = 27, la deflación del Sharpe por el término de corrección del DSR es modesta: `ln(27) ≈ 3.30`, muy por debajo de los cientos o miles de trials que erosionan el DSR por debajo de 0.95. El gate G4/T1 (DSR ≥ 0.95) es alcanzable con este presupuesto. Ver §7.2 para el sanity-check completo.
+
 ---
 
-## 7. Umbrales go/no-go
+## 7. Umbrales go/no-go (definitivos)
 
-Valores iniciales; el Issue A los fija. Riesgo por trade de referencia: 0.25–0.5%, calibrable por fase contra los gates P.
+Los umbrales de esta sección son **definitivos**. Riesgo por trade de referencia: 0.25–0.5%, calibrable por fase contra los gates P.
 
 ### 7.1. Gates G — robustez por símbolo y candidato (sobre OOS)
 
-| # | Criterio | Umbral inicial |
+| # | Criterio | Umbral definitivo |
 |---|---|---|
 | G1 | Trades OOS totales | ≥ 300 |
 | G2 | WFE (curva OOS cosida vs IS agregado) | ≥ 0.5 |
@@ -280,25 +423,25 @@ Valores iniciales; el Issue A los fija. Riesgo por trade de referencia: 0.25–0
 
 ### 7.2. Gates C — coherencia de canasta (por candidato)
 
-| # | Criterio | Umbral inicial |
+| # | Criterio | Umbral definitivo |
 |---|---|---|
 | C1 | Símbolos del universo del candidato que pasan G1–G9 | ≥ 60% |
 | C2 | PF OOS mínimo de los que no pasan | ≥ 0.8 |
 
 ### 7.3. Gates P — economía prop a nivel de cuenta (por candidato y firma)
 
-| # | Criterio | Umbral inicial |
+| # | Criterio | Umbral definitivo |
 |---|---|---|
 | P1 | P(pasar challenge completo) | ≥ 50% |
 | P2 | E[intentos hasta fondeo] | ≤ 2 |
-| P3 | P(breach del límite diario en un mes fondeado, equity flotante) | < 2% |
+| P3 | P(breach del límite diario en un mes fondeado) | < 2% — evaluado sobre **equity flotante intradía** (base que dispara primero). El breach también ocurre si la pérdida contra el balance del día anterior cruza el 5% (cota adicional, coherente con §1.3 D1). |
 | P4 | Supervivencia mediana fondeada | ≥ 6 meses |
 | P5 | Payout neto a 12 m, percentil 25 de la distribución MC | > 0 |
 | P6 | Violaciones de reglas de firma en simulación OOS | = 0 |
 
 ### 7.4. Gates T — torneo
 
-| # | Criterio | Umbral inicial |
+| # | Criterio | Umbral definitivo |
 |---|---|---|
 | T1 | DSR del candidato ganador, deflactado por el nº de candidatos del torneo | ≥ 0.95 |
 | T2 | Ensemble: correlación OOS de retornos diarios entre candidatos que pasan | < 0.3 para validar ensemble; en caso contrario, solo el de mejor economía P |
@@ -310,14 +453,45 @@ Valores iniciales; el Issue A los fija. Riesgo por trade de referencia: 0.25–0
 - **GO-PARCIAL**: pasa en subconjunto de símbolos → incubación restringida.
 - **NO-GO**: ningún candidato pasa → revisar hipótesis, no parámetros. Se permite **una** iteración de política de riesgo/firma sin tocar parámetros de señal (registrada como trial para T1).
 
+### 7.6. Sanity-checks de alcanzabilidad (G1 y G4/T1)
+
+#### Sanity-check G1 ≥ 300 (alcanzabilidad de trades OOS totales)
+
+El gate G1 exige ≥ 300 trades OOS en la curva OOS cosida sobre todas las ventanas WFA.
+
+**Cálculo de referencia para el Candidato B:**
+
+- Frecuencia operativa: ~700–1.000 apuestas/año repartidas en 4 índices (US500, NAS100, US30, GER40).
+- Ventana OOS por paso del WFA rolling: 6–12 meses.
+- Trades OOS por ventana cosida: 700–1.000 apuestas/año × 0.5–1.0 año = **350–1.000 trades OOS por ventana cosida**.
+
+Como G1 cuenta trades OOS totales sobre la curva OOS cosida (suma de todas las ventanas), y la primera ventana anual ya produce 350–1.000 trades, el sanity-check concluye: **G1 ≥ 300 es holgadamente alcanzable sin ajuste de umbrales.**
+
+Si un índice individual no alcanzara 300 trades OOS en la ventana de historia disponible de The5ers, la solución es extender la ventana temporal de M1 (documentado en `quality.py` como restricción de suficiencia de historia) o excluir ese índice del universo de ese candidato. **Los gates no se relajan.** Esta contingencia se gestiona en Issue B según la historia real disponible.
+
+#### Sanity-check G4/T1 DSR ≥ 0.95 (coherencia con presupuesto de grid)
+
+El gate G4 (y T1, que deflacta por el número de candidatos) exige DSR ≥ 0.95 tras el WFA.
+
+**Análisis con N_trials_IS = 27:**
+
+La corrección del DSR (Deflated Sharpe Ratio de Bailey & López de Prado) penaliza la búsqueda IS mediante el término `Φ⁻¹(1 − 1/T_trials)` donde `T_trials` es el número de trials evaluados. Con 27 trials:
+
+- `ln(27) ≈ 3.30` (como referencia del crecimiento del término de corrección)
+- La deflación esperada del Sharpe IS → OOS con 27 trials es modesta comparada con búsquedas de cientos o miles de trials.
+
+**Conclusión**: con N_trials_IS = 27 (grid 3×3×3), el presupuesto de grid es suficientemente pequeño para que la deflación del DSR no haga el gate G4 ≥ 0.95 inalcanzable bajo condiciones normales de edge. **DSR ≥ 0.95 es alcanzable con este presupuesto.** El techo de 27 trials queda documentado como restricción de diseño del WFA (Issue H).
+
+Si el edge IS observado fuera tan pequeño que la deflación lo llevara por debajo de 0.95, eso indica ausencia de ventaja estadística real — el gate cumpliría su función de NO-GO, no habría incoherencia.
+
 ---
 
 ## 8. Manejo de errores
 
 - **Fail-fast con contexto**: dataset sin calidad, config inválida, ficha incompleta → aborto explícito. Nunca degradación silenciosa.
-- **`LookaheadError`**: reloj interno del simulador; leer barra/tick/swing con `confirmed_time > now` lanza excepción.
+- **`LookaheadError`**: reloj interno del simulador; leer barra/tick/swing con `confirmed_time > now` lanza excepción. Cualquier candidato que intente acceder a barras futuras durante `on_bar(t)` viola la invariante forward-only y obtiene esta excepción. Ver §2.1.
 - **`DayBoundaryError`**: inconsistencia entre cortes de día del store y `daily_reset_time` de la firma aborta el run.
-- **`SessionBoundaryError`**: posición del Candidato B viva tras el cierre de sesión de contado aborta el run (el cierre forzado es invariante, no best-effort).
+- **`SessionBoundaryError`**: posición del Candidato B viva tras el cierre de sesión de contado aborta el run (el cierre forzado es invariante, no best-effort). Ver §2.3.
 - **`AccountScopeError`**: el exportador detecta una cuenta con permisos de trading real/challenge y aborta antes de la primera petición (§4.1). El pipeline de datos y la cuenta de capital no se tocan jamás.
 - **Determinismo total**: misma semilla + dataset + config + ficha + candidato ⇒ resultados bit-idénticos.
 - **Runs reanudables**: ventanas WFA persistidas por hash de insumos.
@@ -335,9 +509,38 @@ Valores iniciales; el Issue A los fija. Riesgo por trade de referencia: 0.25–0
 
 ---
 
-## 10. Post-GO: incubación y puente de ejecución (fuera del alcance v1)
+## 10. Post-GO: incubación y puente de ejecución
 
-El GO autoriza **incubación**, no un challenge: N semanas de forward test en demo con el candidato ganador (o ensemble), comparando ledger vivo vs expectativa del backtest (distribución de rechazos, slippage real, spreads en los momentos críticos de cada candidato: sweeps para A, aperturas para B). El gate de salida (bandas de consistencia definidas en Issue A) habilita el diseño del **puente de ejecución hacia la plataforma de la firma** (MT5/cTrader), proyecto con cadena de issues propia.
+### 10.1. Duración y métricas de consistencia
+
+El GO autoriza **incubación**, no un challenge: **mínimo 8 semanas** de forward test en demo con el candidato ganador (o ensemble), comparando ledger vivo vs expectativa del backtest.
+
+Las siguientes métricas de consistencia actúan como criterios de salida por degradación durante la incubación. Se aplican de forma idéntica a todos los candidatos (A, B, ensemble); las métricas específicas por candidato (sweeps para A, aperturas para B) son **aditivas**, no sustitutivas.
+
+#### (a) Distribución de slippage real vs backtest
+
+- La mediana del slippage real por símbolo no debe exceder **1.5× el slippage modelado en backtest** sobre la misma ventana.
+- **Criterio de breach de banda** de slippage en incubación: si el percentil 90 del slippage real supera **2.0×** el slippage modelado en backtest durante **≥ 2 semanas consecutivas**, se activa el criterio de salida por degradación de slippage.
+
+#### (b) Tasa de rechazo del Inspector por símbolo
+
+- La tasa de rechazo real del Inspector por símbolo no debe desviarse más de **±10 puntos porcentuales** respecto a la tasa de rechazo del backtest sobre la misma ventana temporal.
+- Una desviación mayor indica que las condiciones de mercado reales difieren materialmente de las del backtest (spreads distintos, microestructura cambiada, restricciones de firma no modeladas).
+
+#### (c) Sharpe rolling sobre la ventana de incubación
+
+- El Sharpe rolling de **4 semanas** debe ser ≥ **0.5× el Sharpe OOS** de la validación (resultado del WFA).
+- **Criterio de degradación**: si el Sharpe rolling de 4 semanas cae por debajo de ese piso durante **≥ 2 ventanas rolling consecutivas**, se activa el criterio de salida por degradación de Sharpe.
+
+### 10.2. Criterio de salida por violación de firma (invariante)
+
+Cualquier breach diario o total de la firma durante la incubación **cancela inmediatamente** el forward test. Este criterio no admite banda de tolerancia: una sola violación de firma en incubación es cancelación incondicional.
+
+Lógica: una violación de firma en incubación indica que el sistema en condiciones reales viola las reglas de la prop firm. Si eso ocurre en demo, la probabilidad de violación en challenge/fondeado es inaceptable. El cancela forward test inmediatamente y el proceso requiere revisión de hipótesis antes de volver a iniciar incubación.
+
+### 10.3. Puente de ejecución (fuera del alcance v1)
+
+Una vez superada la incubación, el gate de salida (criterios §10.1 + §10.2 en verde durante las 8 semanas completas) habilita el diseño del **puente de ejecución hacia la plataforma de la firma** (MT5/cTrader), proyecto con cadena de issues propia.
 
 ---
 
@@ -345,20 +548,30 @@ El GO autoriza **incubación**, no un challenge: N semanas de forward test en de
 
 | Issue | Alcance | Depende de |
 |---|---|---|
-| **A — `docs(spec)`** | Spec definitivo: contrato plugin, sección normativa del Candidato B (rango, sizing, sesiones), umbrales G/C/P/T finales, universos por candidato, fichas de firmas candidatas, presupuesto y métrica de selección del grid, bandas de incubación. **Bloquea al resto.** | — |
-| **B — `feat(data)`** | Export MT5 (M1 + ticks + fichas extendidas) + calendario + sesiones + quality + store. | A |
+| **A — `docs(spec)`** | Spec definitivo: contrato plugin, sección normativa del Candidato B (rango, sizing, sesiones), umbrales G/C/P/T finales, universos por candidato, fichas de firmas candidatas, presupuesto y métrica de selección del grid, bandas de incubación. **Bloquea al resto.** Cerrado por v1.2 (este documento). | — |
+| **B — `feat(data)`** | Export MT5 (M1 + ticks + fichas extendidas) + calendario + sesiones + quality + store. Confirma símbolos MT5 exactos de The5ers (PA-1 de Issue A). | A |
 | **C — `feat(strategy)`** | Contrato plugin + Inspector compartido + componentes comunes (`vwap_engine` portado, `zones`). | B |
 | **D — `feat(strategy)`** | `smc_engine` + **diagnóstico de señal desnuda** (§2.2.1). Entregable: informe de distribución condicional por símbolo/sesión + decisión archivar/continuar el Candidato A. | C |
 | **E — `feat(strategy)`** | Candidato B completo (rango, gatillo, sizing, cierre forzado). **Paralelo a D.** | C |
 | **F — `feat(strategy)`** | Candidato A completo (riesgo + gatillo CT). **Condicional al resultado de D.** | D (pasa diagnóstico) |
 | **G — `feat(backtest)`** | Simulador (equity intradía, fills por ticks, cierre por sesión, breaches) + costos + ledger + métricas. **Paralelo a D/E/F** (depende solo del contrato de C). | C |
-| **H — `feat(validation)`** | WFA + Monte Carlo (símbolo y portafolio). | G |
+| **H — `feat(validation)`** | WFA + Monte Carlo (símbolo y portafolio). Honra el techo N_trials_IS = 27 (§6.2). | G |
 | **I — `feat(validation)`** | Purged K-Fold + DSR + PBO + sensibilidad. | H |
 | **J — `feat(validation)`** | `prop_sim` + `verdict` con gates T + tearsheet + manifest. | I |
 | **K — `feat(strategy)`** | Candidato C (TSMOM) + validación de ensemble. **Post-veredicto de A/B.** | J |
 
 Camino crítico: A → B → C → {E, G} → H → I → J. El Candidato B puede llegar a veredicto aunque A se archive en D.
 
-### 11.1. Dependencias de runtime (vía `uv`)
+### 11.1. Preguntas abiertas para issues dependientes
+
+Las siguientes preguntas heredadas de Issue A no bloquean este spec pero deben resolverse en los issues indicados:
+
+- **PA-1 (Issue B)**: confirmar en la cuenta demo de The5ers los nombres de símbolo MT5 exactos para US500, NAS100 (esperado `US100`), US30 y GER40. El spec lista los nombres esperados; Issue B confirma o corrige y actualiza §1.3 y §2.x.
+- **PA-2 (Issue B)**: profundidad de historia de ticks disponible en The5ers. Si la ventana de ticks es inferior a la necesaria para el modelo de spread por hora, `quality.py` debe reportarlo.
+- **PA-3 (Issue C)**: la firma Python exacta del protocolo `StrategyCandidate` (tipado de `on_bar`, clase base o Protocol, sistema de registro). El spec fija la especificación normativa (§2.1); Issue C elige la forma Python.
+- **PA-4 (Issue C)**: mecanismo de enforcement de `LookaheadError`: si es una guard en el método `on_bar` del simulador, en el store, o en ambos.
+- **PA-5 (Issue H/I)**: forma concreta del grid IS para el Candidato B (grid lineal, log-lineal, Sobol) dentro del presupuesto N_trials_IS = 27.
+
+### 11.2. Dependencias de runtime (vía `uv`)
 
 `MetaTrader5`, `pandas`, `pyarrow`, `numpy`, `scipy`, `statsmodels`, `matplotlib`, `quantstats`. Dev: `hypothesis`, `pytest`. Versiones en Issue B.
