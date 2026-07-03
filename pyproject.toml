@@ -4,7 +4,15 @@ version = "0.1.1"
 description = "Pipeline de validación institucional para prop firms: torneo de candidatos de estrategia bajo gates mecánicos (Spec Génesis v1.1)."
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "metatrader5>=5.0.5735 ; sys_platform == 'win32'",
+    "numpy>=2.5.0",
+    "pandas>=3.0.3",
+    "pyarrow>=24.0.0",
+]
+
+[project.scripts]
+mt5-export = "genesis.data.mt5_export:main"
 
 [dependency-groups]
 dev = [
