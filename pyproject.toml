@@ -87,7 +87,7 @@ paths = ["src", "tests", "tests/whitelist_vulture.py"]
 ignore_names = ["cls", "app", "prompt", "model"]
 
 [tool.ty]
-environment = { python-version = "3.14", root = ["src", ".agents/hooks/_lib"] }
+environment = { python-version = "3.14", root = ["src", ".agents/hooks/_lib", "."] }
 
 [tool.ty.rules]
 possibly-unresolved-reference = "error"
