@@ -95,7 +95,7 @@ run = "uv run ruff check . --fix"
 [tasks."lint:bandit"]
 description = "Ejecuta bandit"
 sources = ["src/**/*.py"]
-run = "uv run bandit -r src/"
+run = "uv run bandit -c pyproject.toml -r src/"
 
 [tasks."lint:vulture"]
 description = "Ejecuta vulture"

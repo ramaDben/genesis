@@ -1,0 +1,15 @@
+{
+  "name": "The5ers",
+  "daily_reset_time": "00:00:00",
+  "daily_reset_tz": "America/New_York",
+  "daily_loss_limit_pct": 5.0,
+  "server_tz": "America/New_York",
+  "news_bracket_before_minutes": 15,
+  "news_bracket_after_minutes": 15,
+  "symbols": {
+    "US500": { "expected": "US500", "aliases": ["SP500", "SPX500"] },
+    "NAS100": { "expected": "US100", "aliases": ["NAS100", "USTEC"] },
+    "US30": { "expected": "US30", "aliases": ["DJ30", "DJIA"] },
+    "GER40": { "expected": "GER40", "aliases": ["DE40", "DAX40"] }
+  }
+}
