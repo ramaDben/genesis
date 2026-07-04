@@ -10,6 +10,7 @@ from genesis.data.mt5_export import (
     Granularity,
     RawParquetStore,
     assert_demo_account,
+    is_off_hours,
     run_export,
 )
 from genesis.data.profile import load_firm_profile
@@ -173,3 +174,121 @@ def test_run_export_resolves_symbol_alias_before_download(tmp_path) -> None:
     )
     # NAS100 -> esperado US100 (no presente) -> cae al alias NAS100 (presente).
     assert results[0].resolved_symbol == "NAS100"
+
+
+# --- Ejecución preferente en fin de semana / horas de baja actividad (R11) ----------
+
+_A_WEEKEND_MOMENT = datetime(2024, 3, 2, 12, 0, tzinfo=UTC)  # sábado
+_A_WEEKDAY_MARKET_HOURS_MOMENT = datetime(2024, 3, 5, 15, 0, tzinfo=UTC)  # martes, 10:00 NY
+_A_WEEKDAY_OFF_HOURS_MOMENT = datetime(2024, 3, 5, 3, 0, tzinfo=UTC)  # martes 22:00 NY (día previo)
+
+
+def test_is_off_hours_true_on_weekend() -> None:
+    assert is_off_hours(_A_WEEKEND_MOMENT) is True
+
+
+def test_is_off_hours_false_on_weekday_market_hours() -> None:
+    assert is_off_hours(_A_WEEKDAY_MARKET_HOURS_MOMENT) is False
+
+
+def test_is_off_hours_true_on_weekday_night() -> None:
+    assert is_off_hours(_A_WEEKDAY_OFF_HOURS_MOMENT) is True
+
+
+def test_run_export_default_schedule_mode_is_off_and_never_warns(
+    tmp_path, recwarn: pytest.WarningsRecorder
+) -> None:
+    """Default no intrusivo (R11): sin schedule_mode explícito, corre en cualquier momento."""
+    terminal = FakeMt5Terminal(trade_mode=ACCOUNT_TRADE_MODE_DEMO, available_symbols=["US500"])
+    profile = load_firm_profile()
+    store = RawParquetStore(tmp_path / "raw")
+    run_export(
+        terminal,
+        ["US500"],
+        datetime(2024, 3, 1, tzinfo=UTC),
+        datetime(2024, 3, 1, 0, 5, tzinfo=UTC),
+        profile,
+        store,
+        pause_range=(0.0, 0.0),
+        now=lambda: _A_WEEKDAY_MARKET_HOURS_MOMENT,
+    )
+    assert len(recwarn) == 0
+
+
+def test_run_export_schedule_mode_warn_emits_warning_in_market_hours(tmp_path) -> None:
+    terminal = FakeMt5Terminal(trade_mode=ACCOUNT_TRADE_MODE_DEMO, available_symbols=["US500"])
+    profile = load_firm_profile()
+    store = RawParquetStore(tmp_path / "raw")
+    with pytest.warns(UserWarning, match="R11|baja actividad|fin de semana"):
+        results = run_export(
+            terminal,
+            ["US500"],
+            datetime(2024, 3, 1, tzinfo=UTC),
+            datetime(2024, 3, 1, 0, 5, tzinfo=UTC),
+            profile,
+            store,
+            pause_range=(0.0, 0.0),
+            schedule_mode="warn",
+            now=lambda: _A_WEEKDAY_MARKET_HOURS_MOMENT,
+        )
+    assert len(results) == 1  # el export continúa pese a la advertencia
+
+
+def test_run_export_schedule_mode_warn_silent_on_weekend(
+    tmp_path, recwarn: pytest.WarningsRecorder
+) -> None:
+    terminal = FakeMt5Terminal(trade_mode=ACCOUNT_TRADE_MODE_DEMO, available_symbols=["US500"])
+    profile = load_firm_profile()
+    store = RawParquetStore(tmp_path / "raw")
+    run_export(
+        terminal,
+        ["US500"],
+        datetime(2024, 3, 1, tzinfo=UTC),
+        datetime(2024, 3, 1, 0, 5, tzinfo=UTC),
+        profile,
+        store,
+        pause_range=(0.0, 0.0),
+        schedule_mode="warn",
+        now=lambda: _A_WEEKEND_MOMENT,
+    )
+    assert len(recwarn) == 0
+
+
+def test_run_export_schedule_mode_strict_aborts_before_any_download_in_market_hours(
+    tmp_path,
+) -> None:
+    terminal = FakeMt5Terminal(trade_mode=ACCOUNT_TRADE_MODE_DEMO, available_symbols=["US500"])
+    profile = load_firm_profile()
+    store = RawParquetStore(tmp_path / "raw")
+    with pytest.raises(Exception, match=r"R11|baja actividad|fin de semana"):
+        run_export(
+            terminal,
+            ["US500"],
+            datetime(2024, 3, 1, tzinfo=UTC),
+            datetime(2024, 3, 1, 0, 5, tzinfo=UTC),
+            profile,
+            store,
+            pause_range=(0.0, 0.0),
+            schedule_mode="strict",
+            now=lambda: _A_WEEKDAY_MARKET_HOURS_MOMENT,
+        )
+    assert terminal.copy_rates_range_calls == 0
+    assert terminal.copy_ticks_range_calls == 0
+
+
+def test_run_export_schedule_mode_strict_allows_weekend(tmp_path) -> None:
+    terminal = FakeMt5Terminal(trade_mode=ACCOUNT_TRADE_MODE_DEMO, available_symbols=["US500"])
+    profile = load_firm_profile()
+    store = RawParquetStore(tmp_path / "raw")
+    results = run_export(
+        terminal,
+        ["US500"],
+        datetime(2024, 3, 1, tzinfo=UTC),
+        datetime(2024, 3, 1, 0, 5, tzinfo=UTC),
+        profile,
+        store,
+        pause_range=(0.0, 0.0),
+        schedule_mode="strict",
+        now=lambda: _A_WEEKEND_MOMENT,
+    )
+    assert len(results) == 1

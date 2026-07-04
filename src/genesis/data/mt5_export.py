@@ -14,13 +14,15 @@ import json
 import random
 import sys
 import time
-from collections.abc import Mapping, Sequence
+import warnings
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from itertools import pairwise
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -418,6 +420,52 @@ def _call_with_backoff(func: Any, *args: object, max_retries: int) -> object:
     raise GenesisDataError(message) from last_exc
 
 
+# Heurística de "baja actividad" para R11 (spec §4.1: "ejecución preferente en fin de
+# semana u horas de baja actividad" — cortesía de cliente, no bloqueante). Ventana fuera
+# de horario de mercado: antes de las 07:00 o desde las 20:00 hora de Nueva York.
+_OFF_HOURS_MARKET_TZ = "America/New_York"
+_OFF_HOURS_START_HOUR = 20
+_OFF_HOURS_END_HOUR = 7
+
+
+def is_off_hours(moment: datetime, *, market_tz: str = _OFF_HOURS_MARKET_TZ) -> bool:
+    """`True` si `moment` cae en fin de semana o fuera de horario de mercado (R11).
+
+    Heurística conservadora de "baja actividad" (spec §4.1): fin de semana (sábado o
+    domingo) en `market_tz`, o fuera de la ventana `07:00–20:00` hora de mercado en día
+    hábil. Función pura, sin I/O.
+    """
+    local_moment = moment.astimezone(ZoneInfo(market_tz))
+    if local_moment.weekday() >= 5:  # 5=sábado, 6=domingo
+        return True
+    return local_moment.hour < _OFF_HOURS_END_HOUR or local_moment.hour >= _OFF_HOURS_START_HOUR
+
+
+def _check_schedule(
+    schedule_mode: Literal["off", "warn", "strict"],
+    now: Callable[[], datetime] | None,
+) -> None:
+    """Aplica R11: ejecución preferente en fin de semana/horas de baja actividad.
+
+    `schedule_mode="off"` (default, no intrusivo) no evalúa nada. `"warn"` emite un
+    `UserWarning` si se ejecuta en horario de mercado, pero no bloquea el export.
+    `"strict"` lanza `GenesisDataError` antes de cualquier descarga si no es un momento
+    de baja actividad — únicamente cuando el operador lo elige explícitamente.
+    """
+    if schedule_mode == "off":
+        return
+    moment = now() if now is not None else datetime.now(UTC)
+    if is_off_hours(moment):
+        return
+    message = (
+        "mt5-export: ejecutando fuera de la ventana preferente de baja actividad (R11: "
+        f"fin de semana / fuera de horario de mercado). Momento evaluado: {moment.isoformat()}."
+    )
+    if schedule_mode == "strict":
+        raise GenesisDataError(message)
+    warnings.warn(message, UserWarning, stacklevel=2)
+
+
 def run_export(
     terminal: Mt5Terminal,
     symbols: Sequence[str],
@@ -428,6 +476,8 @@ def run_export(
     *,
     pause_range: tuple[float, float] = (0.5, 2.0),
     max_retries: int = 5,
+    schedule_mode: Literal["off", "warn", "strict"] = "off",
+    now: Callable[[], datetime] | None = None,
 ) -> list[ExportResult]:
     """Orquesta el export secuencial y troceado de `symbols` en `[start, end]`.
 
@@ -437,7 +487,15 @@ def run_export(
     aplica `pause_range` entre peticiones y `backoff_delay` ante error de servidor;
     persiste cada chunk con `ArtifactMetadata` (R39). Fail-fast con contexto
     (símbolo/rango/causa) para configuración o ficha inválida (R38).
+
+    `schedule_mode` cubre R11 (ejecución preferente en fin de semana/horas de baja
+    actividad, spec §4.1): `"off"` (default, no intrusivo) no evalúa nada; `"warn"`
+    emite un `UserWarning` si se corre en horario de mercado, sin bloquear; `"strict"`
+    aborta con `GenesisDataError` antes de cualquier descarga si no es un momento de baja
+    actividad. `now` (inyectable, por defecto `datetime.now(UTC)`) permite testear la
+    heurística sin depender del reloj real.
     """
+    _check_schedule(schedule_mode, now)
     terminal.initialize()
     try:
         assert_demo_account(terminal)
@@ -600,6 +658,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     export_parser.add_argument(
         "--out", default="data/raw", help="Directorio raíz del RawParquetStore de salida."
     )
+    export_parser.add_argument(
+        "--schedule-mode",
+        choices=["off", "warn", "strict"],
+        default="off",
+        help=(
+            "Ejecución preferente en fin de semana/horas de baja actividad (R11): 'off' "
+            "(default, no evalúa nada), 'warn' (advierte en horario de mercado sin "
+            "bloquear) o 'strict' (aborta antes de descargar si no es baja actividad)."
+        ),
+    )
 
     confirm_parser = subparsers.add_parser(
         "confirm-firm-profile",
@@ -637,7 +705,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         end = datetime.fromisoformat(args.end)
         store = RawParquetStore(Path(args.out))
         try:
-            run_export(terminal, symbols, start, end, profile, store)
+            run_export(
+                terminal, symbols, start, end, profile, store, schedule_mode=args.schedule_mode
+            )
         except GenesisDataError as exc:
             print(f"mt5-export export: {exc}", file=sys.stderr)
             return 1

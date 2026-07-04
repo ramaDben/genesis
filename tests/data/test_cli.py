@@ -125,3 +125,63 @@ def test_export_succeeds_with_demo_fake_terminal(monkeypatch: pytest.MonkeyPatch
         ]
     )
     assert exit_code == 0
+
+
+def test_export_cli_default_schedule_mode_is_off(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_export(*_args: object, **kwargs: object) -> list[object]:
+        captured.update(kwargs)
+        return []
+
+    terminal = FakeMt5Terminal(trade_mode=ACCOUNT_TRADE_MODE_DEMO, available_symbols=["US500"])
+    monkeypatch.setattr(mt5_export, "_connect_real_terminal", lambda: terminal)
+    monkeypatch.setattr(mt5_export, "run_export", _fake_run_export)
+
+    exit_code = main(
+        [
+            "export",
+            "--symbols",
+            "US500",
+            "--start",
+            "2024-03-01T00:00:00+00:00",
+            "--end",
+            "2024-03-01T00:05:00+00:00",
+            "--out",
+            str(tmp_path / "raw"),
+        ]
+    )
+    assert exit_code == 0
+    assert captured["schedule_mode"] == "off"
+
+
+def test_export_cli_passes_explicit_schedule_mode_through_to_run_export(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_export(*_args: object, **kwargs: object) -> list[object]:
+        captured.update(kwargs)
+        return []
+
+    terminal = FakeMt5Terminal(trade_mode=ACCOUNT_TRADE_MODE_DEMO, available_symbols=["US500"])
+    monkeypatch.setattr(mt5_export, "_connect_real_terminal", lambda: terminal)
+    monkeypatch.setattr(mt5_export, "run_export", _fake_run_export)
+
+    exit_code = main(
+        [
+            "export",
+            "--symbols",
+            "US500",
+            "--start",
+            "2024-03-01T00:00:00+00:00",
+            "--end",
+            "2024-03-01T00:05:00+00:00",
+            "--out",
+            str(tmp_path / "raw"),
+            "--schedule-mode",
+            "strict",
+        ]
+    )
+    assert exit_code == 0
+    assert captured["schedule_mode"] == "strict"
