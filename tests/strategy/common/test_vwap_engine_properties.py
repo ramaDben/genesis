@@ -181,8 +181,8 @@ def test_sigma_zero_zscore_zero(price: int, n_bars: int, volume: int) -> None:
     """
     p = float(price)
     state = VWAPState()
-    for _ in range(n_bars):
-        r = update_vwap(
+    results = [
+        update_vwap(
             state,
             high=p,
             low=p,
@@ -192,6 +192,9 @@ def test_sigma_zero_zscore_zero(price: int, n_bars: int, volume: int) -> None:
             is_anchor=False,
             config=_CFG,
         )
+        for _ in range(n_bars)
+    ]
+    r = results[-1]  # n_bars >= 1 (strategy min_value=1): siempre hay al menos un resultado
     assert r.sigma == 0.0, f"sigma debería ser 0 con precios idénticos: {r.sigma}"
     assert r.zscore == 0.0, f"zscore debería ser 0 cuando sigma==0: {r.zscore}"
     assert r.is_valid is True, "is_valid debe ser True cuando total_v > 0"

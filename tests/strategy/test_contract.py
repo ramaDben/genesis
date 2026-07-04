@@ -50,7 +50,7 @@ def test_entry_intent_es_frozen() -> None:
         config_version=CONFIG_VERSION,
     )
     with pytest.raises(FrozenInstanceError):
-        intent.sizing_hint = 0.2  # type: ignore[misc]
+        setattr(intent, "sizing_hint", 0.2)  # noqa: B010
 
 
 class _FakeCandidate:

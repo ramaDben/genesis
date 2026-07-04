@@ -3,7 +3,8 @@
 Implementación nueva (no porte): no existe `zones.py` ni lógica de clasificación
 PRO/MID/CT en la fuente inspeccionada. Las 3 zonas se mantienen genéricas y
 agnósticas al candidato (ADR-C6): la pierna PRO archivada para el Candidato A es
-decisión de `candidate_a` (Issue F), no una limitación de este componente `common/`.
+decisión del paquete concreto de ese candidato (Issue F), no una limitación de este
+componente `common/`.
 """
 
 from enum import StrEnum

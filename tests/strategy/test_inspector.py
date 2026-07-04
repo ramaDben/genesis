@@ -169,7 +169,7 @@ def test_rejection_reason_tiene_exactamente_tres_miembros() -> None:
 def test_inspector_verdict_es_dataclass_frozen() -> None:
     verdict = InspectorVerdict(authorized=True, rejection_reason=None)
     with pytest.raises(FrozenInstanceError):
-        verdict.authorized = False  # type: ignore[misc]
+        setattr(verdict, "authorized", False)  # noqa: B010
 
 
 def test_load_inspector_funnel_config_default_empaquetado() -> None:

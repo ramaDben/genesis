@@ -72,15 +72,15 @@ def register_candidate(letter: str) -> Callable[[type], type]:
     """
     normalized = letter.upper()
 
-    def decorator(candidate_cls: type) -> type:
+    def decorator(strategy_type: type) -> type:
         if normalized in CANDIDATE_REGISTRY:
             existing = CANDIDATE_REGISTRY[normalized]
             message = (
                 f"La letra de candidato '{normalized}' ya está registrada por "
-                f"'{existing.__qualname__}'; no se puede registrar '{candidate_cls.__qualname__}'."
+                f"'{existing.__qualname__}'; no se puede registrar '{strategy_type.__qualname__}'."
             )
             raise DuplicateCandidateError(message)
-        CANDIDATE_REGISTRY[normalized] = candidate_cls
-        return candidate_cls
+        CANDIDATE_REGISTRY[normalized] = strategy_type
+        return strategy_type
 
     return decorator
