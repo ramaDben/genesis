@@ -9,8 +9,10 @@ perezosa (nunca a nivel de módulo, R2/R35), de modo que `import genesis.data.mt
 no falla en una plataforma sin el paquete instalado.
 """
 
+import argparse
 import json
 import random
+import sys
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -26,7 +28,7 @@ import pyarrow.parquet as pq
 
 from genesis.data.errors import GenesisDataError
 from genesis.data.metadata import CONFIG_VERSION, ArtifactMetadata, current_git_commit, sha256_of
-from genesis.data.profile import FirmProfile, SymbolAliases, firm_profile_hash
+from genesis.data.profile import FirmProfile, SymbolAliases, firm_profile_hash, load_firm_profile
 from genesis.data.symbols import SymbolFigure
 
 # Valor documentado del SDK MetaTrader5 para `account_info().trade_mode` en cuentas demo
@@ -500,3 +502,138 @@ def run_export(
         return results
     finally:
         terminal.shutdown()
+
+
+def _connect_real_terminal() -> Mt5Terminal | None:
+    """Instancia `RealMt5Terminal`; retorna `None` si el SDK `MetaTrader5` no está instalado.
+
+    No conecta (no llama `initialize()`): el import perezoso ocurre dentro de
+    `RealMt5Terminal.__init__`, de modo que en una plataforma sin el SDK esta función
+    retorna `None` en vez de propagar un traceback opaco (R45).
+    """
+    try:
+        return RealMt5Terminal()
+    except ImportError:
+        return None
+
+
+def _confirm_firm_profile(terminal: Mt5Terminal | None, profile: FirmProfile) -> int:
+    """Lógica de `confirm-firm-profile` (R44, R45), con el terminal inyectado para test.
+
+    Compara `symbols_get()` de una cuenta demo real contra la tabla esperada de
+    `profile.symbols` y **reporta** discrepancias sin corregirlas (R44). Si `terminal` es
+    `None` (SDK no instalado) o si `terminal.initialize()` falla (sin terminal conectado),
+    imprime un mensaje explícito de paso diferido/no bloqueante y retorna `2` — nunca un
+    traceback opaco (R45).
+    """
+    if terminal is None:
+        print(
+            "mt5-export confirm-firm-profile: paso diferido, no bloqueante. El SDK "
+            "MetaTrader5 no está instalado en este entorno; confirmar la ficha de firma "
+            "contra una cuenta demo real de The5ers es un paso humano posterior."
+        )
+        return 2
+
+    if not terminal.initialize():
+        code, description = terminal.last_error()
+        print(
+            "mt5-export confirm-firm-profile: paso diferido, no bloqueante. No se pudo "
+            f"conectar a un terminal MT5 (last_error={code}: {description!r}); confirmar "
+            "la ficha de firma contra una cuenta demo real de The5ers es un paso humano "
+            "posterior."
+        )
+        return 2
+
+    try:
+        available = {
+            getattr(item, "name")  # noqa: B009 (item es `object`; ty exige acceso indirecto)
+            for item in terminal.symbols_get()
+        }
+        discrepancies = [
+            f"{conventional}: ninguno de {(aliases.expected, *aliases.aliases)} está "
+            "presente en symbols_get() del terminal conectado."
+            for conventional, aliases in profile.symbols.items()
+            if not any(candidate in available for candidate in (aliases.expected, *aliases.aliases))
+        ]
+        if discrepancies:
+            print(
+                "mt5-export confirm-firm-profile: discrepancias encontradas (no se "
+                "corrigen automáticamente; actualizar profiles/the5ers.json es un paso "
+                "humano):"
+            )
+            for discrepancy in discrepancies:
+                print(f"  - {discrepancy}")
+            return 1
+
+        print("mt5-export confirm-firm-profile: todos los símbolos esperados están presentes.")
+        return 0
+    finally:
+        terminal.shutdown()
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="mt5-export", description="Exportador MT5 de la capa de datos de genesis."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    export_parser = subparsers.add_parser("export", help="Descarga M1/ticks de símbolos MT5.")
+    export_parser.add_argument(
+        "--symbols", required=True, help="Símbolos convencionales separados por coma."
+    )
+    export_parser.add_argument(
+        "--start", required=True, help="Inicio del rango temporal (ISO 8601, tz-aware)."
+    )
+    export_parser.add_argument(
+        "--end", required=True, help="Fin del rango temporal (ISO 8601, tz-aware)."
+    )
+    export_parser.add_argument(
+        "--profile", default=None, help="Ruta a una ficha de firma alternativa (JSON)."
+    )
+    export_parser.add_argument(
+        "--out", default="data/raw", help="Directorio raíz del RawParquetStore de salida."
+    )
+
+    confirm_parser = subparsers.add_parser(
+        "confirm-firm-profile",
+        help="Compara los símbolos esperados contra una cuenta demo real (R44).",
+    )
+    confirm_parser.add_argument(
+        "--profile", default=None, help="Ruta a una ficha de firma alternativa (JSON)."
+    )
+
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Entrypoint CLI `mt5-export` con subcomandos `export` y `confirm-firm-profile`."""
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    profile_path = Path(args.profile) if args.profile else None
+    profile = load_firm_profile(profile_path)
+
+    if args.command == "confirm-firm-profile":
+        terminal = _connect_real_terminal()
+        return _confirm_firm_profile(terminal, profile)
+
+    if args.command == "export":
+        terminal = _connect_real_terminal()
+        if terminal is None:
+            print(
+                "mt5-export export: el SDK MetaTrader5 no está instalado en este entorno; "
+                "no es posible ejecutar un export real.",
+                file=sys.stderr,
+            )
+            return 2
+        symbols = [symbol.strip() for symbol in args.symbols.split(",") if symbol.strip()]
+        start = datetime.fromisoformat(args.start)
+        end = datetime.fromisoformat(args.end)
+        store = RawParquetStore(Path(args.out))
+        try:
+            run_export(terminal, symbols, start, end, profile, store)
+        except GenesisDataError as exc:
+            print(f"mt5-export export: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
+    return 2  # inalcanzable: argparse exige un subcomando (subparsers required=True)
