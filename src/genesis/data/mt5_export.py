@@ -22,6 +22,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -364,11 +365,17 @@ class ExportResult:
 def _raw_to_frame(raw: object) -> pd.DataFrame:
     """Normaliza el retorno crudo de `copy_rates_range`/`copy_ticks_range` a `pd.DataFrame`.
 
-    Acepta tanto un `pd.DataFrame` ya construido (fakes de test) como cualquier
-    estructura tabular con una columna `time` en segundos epoch (numpy structured array
-    del SDK real `MetaTrader5`), que se renombra y convierte a `timestamp` UTC.
+    El SDK real `MetaTrader5` retorna un `numpy.ndarray` estructurado (columna `time` en
+    segundos epoch); los fakes de test retornan directamente un `pd.DataFrame`. Ambos
+    casos se normalizan aquí a un `pd.DataFrame` con columna `timestamp` UTC.
     """
-    frame = raw.copy() if isinstance(raw, pd.DataFrame) else pd.DataFrame(raw)
+    if isinstance(raw, pd.DataFrame):
+        frame = raw.copy()
+    elif isinstance(raw, np.ndarray):
+        frame = pd.DataFrame.from_records(raw)
+    else:
+        frame = pd.DataFrame(raw)
+
     if "timestamp" not in frame.columns and "time" in frame.columns:
         frame = frame.rename(columns={"time": "timestamp"})
         frame["timestamp"] = pd.to_datetime(frame["timestamp"], unit="s", utc=True)
