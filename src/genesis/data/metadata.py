@@ -7,7 +7,7 @@ su hash), el rango temporal cubierto y el commit de git vigente (spec §3, R39).
 
 import hashlib
 import json
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,7 +35,7 @@ def current_git_commit(repo_root: Path | None = None) -> str:
     """
     root = repo_root if repo_root is not None else Path.cwd()
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607
             ["git", "rev-parse", "HEAD"],  # noqa: S607
             cwd=root,
             check=True,

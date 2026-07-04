@@ -99,6 +99,10 @@ invalid-return-type = "error"
 extend_exclude = [".venv", "venv", ".git"]
 known_first_party = ["genesis", "pulse_hooks_lib"]
 package_module_name_map = { "pyyaml" = "yaml", "gitpython" = "git", "MetaTrader5" = "MetaTrader5" }
+# MetaTrader5 se importa vía importlib (opaco para deptry) y su marker win32 lo excluye
+# del entorno Linux del gate determinista de cierre: sin esta excepción deptry lo
+# reporta como DEP002 (no usado) en Windows y DEP001 (faltante) en Linux.
+per_rule_ignores = { DEP001 = ["MetaTrader5", "metatrader5"], DEP002 = ["MetaTrader5", "metatrader5"] }
 
 [tool.bandit]
 exclude_dirs = ["tests", ".agents/hooks/_lib/tests", ".venv", "venv"]

@@ -10,6 +10,7 @@ no falla en una plataforma sin el paquete instalado.
 """
 
 import argparse
+import importlib
 import json
 import random
 import sys
@@ -112,11 +113,11 @@ class RealMt5Terminal:
     """
 
     def __init__(self) -> None:
-        import MetaTrader5 as _mt5  # noqa: N813 (nombre del SDK, no controlado por este repo)
-
-        # El SDK no publica stubs de tipos completos: se aísla como `Any` tras este único
-        # punto de import perezoso; el `Protocol` Mt5Terminal es el contrato tipado real.
-        self._mt5: Any = _mt5
+        # El SDK no publica stubs de tipos y solo existe en Windows: se importa vía
+        # `importlib` (opaco para el análisis estático multiplataforma) y se aísla como
+        # `Any`; el `Protocol` Mt5Terminal es el contrato tipado real. Lanza
+        # `ModuleNotFoundError` igual que un `import` directo si el SDK no está instalado.
+        self._mt5: Any = importlib.import_module("MetaTrader5")
 
     def initialize(self, *args: object, **kwargs: object) -> bool:
         return bool(self._mt5.initialize(*args, **kwargs))
