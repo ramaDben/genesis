@@ -1,0 +1,5 @@
+{
+  "max_loss_limit_pct": 10.0,
+  "max_loss_limit_kind": "static",
+  "weekend_holding_allowed": true
+}
