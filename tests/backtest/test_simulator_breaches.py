@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.ledger import BreachKind
+from genesis.backtest.ledger import BreachEvent, BreachKind
 from genesis.backtest.risk_profile import RiskProfile
 from genesis.backtest.simulator import Simulator
 from genesis.data.profile import FirmProfile
@@ -25,9 +25,10 @@ def _build_simulator(
     risk_profile_fixture: RiskProfile,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
-) -> Simulator:
-    return Simulator(
-        FakeRiskCandidate(),
+) -> tuple[Simulator, FakeRiskCandidate]:
+    candidate = FakeRiskCandidate()
+    simulator = Simulator(
+        candidate,
         symbol="US500",
         firm_profile=firm_profile_fixture,
         risk_profile=risk_profile_fixture,
@@ -39,6 +40,7 @@ def _build_simulator(
         starting_balance=_STARTING_BALANCE,
         dataset_hash="test-dataset-hash",
     )
+    return simulator, candidate
 
 
 def test_breach_diario_golden_calculado_a_mano(
@@ -55,7 +57,7 @@ def test_breach_diario_golden_calculado_a_mano(
     haber subido). `daily_loss = max(6_000, 6_000) = 6_000 >= threshold = 100_000 *
     0.05 = 5_000` → dispara `BreachEvent(DAILY)` con `magnitude=6_000`, `threshold=5_000`.
     """
-    simulator = _build_simulator(
+    simulator, _candidate = _build_simulator(
         firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator.account.balance = 94_000.0
@@ -66,8 +68,7 @@ def test_breach_diario_golden_calculado_a_mano(
     daily_events = [
         entry.payload
         for entry in simulator.ledger.entries
-        if entry.payload.__class__.__name__ == "BreachEvent"
-        and entry.payload.kind is BreachKind.DAILY
+        if isinstance(entry.payload, BreachEvent) and entry.payload.kind is BreachKind.DAILY
     ]
     assert len(daily_events) == 1
     assert daily_events[0].magnitude == pytest.approx(6_000.0)
@@ -89,7 +90,7 @@ def test_breach_total_golden_calculado_a_mano(
     threshold = 100_000 * 0.10 = 10_000` → dispara `BreachEvent(TOTAL,
     account_exhausted=True)` y agota la cuenta.
     """
-    simulator = _build_simulator(
+    simulator, _candidate = _build_simulator(
         firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator.account.balance = 88_000.0
@@ -100,8 +101,7 @@ def test_breach_total_golden_calculado_a_mano(
     total_events = [
         entry.payload
         for entry in simulator.ledger.entries
-        if entry.payload.__class__.__name__ == "BreachEvent"
-        and entry.payload.kind is BreachKind.TOTAL
+        if isinstance(entry.payload, BreachEvent) and entry.payload.kind is BreachKind.TOTAL
     ]
     assert len(total_events) == 1
     assert total_events[0].magnitude == pytest.approx(12_000.0)
@@ -117,7 +117,7 @@ def test_tras_breach_diario_on_bar_sigue_invocandose(
     costs_config_fixture: CostsConfig,
 ) -> None:
     """R29: DAILY es continuable — el run sigue invocando `candidate.on_bar`."""
-    simulator = _build_simulator(
+    simulator, candidate = _build_simulator(
         firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator.account.balance = 94_000.0
@@ -126,7 +126,7 @@ def test_tras_breach_diario_on_bar_sigue_invocandose(
     simulator._process_bar(bar)
 
     assert simulator.account.account_exhausted is False
-    assert bar in simulator.candidate.on_bar_calls
+    assert bar in candidate.on_bar_calls
 
 
 def test_tras_breach_total_on_bar_no_se_invoca_y_no_hay_excepcion(
@@ -136,7 +136,7 @@ def test_tras_breach_total_on_bar_no_se_invoca_y_no_hay_excepcion(
     costs_config_fixture: CostsConfig,
 ) -> None:
     """R30/R31: TOTAL agota la cuenta; el run continúa sin excepción, omitiendo `on_bar`."""
-    simulator = _build_simulator(
+    simulator, candidate = _build_simulator(
         firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator.account.balance = 88_000.0
@@ -148,4 +148,4 @@ def test_tras_breach_total_on_bar_no_se_invoca_y_no_hay_excepcion(
 
     simulator._process_bar(bar_2)
 
-    assert bar_2 not in simulator.candidate.on_bar_calls
+    assert bar_2 not in candidate.on_bar_calls

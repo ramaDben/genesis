@@ -47,7 +47,7 @@ def test_breach_event_es_frozen() -> None:
         threshold=50.0,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
-        event.magnitude = 0.0  # type: ignore[misc]
+        setattr(event, "magnitude", 0.0)  # noqa: B010
 
 
 def test_fill_record_es_frozen() -> None:
@@ -62,7 +62,7 @@ def test_fill_record_es_frozen() -> None:
         equity_after=100_000.0,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
-        fill.price = 0.0  # type: ignore[misc]
+        setattr(fill, "price", 0.0)  # noqa: B010
 
 
 def test_ledger_entry_es_frozen() -> None:
@@ -78,7 +78,7 @@ def test_ledger_entry_es_frozen() -> None:
     )
     entry = LedgerEntry(provenance=_PROVENANCE, payload=fill)
     with pytest.raises(dataclasses.FrozenInstanceError):
-        entry.payload = fill  # type: ignore[misc]
+        setattr(entry, "payload", fill)  # noqa: B010
 
 
 def test_breach_event_account_exhausted_solo_true_para_total() -> None:

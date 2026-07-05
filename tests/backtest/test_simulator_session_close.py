@@ -6,7 +6,7 @@ import pytest
 
 from genesis.backtest.costs import CostsConfig
 from genesis.backtest.errors import SessionBoundaryError
-from genesis.backtest.ledger import BreachKind
+from genesis.backtest.ledger import BreachEvent, BreachKind, FillRecord
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
 from genesis.backtest.simulator import OpenPosition, Simulator
 from genesis.data.profile import FirmProfile
@@ -86,7 +86,7 @@ def test_cierre_forzado_proactivo_al_cierre_de_sesion(
     exit_fills = [
         entry.payload
         for entry in simulator.ledger.entries
-        if entry.payload.__class__.__name__ == "FillRecord" and entry.payload.is_exit
+        if isinstance(entry.payload, FillRecord) and entry.payload.is_exit
     ]
     assert len(exit_fills) == 1
     assert exit_fills[0].price == pytest.approx(100.5)
@@ -152,8 +152,7 @@ def test_breach_weekend_al_cerrar_sesion_del_viernes_sin_holding_permitido(
     weekend_events = [
         entry.payload
         for entry in simulator.ledger.entries
-        if entry.payload.__class__.__name__ == "BreachEvent"
-        and entry.payload.kind is BreachKind.WEEKEND
+        if isinstance(entry.payload, BreachEvent) and entry.payload.kind is BreachKind.WEEKEND
     ]
     assert len(weekend_events) == 1
     assert simulator.account.open_positions == []

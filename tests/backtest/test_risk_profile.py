@@ -29,7 +29,7 @@ def test_risk_profile_es_frozen() -> None:
         weekend_holding_allowed=True,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
-        profile.max_loss_limit_pct = 5.0  # type: ignore[misc]
+        setattr(profile, "max_loss_limit_pct", 5.0)  # noqa: B010
 
 
 def test_load_risk_profile_default_empaquetado() -> None:
