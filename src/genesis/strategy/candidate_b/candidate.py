@@ -202,8 +202,8 @@ class CandidateB:
         else:
             stop = range_high + self._atr_stop_frac * self._atr_value if use_atr else range_high
 
-        distancia_stop = abs(entry_reference - stop)
-        if distancia_stop <= 0:
+        stop_distance = abs(entry_reference - stop)
+        if stop_distance <= 0:
             message = (
                 f"distancia_stop<=0 (entry_reference={entry_reference!r}, stop_loss={stop!r}, "
                 f"direction={direction!r}) — invariante de geometría R58/R66 violado."
@@ -211,13 +211,13 @@ class CandidateB:
             raise CandidateBStateError(message)
 
         take_profit = (
-            entry_reference + self._tp_rr_multiple * distancia_stop
+            entry_reference + self._tp_rr_multiple * stop_distance
             if direction is Direction.LONG
-            else entry_reference - self._tp_rr_multiple * distancia_stop
+            else entry_reference - self._tp_rr_multiple * stop_distance
         )
 
         sizing = (self._risk_pct * self._reference_balance) / (
-            distancia_stop * self._figure.tick_value
+            stop_distance * self._figure.tick_value
         )
         return (stop, take_profit, sizing)
 
