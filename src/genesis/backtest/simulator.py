@@ -23,22 +23,24 @@ import pandas as pd
 
 from genesis.backtest.clock import SimulationClock
 from genesis.backtest.costs import CostsConfig, commission_for, slippage_for, spread_for, swap_for
-from genesis.backtest.errors import BacktestConfigError
+from genesis.backtest.errors import BacktestConfigError, SessionBoundaryError
 from genesis.backtest.ledger import (
     CONFIG_VERSION,
+    BreachEvent,
+    BreachKind,
     FillRecord,
     Ledger,
     RejectionRecord,
     RunProvenance,
 )
-from genesis.backtest.risk_profile import RiskProfile, risk_profile_hash
+from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile, risk_profile_hash
 from genesis.backtest.ticks import (
     TickRow,
     has_sufficient_tick_coverage,
     iter_ticks,
     ticks_in_bar_window,
 )
-from genesis.data.calendar import EconomicEvent
+from genesis.data.calendar import EconomicEvent, news_windows
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash
 from genesis.data.sessions import session_window
@@ -46,6 +48,9 @@ from genesis.data.store import AnnotatedBar, iter_bars
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.contract import Direction, EntryIntent, StrategyCandidate
 from genesis.strategy.inspector import InspectorFunnelConfig, inspect
+
+_FRIDAY_WEEKDAY = 4
+"""`date.weekday()` para viernes (0=lunes); usado por el breach WEEKEND (R28)."""
 
 _SESSION_PROBE_DATE = date(2024, 1, 1)
 """Fecha arbitraria usada solo para validar `symbol in SESSIONS` al construir (R3c)."""
@@ -256,6 +261,10 @@ class Simulator:
         self.tick_store = tick_store
         self.stress = stress
         self._day_ticks_cache: dict[date, list[TickRow]] = {}
+        self._starting_balance = starting_balance
+        self._intraday_peak_equity = starting_balance
+        self._all_time_peak_equity = starting_balance
+        self._session_closed_days: set[date] = set()
 
         candidate_id = getattr(candidate, "candidate_id", "?")
         provenance = RunProvenance(
@@ -290,6 +299,7 @@ class Simulator:
         # (0) reset diario: base doble del breach DAILY (R25).
         if self.clock.trading_day is not None and bar.trading_day != self.clock.trading_day:
             self.clock.previous_day_close_balance = self.account.balance
+            self._intraday_peak_equity = self.account.balance
         # (a) alimenta el reloj (LookaheadError si retrocede, R5/R9).
         self.clock.advance(bar)
 
@@ -319,17 +329,136 @@ class Simulator:
             if fill is not None:
                 self._close_position(position, fill)
 
+    def _floating_pnl(self, position: OpenPosition, price: float) -> float:
+        """P&L no realizado de `position` a `price` (bruto, sin costos), en dinero."""
+        direction_sign = 1.0 if position.direction is Direction.LONG else -1.0
+        points = (price - position.entry_price) * direction_sign
+        return points * position.sizing_hint * self.figure.tick_value
+
+    def _floating_equity(self, bar: AnnotatedBar) -> float:
+        """Equity flotante intradía: balance realizado + P&L no realizado a `bar.close`."""
+        unrealized = sum(
+            self._floating_pnl(position, bar.close) for position in self.account.open_positions
+        )
+        return self.account.balance + unrealized
+
     def _evaluate_breaches(
         self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
     ) -> None:
-        """Detección de breaches DAILY/TOTAL/NEWS/WEEKEND en línea (implementado en T10)."""
-        return
+        """Detección de breaches DAILY/TOTAL en línea sobre equity flotante (R25, R26)."""
+        del day_ticks, coverage
+        floating_equity = self._floating_equity(bar)
+        self._intraday_peak_equity = max(self._intraday_peak_equity, floating_equity)
+        self._all_time_peak_equity = max(self._all_time_peak_equity, floating_equity)
+
+        self._evaluate_daily_breach(bar, floating_equity)
+        if not self.account.account_exhausted:
+            self._evaluate_total_breach(bar, floating_equity)
+
+    def _evaluate_daily_breach(self, bar: AnnotatedBar, floating_equity: float) -> None:
+        """Breach DAILY (R25): base doble — el mayor entre pérdida vs. flotante intradía y
+        pérdida vs. `clock.previous_day_close_balance`, contra `daily_loss_limit_pct`.
+        """
+        reference = self.clock.previous_day_close_balance
+        if reference is None or reference <= 0:
+            return
+        loss_vs_close = reference - floating_equity
+        loss_vs_peak = self._intraday_peak_equity - floating_equity
+        daily_loss = max(loss_vs_close, loss_vs_peak)
+        threshold = reference * (self.firm_profile.daily_loss_limit_pct / 100.0)
+        if daily_loss >= threshold:
+            self.ledger.append(
+                BreachEvent(
+                    kind=BreachKind.DAILY,
+                    trading_day=bar.trading_day,
+                    timestamp_utc=bar.timestamp_utc,
+                    magnitude=daily_loss,
+                    threshold=threshold,
+                )
+            )
+
+    def _evaluate_total_breach(self, bar: AnnotatedBar, floating_equity: float) -> None:
+        """Breach TOTAL (R26): pérdida vs. la referencia de `risk_profile.max_loss_limit_kind`.
+
+        `STATIC` compara contra el balance inicial del run; `TRAILING` contra el pico de
+        equity flotante alcanzado en toda la ejecución (ADR-G2). Terminal (R30/R31):
+        agota la cuenta, sin lanzar excepción Python.
+        """
+        if self.risk_profile.max_loss_limit_kind is MaxLossLimitKind.TRAILING:
+            reference = self._all_time_peak_equity
+        else:
+            reference = self._starting_balance
+        if reference <= 0:
+            return
+        total_loss = reference - floating_equity
+        threshold = reference * (self.risk_profile.max_loss_limit_pct / 100.0)
+        if total_loss >= threshold:
+            self.ledger.append(
+                BreachEvent(
+                    kind=BreachKind.TOTAL,
+                    trading_day=bar.trading_day,
+                    timestamp_utc=bar.timestamp_utc,
+                    magnitude=total_loss,
+                    threshold=threshold,
+                    account_exhausted=True,
+                )
+            )
+            self.account.account_exhausted = True
 
     def _enforce_session_close_and_guard(
         self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
     ) -> None:
-        """Cierre forzado de sesión + guard `SessionBoundaryError` (implementado en T10)."""
-        return
+        """Cierre forzado proactivo de sesión (R23) + guard `SessionBoundaryError` (R24)."""
+        _open_utc, close_utc = session_window(self.symbol, bar.trading_day)
+
+        if bar.timestamp_utc >= close_utc and bar.trading_day not in self._session_closed_days:
+            if bar.trading_day.weekday() == _FRIDAY_WEEKDAY and not (
+                self.risk_profile.weekend_holding_allowed
+            ):
+                self._register_weekend_breaches(bar)
+            self._force_close_all_positions(bar, day_ticks, coverage)
+            self._session_closed_days.add(bar.trading_day)
+
+        if (
+            bar.timestamp_utc > close_utc
+            and bar.trading_day in self._session_closed_days
+            and self.account.open_positions
+        ):
+            message = (
+                f"Posición viva tras el cierre de sesión (close_utc={close_utc!r}) pese al "
+                f"cierre forzado proactivo ya intentado para symbol={self.symbol!r}, "
+                f"trading_day={bar.trading_day!r}, bar.timestamp_utc={bar.timestamp_utc!r}."
+            )
+            raise SessionBoundaryError(message)
+
+    def _register_weekend_breaches(self, bar: AnnotatedBar) -> None:
+        """R28: posiciones vivas al cierre del viernes con tenencia de fin de semana prohibida."""
+        for position in self.account.open_positions:
+            magnitude = abs(self._floating_pnl(position, bar.close))
+            self.ledger.append(
+                BreachEvent(
+                    kind=BreachKind.WEEKEND,
+                    trading_day=bar.trading_day,
+                    timestamp_utc=bar.timestamp_utc,
+                    magnitude=magnitude,
+                    threshold=0.0,
+                )
+            )
+
+    def _force_close_all_positions(
+        self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
+    ) -> None:
+        """R23/R53: cierra toda posición viva al final de sesión, con las reglas de §4.3.
+
+        Reutiliza `_resolve_fill` (mismas reglas de fill); si no dispara (SL/TP fuera de
+        rango esta vela), fuerza el cierre a `bar.close` — el flatten de fin de sesión es
+        incondicional, no depende de tocar SL/TP.
+        """
+        for position in list(self.account.open_positions):
+            fill = _resolve_fill(position, bar, day_ticks, coverage)
+            if fill is None:
+                fill = ResolvedFill(price=bar.close, timestamp_utc=bar.timestamp_utc)
+            self._close_position(position, fill)
 
     def _process_new_entries(
         self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
@@ -450,7 +579,34 @@ class Simulator:
                 equity_after=self.account.balance,
             )
         )
+        self._register_news_breaches(position, fill)
         self.account.open_positions.remove(position)
+
+    def _register_news_breaches(self, position: OpenPosition, fill: ResolvedFill) -> None:
+        """R27/ADR-G7: un `BreachEvent(NEWS)` por cada ventana que intersecta la tenencia.
+
+        Intersección de intervalos cerrados `[entry_time, exit_time] ∩ [w_start, w_end]`
+        (`entry_time <= w_end and w_start <= exit_time`), evaluada al cierre de la
+        posición (§5.1). `magnitude` = duración del solape en segundos; `threshold=0.0`
+        (evento informativo y continuable, R29).
+        """
+        entry_time = position.entry_time
+        exit_time = fill.timestamp_utc
+        windows = news_windows(self.news_events, self.symbol, self.firm_profile)
+        for window_start, window_end in windows:
+            if entry_time <= window_end and window_start <= exit_time:
+                overlap_start = max(entry_time, window_start)
+                overlap_end = min(exit_time, window_end)
+                magnitude = max((overlap_end - overlap_start).total_seconds(), 0.0)
+                self.ledger.append(
+                    BreachEvent(
+                        kind=BreachKind.NEWS,
+                        trading_day=exit_time.date(),
+                        timestamp_utc=exit_time,
+                        magnitude=magnitude,
+                        threshold=0.0,
+                    )
+                )
 
 
 def run_backtest(candidate: StrategyCandidate, frame: pd.DataFrame, **kwargs: Any) -> Ledger:
