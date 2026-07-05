@@ -1,0 +1,5 @@
+{
+  "default_spread_points": 1.5,
+  "commission_per_lot": 7.0,
+  "slippage_points": 0.2
+}
