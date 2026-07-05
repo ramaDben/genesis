@@ -6,27 +6,46 @@ capa más los puertos ya cerrados de `genesis.strategy` (capa 2) y `genesis.data
 puerto adicional requisito duro (ADR-G3): el `Simulator` exige que el candidato lo
 implemente al construirse, en vez de un `RejectionReason` nuevo o un rechazo
 silencioso (R21).
+
+Modelo de costos monetario (decisión de implementación, sin R-número específico que
+fije la fórmula exacta de P&L): el P&L en puntos de precio se convierte a dinero vía
+`figure.tick_value`; comisión y swap se cobran como cargos explícitos (`cost_applied`)
+separados del precio de ejecución, que permanece geométricamente puro (bar.open/nivel
+SL-TP/precio de tick) para no contaminar la tabla golden de fills (R32–R36).
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 import pandas as pd
 
 from genesis.backtest.clock import SimulationClock
-from genesis.backtest.costs import CostsConfig
+from genesis.backtest.costs import CostsConfig, commission_for, slippage_for, spread_for, swap_for
 from genesis.backtest.errors import BacktestConfigError
-from genesis.backtest.ledger import CONFIG_VERSION, Ledger, RunProvenance
+from genesis.backtest.ledger import (
+    CONFIG_VERSION,
+    FillRecord,
+    Ledger,
+    RejectionRecord,
+    RunProvenance,
+)
 from genesis.backtest.risk_profile import RiskProfile, risk_profile_hash
+from genesis.backtest.ticks import (
+    TickRow,
+    has_sufficient_tick_coverage,
+    iter_ticks,
+    ticks_in_bar_window,
+)
 from genesis.data.calendar import EconomicEvent
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash
 from genesis.data.sessions import session_window
+from genesis.data.store import AnnotatedBar, iter_bars
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.contract import Direction, EntryIntent, StrategyCandidate
-from genesis.strategy.inspector import InspectorFunnelConfig
+from genesis.strategy.inspector import InspectorFunnelConfig, inspect
 
 _SESSION_PROBE_DATE = date(2024, 1, 1)
 """Fecha arbitraria usada solo para validar `symbol in SESSIONS` al construir (R3c)."""
@@ -67,6 +86,113 @@ class AccountState:
     balance: float
     open_positions: list[OpenPosition]
     account_exhausted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedFill:
+    """Resultado puro del motor de fills: precio geométrico y momento de ejecución."""
+
+    price: float
+    timestamp_utc: datetime
+
+
+def _is_adverse_gap(direction: Direction, open_price: float, stop_loss: float) -> bool:
+    if direction is Direction.LONG:
+        return open_price <= stop_loss
+    return open_price >= stop_loss
+
+
+def _is_favorable_gap(direction: Direction, open_price: float, take_profit: float) -> bool:
+    if direction is Direction.LONG:
+        return open_price >= take_profit
+    return open_price <= take_profit
+
+
+def _touches_stop_loss(direction: Direction, price: float, stop_loss: float) -> bool:
+    if direction is Direction.LONG:
+        return price <= stop_loss
+    return price >= stop_loss
+
+
+def _touches_take_profit(direction: Direction, price: float, take_profit: float) -> bool:
+    if direction is Direction.LONG:
+        return price >= take_profit
+    return price <= take_profit
+
+
+def _resolve_fill_from_ticks(
+    position: OpenPosition, bar: AnnotatedBar, day_ticks: Sequence[TickRow]
+) -> ResolvedFill | None:
+    """Rama con cobertura suficiente (R35): primer tick cronológico que toca SL o TP gana."""
+    for tick in ticks_in_bar_window(bar, day_ticks):
+        if _touches_stop_loss(position.direction, tick.last, position.stop_loss):
+            return ResolvedFill(price=position.stop_loss, timestamp_utc=tick.timestamp_utc)
+        if _touches_take_profit(position.direction, tick.last, position.take_profit):
+            return ResolvedFill(price=position.take_profit, timestamp_utc=tick.timestamp_utc)
+    return None
+
+
+def _resolve_fill_fallback(position: OpenPosition, bar: AnnotatedBar) -> ResolvedFill | None:
+    """Rama fallback sin cobertura de ticks (R32–R34), sobre `[bar.low, bar.high]`/`bar.open`."""
+    direction = position.direction
+    if _is_adverse_gap(direction, bar.open, position.stop_loss):
+        return ResolvedFill(price=bar.open, timestamp_utc=bar.timestamp_utc)
+    if _is_favorable_gap(direction, bar.open, position.take_profit):
+        return ResolvedFill(price=position.take_profit, timestamp_utc=bar.timestamp_utc)
+
+    sl_in_range = bar.low <= position.stop_loss <= bar.high
+    tp_in_range = bar.low <= position.take_profit <= bar.high
+    if sl_in_range:
+        return ResolvedFill(price=position.stop_loss, timestamp_utc=bar.timestamp_utc)
+    if tp_in_range:
+        return ResolvedFill(price=position.take_profit, timestamp_utc=bar.timestamp_utc)
+    return None
+
+
+def _resolve_fill(
+    position: OpenPosition,
+    bar: AnnotatedBar,
+    day_ticks: Sequence[TickRow],
+    coverage: bool,
+) -> ResolvedFill | None:
+    """Motor de fills de salida intrabar (R32–R36, spec §5.2: nunca sobreestima el resultado)."""
+    if coverage:
+        return _resolve_fill_from_ticks(position, bar, day_ticks)
+    return _resolve_fill_fallback(position, bar)
+
+
+def _resolve_entry_fill(
+    intent: EntryIntent,
+    bar: AnnotatedBar,
+    day_ticks: Sequence[TickRow],
+    coverage: bool,
+) -> ResolvedFill:
+    """Precio de entrada (R22): primer tick de la vela si hay cobertura, si no `bar.open`.
+
+    Geométricamente puro (sin spread/slippage): esos costos se cobran aparte como
+    cargo explícito (`cost_applied`) para no contaminar el precio de ejecución.
+    """
+    if coverage:
+        window_ticks = ticks_in_bar_window(bar, day_ticks)
+        if window_ticks:
+            first_tick = window_ticks[0]
+            return ResolvedFill(price=first_tick.last, timestamp_utc=first_tick.timestamp_utc)
+    return ResolvedFill(price=bar.open, timestamp_utc=bar.timestamp_utc)
+
+
+def _compute_rr(
+    direction: Direction, reference_price: float, stop_loss: float, take_profit: float
+) -> float:
+    """R:R propuesto para el embudo Inspector, a partir de `bar.close` como referencia."""
+    if direction is Direction.LONG:
+        risk = reference_price - stop_loss
+        reward = take_profit - reference_price
+    else:
+        risk = stop_loss - reference_price
+        reward = reference_price - take_profit
+    if risk <= 0:
+        return 0.0
+    return reward / risk
 
 
 class Simulator:
@@ -129,6 +255,7 @@ class Simulator:
         self.news_events = news_events
         self.tick_store = tick_store
         self.stress = stress
+        self._day_ticks_cache: dict[date, list[TickRow]] = {}
 
         candidate_id = getattr(candidate, "candidate_id", "?")
         provenance = RunProvenance(
@@ -144,11 +271,186 @@ class Simulator:
         self.clock.previous_day_close_balance = starting_balance
 
     def run(self, frame: pd.DataFrame) -> Ledger:
-        """Ejecuta la simulación completa sobre `frame` y retorna el `Ledger` poblado.
+        """Ejecuta la simulación completa sobre `frame` y retorna el `Ledger` poblado (R22)."""
+        for bar in iter_bars(frame, self.symbol, self.firm_profile):
+            self._process_bar(bar)
+        return self.ledger
 
-        Cuerpo implementado en T9 (loop + fills) y T10 (breaches + cierre de sesión).
-        """
-        raise NotImplementedError
+    def _day_ticks_for(self, trading_day: date) -> list[TickRow]:
+        """Cachea `day_ticks` por `trading_day`: una lectura por día, no por barra (RI-G1)."""
+        if self.tick_store is None:
+            return []
+        if trading_day not in self._day_ticks_cache:
+            self._day_ticks_cache[trading_day] = list(
+                iter_ticks(self.tick_store, self.symbol, trading_day)
+            )
+        return self._day_ticks_cache[trading_day]
+
+    def _process_bar(self, bar: AnnotatedBar) -> None:
+        # (0) reset diario: base doble del breach DAILY (R25).
+        if self.clock.trading_day is not None and bar.trading_day != self.clock.trading_day:
+            self.clock.previous_day_close_balance = self.account.balance
+        # (a) alimenta el reloj (LookaheadError si retrocede, R5/R9).
+        self.clock.advance(bar)
+
+        day_ticks = self._day_ticks_for(bar.trading_day)
+        coverage = (
+            has_sufficient_tick_coverage(self.tick_store, self.symbol, bar, day_ticks)
+            if self.tick_store is not None
+            else False
+        )
+
+        # (1) gestión de posiciones abiertas ANTES de nuevas entradas.
+        self._manage_open_positions(bar, day_ticks, coverage)
+        # (2) breaches en línea sobre equity flotante (T10).
+        self._evaluate_breaches(bar, day_ticks, coverage)
+        # (3)/(4) cierre forzado proactivo de sesión + guard defensivo (T10).
+        self._enforce_session_close_and_guard(bar, day_ticks, coverage)
+
+        # (5) nuevas entradas: solo si la cuenta no está agotada (R30).
+        if not self.account.account_exhausted:
+            self._process_new_entries(bar, day_ticks, coverage)
+
+    def _manage_open_positions(
+        self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
+    ) -> None:
+        for position in list(self.account.open_positions):
+            fill = _resolve_fill(position, bar, day_ticks, coverage)
+            if fill is not None:
+                self._close_position(position, fill)
+
+    def _evaluate_breaches(
+        self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
+    ) -> None:
+        """Detección de breaches DAILY/TOTAL/NEWS/WEEKEND en línea (implementado en T10)."""
+        return
+
+    def _enforce_session_close_and_guard(
+        self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
+    ) -> None:
+        """Cierre forzado de sesión + guard `SessionBoundaryError` (implementado en T10)."""
+        return
+
+    def _process_new_entries(
+        self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
+    ) -> None:
+        risk_provider = cast(RiskLevelsProvider, self.candidate)
+        intents = self.candidate.on_bar(bar)
+        for intent in intents:
+            stop_loss, take_profit = risk_provider.risk_levels(intent)
+            proposed_rr = _compute_rr(intent.direction, bar.close, stop_loss, take_profit)
+            verdict = inspect(
+                intent,
+                symbol=self.symbol,
+                intent_time=bar.timestamp_utc,
+                proposed_rr=proposed_rr,
+                figure=self.figure,
+                firm_profile=self.firm_profile,
+                news_events=self.news_events,
+                config=self.funnel_config,
+            )
+            if not verdict.authorized:
+                self.ledger.append(
+                    RejectionRecord(
+                        candidate_id=intent.candidate_id,
+                        symbol=self.symbol,
+                        intent_time=bar.timestamp_utc,
+                        verdict=verdict,
+                    )
+                )
+                continue
+            self._open_position(intent, bar, day_ticks, coverage, stop_loss, take_profit)
+
+    def _open_position(
+        self,
+        intent: EntryIntent,
+        bar: AnnotatedBar,
+        day_ticks: list[TickRow],
+        coverage: bool,
+        stop_loss: float,
+        take_profit: float,
+    ) -> None:
+        entry_fill = _resolve_entry_fill(intent, bar, day_ticks, coverage)
+        ticks_window = ticks_in_bar_window(bar, day_ticks) if coverage else None
+        spread_points = spread_for(
+            self.symbol,
+            entry_fill.timestamp_utc,
+            self.figure,
+            ticks_window,
+            self.costs_config,
+            stress=self.stress,
+        )
+        slippage_points = slippage_for(self.figure, self.costs_config, stress=self.stress)
+        commission = commission_for(intent.sizing_hint, self.costs_config, stress=self.stress)
+        points_total = spread_points + slippage_points
+        cost_points = points_total * intent.sizing_hint * self.figure.tick_value
+        entry_cost = commission + cost_points
+        self.account.balance -= entry_cost
+
+        position = OpenPosition(
+            candidate_id=intent.candidate_id,
+            symbol=self.symbol,
+            direction=intent.direction,
+            entry_time=entry_fill.timestamp_utc,
+            entry_price=entry_fill.price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            sizing_hint=intent.sizing_hint,
+        )
+        self.account.open_positions.append(position)
+        self.ledger.append(
+            FillRecord(
+                candidate_id=intent.candidate_id,
+                symbol=self.symbol,
+                timestamp_utc=entry_fill.timestamp_utc,
+                price=entry_fill.price,
+                direction=intent.direction,
+                is_exit=False,
+                cost_applied=entry_cost,
+                equity_after=self.account.balance,
+            )
+        )
+
+        # Caso "vela única" (spec §9, pregunta abierta): si la MISMA vela ya dispara la
+        # salida (SL/TP), cerrar de inmediato en vez de esperar a la siguiente barra.
+        exit_fill = _resolve_fill(position, bar, day_ticks, coverage)
+        if exit_fill is not None:
+            self._close_position(position, exit_fill)
+
+    def _close_position(self, position: OpenPosition, fill: ResolvedFill) -> None:
+        direction_sign = 1.0 if position.direction is Direction.LONG else -1.0
+        pnl_points = (fill.price - position.entry_price) * direction_sign
+        pnl_gross = pnl_points * position.sizing_hint * self.figure.tick_value
+
+        commission = commission_for(position.sizing_hint, self.costs_config, stress=self.stress)
+        days_held = (fill.timestamp_utc.date() - position.entry_time.date()).days
+        swap_money = 0.0
+        if days_held >= 1:
+            swap_rate = swap_for(
+                self.symbol,
+                days_held,
+                self.figure,
+                position.direction is Direction.LONG,
+                stress=self.stress,
+            )
+            swap_money = abs(swap_rate) * position.sizing_hint
+
+        total_cost = commission + swap_money
+        self.account.balance += pnl_gross - total_cost
+
+        self.ledger.append(
+            FillRecord(
+                candidate_id=position.candidate_id,
+                symbol=self.symbol,
+                timestamp_utc=fill.timestamp_utc,
+                price=fill.price,
+                direction=position.direction,
+                is_exit=True,
+                cost_applied=total_cost,
+                equity_after=self.account.balance,
+            )
+        )
+        self.account.open_positions.remove(position)
 
 
 def run_backtest(candidate: StrategyCandidate, frame: pd.DataFrame, **kwargs: Any) -> Ledger:

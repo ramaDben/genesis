@@ -90,6 +90,16 @@ def iter_ticks(
         )
 
 
+def _tick_in_bar_window(tick_timestamp: datetime, bar_timestamp: datetime) -> bool:
+    """Criterio único de borde de la ventana de cobertura `(T-60s, T]` (RI-G5, ADR-G8).
+
+    Compartido por `has_sufficient_tick_coverage` y el motor de fills de `simulator.py`
+    para que ambos nunca discrepen sobre a qué vela pertenece un tick.
+    """
+    lower_bound = bar_timestamp - _COVERAGE_WINDOW
+    return lower_bound < tick_timestamp <= bar_timestamp
+
+
 def has_sufficient_tick_coverage(
     store: RawParquetStore,
     symbol: str,
@@ -106,5 +116,16 @@ def has_sufficient_tick_coverage(
     if not store.has_chunk(symbol, Granularity.TICK, window):
         return False
 
-    lower_bound = bar.timestamp_utc - _COVERAGE_WINDOW
-    return any(lower_bound < tick.timestamp_utc <= bar.timestamp_utc for tick in day_ticks)
+    return any(_tick_in_bar_window(tick.timestamp_utc, bar.timestamp_utc) for tick in day_ticks)
+
+
+def ticks_in_bar_window(bar: AnnotatedBar, day_ticks: Sequence[TickRow]) -> list[TickRow]:
+    """Filtra `day_ticks` a los que caen en la ventana `(bar.timestamp_utc - 60s, T]`.
+
+    Ordenados por `timestamp_utc` ascendente (forward-only); usado por el motor de
+    fills de `simulator.py` (R35) — misma fuente de borde que `has_sufficient_tick_coverage`.
+    """
+    in_window = [
+        tick for tick in day_ticks if _tick_in_bar_window(tick.timestamp_utc, bar.timestamp_utc)
+    ]
+    return sorted(in_window, key=lambda tick: tick.timestamp_utc)
