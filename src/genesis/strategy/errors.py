@@ -23,3 +23,20 @@ class DuplicateCandidateError(GenesisStrategyError):
 
 class InspectorConfigError(GenesisStrategyError):
     """Configuración del embudo (`InspectorFunnelConfig`) inválida o incompleta."""
+
+
+class CandidateBConfigError(GenesisStrategyError):
+    """Configuración de `candidates.B.*` inválida o incompleta en `inspector_config.json` (R73).
+
+    El mensaje debe incluir el campo faltante/inválido y la fuente del recurso leído
+    (patrón fail-fast de `InspectorConfigError`, sin degradación silenciosa).
+    """
+
+
+class CandidateBStateError(GenesisStrategyError):
+    """Invariante interno del Candidato B violado.
+
+    Se lanza cuando `risk_levels()` se invoca sin una señal pendiente (R71) o cuando
+    la geometría calculada produce `distancia_stop <= 0` (R67). El mensaje debe
+    incluir el contexto explícito (campo/valor) que originó la violación.
+    """

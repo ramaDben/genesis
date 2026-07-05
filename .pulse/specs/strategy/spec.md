@@ -537,3 +537,723 @@ ENTONCES retorna 0 coincidencias (namespace candidates.<letra>.* no poblado en e
   `.agents/rules/eval-tdd-conventions.md`, `.agents/rules/tooling-conventions.md`.
 - `AGENTS.md` (raíz) — invariantes de código citados textualmente del spec.
 - `CLAUDE.md` (raíz) — arquitectura de 4 capas, comandos, flujo SDD.
+
+<!-- change:8-e-feat-strategy-candidato-b-completo-rango-de-apertura-gatillo-s -->
+# Specification: Candidato B completo — rango de apertura, gatillo de ruptura, sizing vol-targeting, cierre forzado (Issue #8 / E)
+
+SSoT: `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md` (en adelante «el spec») — §2.1,
+§2.3, §2.x, §3, §5.1, §6.2, §8, §9, §11, §11.1. Este documento formaliza `idea.md` y
+`proposal.md` de este Change en requisitos verificables, y **continúa** la numeración `R#` del
+delta-spec vigente del dominio `strategy` (`.pulse/specs/strategy/spec.md`, R1–R47, promovido de
+Issue C) sin colisionar con ella: este documento empieza en **R48**. Los gates G/C/P/T del spec
+**nunca se relajan**; ningún requisito de este documento puede contradecirlos.
+
+Convención de rutas: real del repo, `src/genesis/strategy/...` (no el pseudocódigo
+`python/strategy/...` del spec §5.1).
+
+Este Change resuelve normativamente los 6 riesgos que `proposal.md` (§"Riesgos que specify debe
+acotar") delega explícitamente a esta fase (fórmula/período ATR, `tp_rr_multiple` default,
+excepción de estado sin señal pendiente, tolerancia de doji, nombre/ubicación de excepciones de
+config, y ubicación del test de integración), y fija con precisión matemática la interacción
+rango-congelado↔gatillo (Decisión 3 de `proposal.md`, cuya redacción original dejaba una
+ambigüedad de índice que aquí se elimina — ver §3.2).
+
+---
+
+## 1. Objetivo y alcance
+
+### 1.1. Objetivo
+
+Construir el primer candidato real del torneo: `src/genesis/strategy/candidate_b/`, paquete que
+implementa `StrategyCandidate` (`genesis.strategy.contract`, Issue C, cerrado) **y**
+`RiskLevelsProvider` (`genesis.backtest.simulator`, Issue G, cerrado, ADR-G3) en una única clase
+`CandidateB`, agnóstica a los demás candidatos, sin reabrir ningún módulo de `genesis.data`,
+`genesis.strategy.{contract,inspector,clock}` ni `genesis.backtest/`. Esto desbloquea el primer
+eslabón real del camino crítico A→B→C→{E,G}→H (Issue H, WFA + Monte Carlo, no puede arrancar sin
+al menos un `StrategyCandidate` real).
+
+### 1.2. Alcance IN
+
+- `src/genesis/strategy/candidate_b/__init__.py`: `__all__` mínimo y curado (patrón
+  `src/genesis/strategy/__init__.py`).
+- `src/genesis/strategy/candidate_b/candidate.py`: `CandidateB` (`@register_candidate("B")`),
+  rango de apertura como estado incremental forward-only, dirección de referencia con tolerancia
+  de doji, gatillo de ruptura confirmado por cierre, ATR-Wilder-14 incremental propio, sizing
+  vol-targeting con balance de referencia fijo, `risk_levels(intent)`.
+- `src/genesis/strategy/candidate_b/config.py`: `CandidateBConfig`, `load_candidate_b_config()`.
+- Extensión aditiva de `src/genesis/strategy/inspector_config.json`: namespace `candidates.B.*`
+  (hoy reservado y vacío por C, R20 del delta-spec de C).
+- Extensión aditiva de `src/genesis/strategy/errors.py`: `CandidateBConfigError`,
+  `CandidateBStateError` (ambas heredan `GenesisStrategyError`).
+- `tests/strategy/candidate_b/`: unit, property (`hypothesis`), golden, integración con el
+  `Simulator` real de Issue G.
+
+### 1.3. Alcance OUT (YAGNI explícito)
+
+- Cualquier modificación de `src/genesis/data/`, `src/genesis/strategy/{contract.py, clock.py,
+  inspector.py}` o `src/genesis/backtest/` — todos cerrados (Issues B, C, G); este Change se apoya
+  exclusivamente en sus superficies públicas ya existentes.
+- El espacio de búsqueda IS completo (grid 3×3×3 = 27 combinaciones del spec §6.2): este Change
+  fija un **constructor parametrizable** y **un único punto de referencia** en
+  `candidates.B.*`; el diseño del muestreo (grid lineal, log-lineal, Sobol) y su materialización
+  completa es responsabilidad de Issue H (spec §6.2 literal).
+- `candidate_a/` (Issue D/F) y `candidate_c/` (Issue K): fuera de alcance total.
+- Cualquier mecanismo de cierre forzado propio del candidato: ya resuelto de facto por
+  `Simulator._enforce_session_close_and_guard` (Issue G, cerrado) — este Change solo documenta la
+  resolución (§3.7), no diseña nada nuevo.
+- Cualquier puerto inyectable nuevo para balance de cuenta en vivo (`AccountBalanceProvider`-like):
+  descartado explícitamente (Decisión 5 de `proposal.md`; §3.4 de este documento fija el balance
+  de referencia como parámetro de construcción fijo).
+- Reintentos de señal tras una ruptura fallida dentro del mismo `trading_day`: máximo una señal
+  por sesión/símbolo sin excepciones (§3.2).
+- Un archivo de config propio nuevo para `candidate_b/` (fuera del `inspector_config.json`
+  existente) y un `errors.py` propio scoped a `candidate_b/`: ambos descartados (§3.6).
+
+---
+
+## 2. Convenciones de esta especificación
+
+- Los requisitos usan **DEBE** (MUST) y **DEBERÍA** (SHOULD), numerados `R48..Rn`, continuando sin
+  colisión la numeración de `.pulse/specs/strategy/spec.md` (R1–R47). Cada requisito es
+  verificable por al menos un test o una aserción `rg`/`fd`.
+- Nombres de funciones/clases/excepciones son **normativos**; firmas exactas de tipos ya fijadas
+  aquí (constructor de `CandidateB`, `CandidateBConfig`) no se reabren en `design.md` salvo
+  justificación explícita.
+- Identificadores en inglés, docstrings y mensajes de error en español (convención del repo).
+- `bar.in_session: bool` y `bar.trading_day: date` (`genesis.data.store.AnnotatedBar`,
+  `src/genesis/data/store.py:31-38`) son la **única** fuente de verdad de sesión/día para
+  `CandidateB` — este Change NO DEBE reimplementar ninguna lógica de calendario/DST
+  (`genesis.data.sessions.session_window`, ya resuelto por Issue B).
+- `on_bar` recibe **toda** barra M1 cerrada que el `Simulator`/harness le entregue, incluidas las
+  que caen fuera de la sesión de contado (`bar.in_session=False`, p. ej. horas extendidas de
+  índices CFD); `CandidateB` DEBE ignorarlas para su lógica de señal (§3.2) pero puede
+  incorporarlas o no a su estado ATR según se fija en §3.3.
+
+---
+
+## 3. Requisitos por módulo
+
+### 3.1. Ubicación y forma del paquete
+
+**Requisitos**:
+
+- **R48** (DEBE). El árbol destino DEBE ser `src/genesis/strategy/candidate_b/` como paquete
+  (`__init__.py` + `candidate.py` + `config.py`), no un módulo plano — coherente con la tabla
+  normativa del spec §5.1 y con `.pulse/specs/strategy/spec.md` §1.3/§5.1 (R20).
+- **R49** (DEBE). `candidate_b/config.py` NO DEBE crear ningún recurso de configuración nuevo:
+  `load_candidate_b_config()` DEBE leer el namespace `candidates.B.*` del **mismo** recurso
+  empaquetado `src/genesis/strategy/inspector_config.json` ya reservado por Issue C (R20 del
+  delta-spec de C), replicando el patrón `importlib.resources` de
+  `load_inspector_funnel_config` (`src/genesis/strategy/inspector.py:117-143`).
+- **R50** (NO DEBE). `src/genesis/strategy/candidate_b/candidate.py` NO DEBE importar
+  `genesis.backtest` en ningún punto (`rg -n "genesis.backtest" src/genesis/strategy/candidate_b/candidate.py`
+  DEBE retornar 0 coincidencias): `RiskLevelsProvider` es un `Protocol` estructural
+  (`@runtime_checkable`, `src/genesis/backtest/simulator.py:59-70`) — `CandidateB` lo satisface
+  por **duck typing** (mismo nombre de método, misma firma) sin importar el símbolo, preservando
+  la dependencia unidireccional capa 2 → capa 1 (nunca capa 2 → capa 3).
+
+### 3.2. `candidate.py` — `CandidateB`, estado de sesión y gatillo
+
+**Responsabilidad**: implementar `StrategyCandidate` (Issue C, cerrado) manteniendo el aislamiento
+del spec §2.1/§2.5 (ningún estado compartido entre candidatos ni entre símbolos).
+
+**Requisitos**:
+
+- **R51** (DEBE). `candidate.py` DEBE definir `class CandidateB` decorada
+  `@register_candidate("B")` (línea inmediatamente anterior a la declaración de clase), con
+  `candidate_id: str = "B"` como atributo de **clase** fijo (no parámetro de constructor): la
+  letra de registro y el atributo normativo DEBEN coincidir por construcción, sin forma de
+  instanciar `CandidateB` con un `candidate_id` distinto de `"B"`.
+- **R52** (DEBE). `CandidateB` DEBE implementar el método `risk_levels(self, intent: EntryIntent)
+  -> tuple[float, float]` en la misma clase que `on_bar`, satisfaciendo estructuralmente
+  `RiskLevelsProvider` (`isinstance(CandidateB(...), RiskLevelsProvider)` DEBE retornar `True`, R50).
+- **R53** (DEBE). El constructor DEBE ser:
+
+  ```python
+  def __init__(
+      self,
+      *,
+      figure: SymbolFigure,
+      reference_balance: float,
+      n_minutes: int,
+      risk_pct: float,
+      atr_stop_frac: float | None = None,
+      atr_period: int = 14,
+      tp_rr_multiple: float = 3.0,
+      config_version: str = CONFIG_VERSION,
+  ) -> None
+  ```
+
+  con los 3 parámetros del grid IS del spec §6.2 (`n_minutes`, `atr_stop_frac`, `risk_pct`)
+  aceptados de forma **explícita y directa** (sin defaults ocultos que oculten qué punto del
+  grid corre una instancia dada — Decisión 7 de `proposal.md`, resuelve Rg-6 de `idea.md`).
+  `figure` y `reference_balance` son obligatorios (sin default): una instancia de `CandidateB`
+  está ligada implícitamente a un único símbolo del universo (US500/NAS100/US30/GER40) y a un
+  balance de referencia fijo — el docstring de la clase DEBE documentar explícitamente que
+  **nunca** debe compartirse una misma instancia entre streams de más de un símbolo (mismo
+  patrón que `Simulator`, un orquestador por `(candidate, symbol)`,
+  `src/genesis/backtest/simulator.py:203-204`).
+- **R54** (DEBE). El estado interno mutable de `CandidateB` DEBE incluir, como mínimo:
+  `_current_trading_day: date | None`, `_range_high: float | None`, `_range_low: float | None`,
+  `_reference_direction: Direction | None`, `_signal_emitted_today: bool`,
+  `_minute_index: int` (contador de barras `in_session=True` vistas en el `trading_day` vigente,
+  0-indexado, reseteado a `0` en el primer bar `in_session` de cada nuevo día), y el estado ATR de
+  §3.3 (`_atr_value`, `_atr_bars_seen`, `_atr_last_close`, estos tres **no** reseteados por día).
+- **R55** (DEBE). `on_bar(bar)` DEBE ejecutar, en este orden exacto, por cada `AnnotatedBar`
+  recibida:
+  1. **Reset diario**: si `bar.trading_day != self._current_trading_day`, resetear
+     `_current_trading_day`, `_range_high`, `_range_low`, `_reference_direction`,
+     `_signal_emitted_today=False`, `_minute_index=0` (el estado ATR de §3.3 **no** se resetea).
+  2. **Actualización ATR** (§3.3): si `bar.in_session`, actualizar el estado ATR con esta barra
+     — incondicionalmente, incluso si ya se emitió la señal del día o si la barra aún no
+     participa en la formación del rango.
+  3. **Filtro de sesión**: si `not bar.in_session`, retornar `[]` sin tocar ningún otro estado
+     (ni rango, ni dirección, ni flag de señal) — R55 termina aquí para esa barra.
+  4. **Dirección de referencia** (§3.2.1): si `self._minute_index == 0` (primera barra
+     `in_session` del día), fijar `_reference_direction` según R56, luego continuar al paso 5
+     sin retornar todavía (esta barra también participa en la formación del rango, R57).
+  5. **Formación del rango** (§3.2.2): si `self._minute_index < n_minutes`, actualizar
+     `_range_high = max(_range_high or bar.high, bar.high)`,
+     `_range_low = min(_range_low or bar.low, bar.low)`; incrementar `_minute_index`; retornar
+     `[]` (el rango aún no está congelado, ningún gatillo se evalúa en esta rama).
+  6. **Gatillo de ruptura** (§3.2.3): si `self._minute_index >= n_minutes` (rango ya congelado
+     — congelación implícita: ninguna barra con `_minute_index >= n_minutes` vuelve a entrar en
+     el paso 5): si `self._signal_emitted_today` o `_reference_direction is None`, incrementar
+     `_minute_index` y retornar `[]`; en caso contrario, evaluar R58; si dispara, construir el
+     `EntryIntent`, calcular y guardar niveles de riesgo (§3.3/§3.4), marcar
+     `_signal_emitted_today = True`, incrementar `_minute_index`, retornar `[intent]`; si no
+     dispara, incrementar `_minute_index` y retornar `[]`.
+- **R56** (DEBE). La dirección de referencia (PA normativa 1 del issue §11.1) DEBE fijarse a
+  partir de **una única** `AnnotatedBar`: la primera con `bar.in_session=True` del `trading_day`
+  vigente (`_minute_index == 0`), comparando `bar.close` contra `bar.open` de esa misma barra:
+  - `Direction.LONG` si `bar.close - bar.open > epsilon`;
+  - `Direction.SHORT` si `bar.open - bar.close > epsilon`;
+  - **ninguna dirección** (`_reference_direction` permanece `None` toda la sesión, fail-safe
+    explícito — no se emite ninguna señal ese `trading_day`) si `abs(bar.close - bar.open) <=
+    epsilon` (doji, dentro de tolerancia).
+  - `epsilon = 0.5 * 10 ** (-figure.digits)` (medio tick del símbolo, la mínima unidad de precio
+    representable por `figure.digits`, `src/genesis/data/symbols.py:12-27`): por debajo de este
+    umbral, cualquier diferencia `close - open` se considera ruido de representación de punto
+    flotante/redondeo, no una dirección real observable en el mercado (resuelve el riesgo 4 de
+    `proposal.md`).
+  - **Ejemplo numérico** (`figure.digits = 2`, `epsilon = 0.005`): `open=4500.00, close=4500.003`
+    → `abs(diff) = 0.003 <= 0.005` → doji, sin dirección. `open=4500.00, close=4500.01` →
+    `abs(diff) = 0.01 > 0.005` → `Direction.LONG`.
+- **R57** (DEBE). La ventana de formación del rango comprende exactamente las primeras
+  `n_minutes` barras `in_session` del día, `_minute_index` en `[0, n_minutes)` (0-indexado): la
+  barra con `_minute_index == 0` (la misma que fija la dirección de referencia, R56) SÍ participa
+  en la formación del rango. `_range_high`/`_range_low` son el `max`/`min` de `bar.high`/`bar.low`
+  de exactamente esas `n_minutes` barras — ninguna barra posterior las modifica.
+- **R58** (DEBE). El gatillo de ruptura (PA normativa 2 del issue §11.1, resuelve la ambigüedad de
+  índice de Decisión 3 de `proposal.md`) DEBE evaluarse **por primera vez** en la barra con
+  `_minute_index == n_minutes` (la `(n_minutes + 1)`-ésima barra `in_session` del día, la primera
+  que **no** participó en la formación del rango, R57) y en toda barra posterior mientras
+  `not self._signal_emitted_today`. Dispara si, y solo si, el cierre de la barra evaluada rompe
+  **estrictamente** el extremo del rango congelado en la dirección de `_reference_direction`:
+  - `Direction.LONG`: dispara si `bar.close > self._range_high` (estricto; `bar.close ==
+    self._range_high` NO dispara).
+  - `Direction.SHORT`: dispara si `bar.close < self._range_low` (estricto).
+  - Ninguna barra con `_minute_index < n_minutes` (barra formadora) puede disparar el gatillo:
+    por construcción, una barra formadora nunca puede romper un extremo que ella misma ayuda a
+    definir (`high = max(...)` que la incluye), eliminando cualquier circularidad geométrica —
+    la primera barra en la que la ruptura es lógicamente posible es, exactamente, la primera que
+    ya no actualiza el rango (`_minute_index == n_minutes`), que es la misma barra desde la que
+    R58 empieza a evaluar. No existe ninguna barra "intermedia" excluida ni ningún salto de
+    índice adicional.
+  - **Ejemplo numérico** (`n_minutes=15`): barras `_minute_index=0..14` (15 barras) forman el
+    rango; supóngase `_range_high=4505.0`, `_range_low=4498.0`, `_reference_direction=LONG`. La
+    barra `_minute_index=15` (16.ª barra `in_session` del día) con `bar.close=4506.2` dispara
+    (`4506.2 > 4505.0`); con `bar.close=4505.0` exacto, NO dispara (igualdad, no ruptura); con
+    `bar.close=4503.0`, NO dispara (dentro del rango).
+- **R59** (DEBE). `CandidateB` DEBE emitir como máximo **un** `EntryIntent` por `trading_day`
+  (PA "una señal por sesión/día como máximo" del issue), independientemente del resultado
+  observable aguas abajo (autorizado/rechazado por el Inspector, ganador/perdedor si se abre, o si
+  el precio regresa dentro del rango sin tocar el stop) — `CandidateB` no tiene visibilidad de
+  ese resultado (`on_bar` no recibe ningún callback, contrato de C es unidireccional) y por tanto
+  NO DEBE intentar inferirlo ni reintentar. `_signal_emitted_today` es el único flag de control
+  (Decisión 9 de `proposal.md`, resuelve la pregunta abierta 9 de `idea.md`).
+- **R60** (NO DEBE). `on_bar` NO DEBE mutar ni consultar ningún estado con `bar.timestamp_utc`
+  futuro respecto al `bar` recibido en la llamada actual (invariante forward-only del spec §9,
+  §8), verificado por R71 y R83.
+
+### 3.3. ATR-Wilder-14 incremental (rama alternativa del stop)
+
+**Decisión**: implementación mínima propia dentro de `candidate_b/` (no diferida, resuelve el
+riesgo 1 de `proposal.md`: el spec §6.2 cuenta explícitamente `atr_stop_frac ∈ {0.5, 1.0, 1.5}`
+como 9 de las 27 combinaciones del presupuesto de trials ya fijado como definitivo — diferir esta
+rama bloquearía silenciosamente 2/3 del espacio de búsqueda de stop).
+
+**Requisitos**:
+
+- **R61** (DEBE). El estado ATR (`_atr_value: float | None`, `_atr_bars_seen: int`,
+  `_atr_last_close: float | None`) DEBE ser **continuo across días**: NO se resetea en el reset
+  diario de R55.1. Se actualiza únicamente con barras `bar.in_session=True` (R55.2) — las barras
+  fuera de sesión NUNCA contribuyen al true range, evitando que un gap nocturno/de fin de semana
+  (entre el cierre de una sesión y la apertura de la siguiente) distorsione el ATR intradía que
+  informa el tamaño del stop.
+- **R62** (DEBE). El *true range* de una barra `in_session` DEBE calcularse como:
+
+  ```
+  TR = max(bar.high - bar.low, |bar.high - last_close|, |bar.low - last_close|)   si last_close is not None
+  TR = bar.high - bar.low                                                          si last_close is None (primera barra in_session vista jamás por la instancia)
+  ```
+
+  donde `last_close` es `_atr_last_close` **antes** de actualizarse con `bar.close` en esta misma
+  barra (incluye el cierre de la última barra `in_session` del día anterior si la barra actual es
+  la primera `in_session` de un nuevo día — el `TR` cruza la frontera de día sin reiniciarse).
+- **R63** (DEBE). El ATR DEBE calcularse con suavizado de Wilder y período `atr_period` (default
+  `14`, parámetro del constructor):
+  - **Calentamiento**: mientras `_atr_bars_seen < atr_period`, `_atr_value` permanece `None`
+    (ATR "no calentado", ATR aún no disponible); tras acumular exactamente `atr_period` valores de
+    `TR`, `_atr_value` se fija por primera vez como la **media aritmética simple** de esos
+    `atr_period` valores de `TR`.
+  - **Suavizado posterior**: para cada barra `in_session` subsiguiente,
+    `_atr_value = ((_atr_value_anterior * (atr_period - 1)) + TR) / atr_period`.
+  - **Ejemplo numérico** (`atr_period=14`): 14 barras `in_session` consecutivas con
+    `TR=10.0` cada una → `_atr_value` tras la 14.ª = `10.0` (media simple de 14 valores de 10.0).
+    Barra 15 con `TR=24.0` → `_atr_value = ((10.0 * 13) + 24.0) / 14 = 154.0 / 14 = 11.0`.
+- **R64** (DEBE). Si `atr_stop_frac is not None` pero `_atr_value is None` (ATR aún no calentado,
+  `_atr_bars_seen < atr_period`) al momento de calcular `risk_levels`, `CandidateB` DEBE usar la
+  **regla primaria** (extremo opuesto del rango, R66) como *fallback* explícito — nunca lanzar una
+  excepción ni bloquear la emisión de la señal por falta de calentamiento del ATR.
+- **R65** (DEBE). `candidate.py` NO DEBE importar ningún módulo de `common/` para el ATR (ni crear
+  uno): el acumulador ATR es estado **propio** de `CandidateB`, sin componente compartido — ningún
+  otro candidato del torneo lo necesita hoy (YAGNI, mismo criterio que evitó portar los 14 campos
+  de `smc_engine` fuera de alcance en el delta-spec de C).
+
+### 3.4. `risk_levels(intent)` — stop, take-profit y sizing
+
+**Requisitos**:
+
+- **R66** (DEBE). El stop_loss DEBE calcularse, en el momento en que `on_bar` detecta la ruptura
+  (R58), a partir de `entry_reference = bar.close` de esa misma barra (idéntica referencia que usa
+  `Simulator._compute_rr` para `proposed_rr`, `src/genesis/backtest/simulator.py:188-200`,
+  `bar.close` — garantiza consistencia entre el R:R que ve el candidato y el que evalúa el
+  Inspector):
+  - **Regla primaria** (siempre disponible, se usa si `atr_stop_frac is None` o si R64 aplica):
+    `stop_loss = self._range_low` si `Direction.LONG`; `stop_loss = self._range_high` si
+    `Direction.SHORT` (extremo opuesto del rango congelado).
+  - **Regla alternativa** (si `atr_stop_frac is not None` y `_atr_value is not None`, R63):
+    `stop_loss = self._range_low - atr_stop_frac * self._atr_value` si `Direction.LONG`;
+    `stop_loss = self._range_high + atr_stop_frac * self._atr_value` si `Direction.SHORT`
+    (extiende el stop más allá del extremo opuesto del rango por `atr_stop_frac × ATR`, en la
+    dirección adversa).
+  - **Ejemplo numérico** (regla alternativa, `Direction.LONG`, `_range_low=4498.0`,
+    `_atr_value=11.0`, `atr_stop_frac=1.0`): `stop_loss = 4498.0 - 1.0 * 11.0 = 4487.0`.
+- **R67** (DEBE). `distancia_stop = abs(entry_reference - stop_loss)` DEBE ser estrictamente
+  positiva; si `distancia_stop <= 0` (invariante interno violado — no debería ocurrir dada la
+  geometría de R58/R66), `risk_levels` DEBE lanzar `CandidateBStateError` con contexto
+  (`entry_reference`, `stop_loss`, `direction`) antes de dividir por ella en R69 — fail-fast, spec
+  §8.
+- **R68** (DEBE). `take_profit` (no definido por el spec §2.3, que solo define stop; la salida
+  real del Candidato B es el cierre forzado de sesión, §3.7) DEBE calcularse como:
+
+  ```
+  take_profit = entry_reference + tp_rr_multiple * distancia_stop   si Direction.LONG
+  take_profit = entry_reference - tp_rr_multiple * distancia_stop   si Direction.SHORT
+  ```
+
+  con `tp_rr_multiple: float = 3.0` como parámetro **propio** de `CandidateB`
+  (`CandidateBConfig`), **no** derivado de `InspectorFunnelConfig.min_rr`
+  (`src/genesis/strategy/inspector.py:58-68`) — acoplar un candidato concreto al namespace
+  `inspector.*` violaría el espíritu de separación de namespaces de R16/R20 del delta-spec de C
+  (resuelve el riesgo 2 de `proposal.md`). `tp_rr_multiple` NO forma parte del grid IS del spec
+  §6.2 y este Change NO DEBE tratarlo como tal.
+  - **Ejemplo numérico** (regla primaria, `Direction.LONG`, `entry_reference=4506.2`,
+    `stop_loss=4498.0`, `tp_rr_multiple=3.0`): `distancia_stop = 8.2`;
+    `take_profit = 4506.2 + 3.0 * 8.2 = 4506.2 + 24.6 = 4530.8`.
+- **R69** (DEBE). El `sizing_hint` del `EntryIntent` (que el `Simulator` usa directamente como
+  **lotes**, no como fracción — `Simulator._floating_pnl`,
+  `src/genesis/backtest/simulator.py:332-336`: `points * position.sizing_hint *
+  figure.tick_value`) DEBE calcularse en el momento de la ruptura como:
+
+  ```
+  sizing_hint = (risk_pct * reference_balance) / (distancia_stop * figure.tick_value)
+  ```
+
+  usando el `figure`/`reference_balance` fijos del constructor (R53) — **nunca** el balance real
+  evolutivo de `Simulator.account.balance` (Decisión 5 de `proposal.md`, resuelve el riesgo 2 de
+  `idea.md`: sizing estático por diseño, no vol-targeting dinámico intra-run, coherente con la
+  fórmula normativa del spec §2.3 que no menciona reajuste por trade).
+  - **Ejemplo numérico** (`risk_pct=0.00375`, `reference_balance=100000.0`, `distancia_stop=8.2`,
+    `figure.tick_value=1.0`): `sizing_hint = (0.00375 * 100000.0) / (8.2 * 1.0) = 375.0 / 8.2 ≈
+    45.7317...` (float sin redondear).
+- **R70** (NO DEBE). `CandidateB` NO DEBE redondear `sizing_hint` a `figure.volume_step` ni
+  clampear contra `min_lot`/`max_lot`: esa validación es responsabilidad exclusiva del Inspector
+  (`InspectorFunnelConfig`, `RejectionReason.LOT_SIZE_OUT_OF_BOUNDS`,
+  `src/genesis/strategy/inspector.py:29-82`, ya cerrado por C) — `CandidateB` produce su mejor
+  estimación sin re-implementar esa lógica (Decisión 5 de `proposal.md`).
+- **R71** (DEBE). `risk_levels(intent)` DEBE retornar el par `(stop_loss, take_profit)` calculado
+  y guardado en `_pending_risk_levels` **durante el mismo `on_bar`** que emitió `intent` (asociación
+  síncrona por atributo mutable, sin necesitar identidad explícita en `EntryIntent` — el
+  `Simulator` invoca `on_bar` → `risk_levels` inmediatamente, sin bar intermedio,
+  `src/genesis/backtest/simulator.py:463-491`). Si `risk_levels` se invoca sin una señal pendiente
+  asociada (`_pending_risk_levels is None`, caso defensivo que no debería ocurrir dado el orden de
+  `_process_new_entries` de G), DEBE lanzar `CandidateBStateError` con contexto (resuelve el
+  riesgo 3 de `proposal.md`: se elige una excepción de dominio nueva, no un `AssertionError`
+  genérico, siguiendo el patrón de excepciones tipificadas con contexto ya establecido en todo el
+  repo — `LookaheadError`, `SessionBoundaryError`, `BacktestConfigError`).
+
+### 3.5. `config.py` — `CandidateBConfig` y namespace `candidates.B.*`
+
+**Requisitos**:
+
+- **R72** (DEBE). `config.py` DEBE definir `CandidateBConfig` como
+  `@dataclass(frozen=True, slots=True)` con exactamente los campos: `n_minutes: int`,
+  `atr_stop_frac: float | None`, `risk_pct: float`, `atr_period: int`, `tp_rr_multiple: float`.
+- **R73** (DEBE). `config.py` DEBE definir `load_candidate_b_config(path: Path | None = None) ->
+  CandidateBConfig` que lea `payload["candidates"]["B"]` del recurso `inspector_config.json`
+  (R49), replicando el patrón fail-fast de `load_inspector_funnel_config`
+  (`src/genesis/strategy/inspector.py:117-143`): lanza `CandidateBConfigError` con contexto
+  (campo faltante + fuente) si el JSON no tiene la clave `candidates.B` o algún campo es
+  inválido — nunca degradación silenciosa.
+- **R74** (DEBE). `src/genesis/strategy/inspector_config.json` DEBE extenderse aditivamente (sin
+  modificar `inspector.*`) con:
+
+  ```json
+  {
+    "inspector": { "min_rr": 2.0, "min_lot": 0.01, "max_lot": 50.0 },
+    "candidates": {
+      "B": {
+        "n_minutes": 15,
+        "atr_stop_frac": 1.0,
+        "risk_pct": 0.00375,
+        "atr_period": 14,
+        "tp_rr_multiple": 3.0
+      }
+    }
+  }
+  ```
+
+  como **un único** punto de referencia (coincidente con el punto medio de cada eje del grid
+  3×3×3 del spec §6.2), usado por `load_candidate_b_config()` para tests de
+  integración/smoke — **no** el espacio completo de 27 combinaciones (Decisión 7 de
+  `proposal.md`, resuelve la pregunta abierta 7 de `idea.md`: el diseño del muestreo IS completo
+  es responsabilidad de Issue H, spec §6.2 literal, no de este Change).
+- **R75** (DEBE). El constructor de `CandidateB` (R53) DEBE ser instanciable con cualquier punto
+  del grid del spec §6.2 (`n_minutes ∈ {5,15,30}`, `atr_stop_frac ∈ {0.5,1.0,1.5}`, `risk_pct ∈
+  {0.0025, 0.00375, 0.005}`) pasando los 3 parámetros directamente, sin depender de
+  `load_candidate_b_config()` — Issue H instancia `CandidateB` una vez por punto del grid, sin
+  reabrir este Change (resuelve Rg-6 de `idea.md`).
+
+### 3.6. Excepciones nuevas
+
+**Requisitos**:
+
+- **R76** (DEBE). `src/genesis/strategy/errors.py` (archivo **compartido** existente, no un
+  `errors.py` propio de `candidate_b/` — resuelve el riesgo 5 de `proposal.md`: no hay precedente
+  en el repo de excepciones scoped a un candidato concreto, y el patrón ya establecido de
+  `InspectorConfigError`/`DuplicateCandidateError` vive en el `errors.py` de la capa, no por
+  módulo) DEBE extenderse aditivamente con:
+  - `CandidateBConfigError(GenesisStrategyError)`: configuración de `candidates.B.*` inválida o
+    incompleta (R73).
+  - `CandidateBStateError(GenesisStrategyError)`: invariante interno violado —
+    `risk_levels()` invocado sin señal pendiente (R71), o `distancia_stop <= 0` (R67).
+- **R77** (DEBE). Ambas excepciones nuevas de R76 DEBEN llevar mensaje con contexto explícito
+  (campo/valor involucrado), heredando de `GenesisStrategyError` (fail-fast, spec §8, mismo
+  patrón que `LookaheadError`/`DuplicateCandidateError`/`InspectorConfigError` ya existentes).
+
+### 3.7. Cierre forzado de sesión — documentación de resolución ya cerrada por G
+
+**Requisitos**:
+
+- **R78** (NO DEBE). `CandidateB` NO DEBE implementar ningún mecanismo propio de cierre de
+  posición, ni emitir ningún `EntryIntent` ni señal equivalente de "cerrar" — el cierre forzado
+  proactivo al alcanzar `close_utc` de `session_window(symbol, trading_day)` y el guard
+  `SessionBoundaryError` (`Simulator._enforce_session_close_and_guard`,
+  `src/genesis/backtest/simulator.py:408-432`, ya cerrado por Issue G, agnóstico a
+  `candidate_id`) son responsabilidad **exclusiva** del `Simulator` (PA normativa 3 del issue
+  §11.1, ya resuelta de facto — este Change solo documenta la resolución, no diseña un mecanismo
+  nuevo).
+- **R79** (DEBE). El docstring de `CandidateB` DEBE citar explícitamente esta resolución (R78) y
+  referenciar `Simulator._enforce_session_close_and_guard` como el mecanismo real, para que un
+  futuro contribuidor no intente reabrir esta decisión dentro de `candidate_b/`.
+
+### 3.8. Testing (`tests/strategy/candidate_b/`)
+
+**Requisitos**:
+
+- **R80** (DEBE). `tests/strategy/candidate_b/` DEBE existir como paquete de test
+  (`__init__.py`), con `conftest.py`/`fakes.py`/`fixtures/` propios únicamente si se necesitan
+  helpers específicos de sesión sintética no cubiertos por `tests/strategy/fakes.py`
+  (`make_annotated_bar`) — sin duplicar los ya existentes.
+- **R81** (DEBE). Un test dedicado DEBE verificar
+  `isinstance(CandidateB(...), RiskLevelsProvider)` como **primer** test del Change (resuelve el
+  riesgo 1 de `idea.md`, patrón `tests/backtest/test_simulator_contract.py`).
+- **R82** (DEBE). `tests/strategy/candidate_b/` DEBE incluir tests unitarios, como mínimo, de:
+  construcción y congelamiento del rango (R57/R58), gatillo por dirección con los 3 casos de
+  R58 (ruptura válida, igualdad exacta al extremo, dentro del rango), tolerancia de doji (R56, los
+  2 casos numéricos del ejemplo), reset por `trading_day` (R55.1), ATR incremental con la tabla
+  golden calculada a mano de R63 (calentamiento + suavizado de Wilder), sizing (R69, ejemplo
+  numérico de R69), y `tp_rr_multiple` (R68, ejemplo numérico de R68).
+- **R83** (DEBE). `tests/strategy/candidate_b/` DEBE incluir al menos un test de propiedad
+  (`hypothesis`, `max_examples>=1000`, marcado `pytest.mark.unit`) que verifique, sobre `CandidateB`
+  real (no solo `FakeStrategyCandidate`): el invariante central del spec §9 — ningún output de
+  `on_bar(t)` cambia si se mutan/agregan barras con `timestamp_utc > t` — y la cita textual del
+  spec §9 "el rango de los primeros N minutos no cambia con barras posteriores", verificado
+  directamente sobre `_range_high`/`_range_low` congelados tras la ventana de formación (R57).
+- **R84** (DEBE). `tests/strategy/candidate_b/` DEBE incluir, como mínimo, 3 golden tests de
+  sesión sintética: `(a)` ruptura confirmada por cierre → exactamente un `EntryIntent`, con
+  `stop_loss`/`take_profit` coincidentes byte a byte con el ejemplo numérico de R66/R68; `(b)`
+  falsa ruptura intrabar (precio rompe el extremo dentro de una vela pero cierra dentro del
+  rango) → cero `EntryIntent` esa barra (ruptura confirmada por cierre, no intrabar, spec §2.3
+  literal); `(c)` doji exacto en la primera barra de la sesión (`abs(close-open) <= epsilon`,
+  R56) → cero `EntryIntent` en toda la sesión.
+- **R85** (DEBE). `tests/strategy/candidate_b/test_integration_simulator.py` (ubicación fijada
+  aquí — resuelve el riesgo 6 de `proposal.md`: vive en `tests/strategy/candidate_b/`, co-ubicado
+  con el resto de la suite del candidato, no en `tests/backtest/`; `tests/` es un árbol de
+  paquetes Python con `__init__.py` en cada subcarpeta, lo que permite reutilizar
+  `tests.backtest.fakes`/`tests.backtest.conftest` por import directo sin duplicar fixtures de
+  `RawParquetStore`/`FirmProfile`) DEBE, marcado `pytest.mark.integration`: `(a)` repetir el test
+  de R81 sobre una instancia real; `(b)` verificar que `Simulator(candidate=CandidateB(...),
+  symbol="US500", ...)` no lanza `BacktestConfigError` al construirse; `(c)` ejecutar
+  `Simulator.run(frame)` sobre un dataset sintético de al menos una sesión completa y verificar
+  que el `Ledger` resultante contiene al menos un `FillRecord` o `RejectionRecord` asociado a
+  `candidate_id="B"`.
+- **R86** (DEBE). `uv run pytest tests/strategy/candidate_b/ -v` DEBE pasar en verde (exit code 0).
+
+---
+
+## 4. Invariantes transversales
+
+- **R87** (DEBE). Ninguna instancia de `CandidateB` DEBE compartirse entre streams de más de un
+  símbolo del universo (US500/NAS100/US30/GER40): una instancia por `(candidato, símbolo)`, mismo
+  patrón que `Simulator` (R53) — `AnnotatedBar` no porta `symbol`
+  (`src/genesis/data/store.py:28-38`), así que el estado incremental de una instancia compartida
+  se corrompería silenciosamente entre símbolos si se entrelazaran streams.
+- **R88** (DEBE). Ningún output de `on_bar(t)` de `CandidateB` DEBE depender, directa o
+  indirectamente, de una `AnnotatedBar` con `timestamp_utc > t` (invariante forward-only, spec
+  §2.1, §8, §9) — verificado por R83.
+- **R89** (DEBE). `git diff --stat -- src/genesis/data src/genesis/backtest
+  src/genesis/strategy/contract.py src/genesis/strategy/inspector.py
+  src/genesis/strategy/clock.py` DEBE quedar vacío al cerrar este Change: la única modificación
+  fuera de `src/genesis/strategy/candidate_b/` permitida es la extensión aditiva de
+  `src/genesis/strategy/errors.py` (R76) y de `src/genesis/strategy/inspector_config.json` (R74).
+- **R90** (DEBE). `uv run mise run ci` (lint + `ty` + test) DEBE pasar en verde sobre
+  `src/genesis/strategy/candidate_b/` y `tests/strategy/candidate_b/` nuevos.
+
+---
+
+## 5. Manejo de errores (resumen normativo, spec §8)
+
+| Excepción | Módulo | Disparador | Efecto |
+|---|---|---|---|
+| `CandidateBConfigError` | `genesis.strategy.errors` | `load_candidate_b_config()` con `candidates.B.*` ausente o inválido en `inspector_config.json` | Aborta la carga de config antes de construir `CandidateB` desde el punto de referencia |
+| `CandidateBStateError` | `genesis.strategy.errors` | `risk_levels(intent)` invocado sin `_pending_risk_levels` asociado, o `distancia_stop <= 0` al calcular niveles de riesgo | Aborta el `_process_new_entries` del `Simulator` que la provocó (defensivo, no debería ocurrir en el flujo normal de G) |
+| (fuera de alcance, ya resuelto por G) `SessionBoundaryError` | `genesis.backtest.errors` | Posición del Candidato B viva tras el cierre proactivo de sesión | No se implementa en este Change; ver R78/R79 |
+| (fuera de alcance, ya resuelto por G) `BacktestConfigError` | `genesis.backtest.errors` | `CandidateB` no implementa `RiskLevelsProvider` (no debería ocurrir dado R52) | No se implementa en este Change |
+
+---
+
+## 6. Criterios de aceptación (evals ejecutables)
+
+```
+DADO   el archivo src/genesis/strategy/candidate_b/candidate.py
+CUANDO rg -n "class CandidateB" src/genesis/strategy/candidate_b/candidate.py
+ENTONCES retorna >=1 coincidencia, con @register_candidate("B") en la línea inmediatamente anterior
+```
+
+```
+DADO   el archivo src/genesis/strategy/candidate_b/candidate.py
+CUANDO rg -n "genesis.backtest" src/genesis/strategy/candidate_b/candidate.py
+ENTONCES retorna 0 coincidencias (R50: satisface RiskLevelsProvider por duck typing, sin importarlo)
+```
+
+```
+DADO   una instancia CandidateB(figure=..., reference_balance=100000.0, n_minutes=15, risk_pct=0.00375)
+CUANDO se evalúa isinstance(instancia, genesis.backtest.simulator.RiskLevelsProvider)
+ENTONCES retorna True (R52, primer test del Change)
+```
+
+```
+DADO   Simulator(candidate=CandidateB(...), symbol="US500", ...)
+CUANDO se construye el Simulator
+ENTONCES no se lanza BacktestConfigError (R85b)
+```
+
+```
+DADO   una sesión sintética con n_minutes=15, 15 barras in_session formando el rango
+       (_range_high=4505.0, _range_low=4498.0) y reference_direction=LONG
+CUANDO la barra 16.ª (_minute_index=15) cierra en bar.close=4506.2
+ENTONCES on_bar retorna exactamente un EntryIntent, y risk_levels(intent) retorna
+         stop_loss=4498.0, take_profit=4530.8 (regla primaria, tp_rr_multiple=3.0, R58/R66/R68)
+```
+
+```
+DADO   la misma sesión sintética, pero la barra 16.ª rompe intrabar (high > 4505.0)
+       y cierra dentro del rango (close=4503.0)
+CUANDO se invoca on_bar sobre esa barra
+ENTONCES retorna [] (ruptura confirmada por cierre, no intrabar, spec §2.3 literal)
+```
+
+```
+DADO   la primera AnnotatedBar in_session de una sesión con open=4500.00, close=4500.003,
+       figure.digits=2 (epsilon=0.005)
+CUANDO se invoca on_bar sobre esa barra
+ENTONCES _reference_direction permanece None (doji dentro de tolerancia, R56) y ninguna
+         señal se emite el resto de esa sesión
+```
+
+```
+DADO   14 barras in_session consecutivas con TR=10.0 cada una, seguidas de una 15.ª con TR=24.0
+       (atr_period=14)
+CUANDO se recalcula el estado ATR incremental de CandidateB tras cada barra
+ENTONCES _atr_value tras la 14.ª es 10.0 (media simple) y tras la 15.ª es 11.0
+         (suavizado de Wilder: ((10.0*13)+24.0)/14, R63)
+```
+
+```
+DADO   Direction.LONG, entry_reference=4506.2, stop_loss=4498.0, atr_stop_frac=None,
+       risk_pct=0.00375, reference_balance=100000.0, figure.tick_value=1.0
+CUANDO se invoca risk_levels(intent) tras el on_bar que emitió intent
+ENTONCES intent.sizing_hint == (0.00375 * 100000.0) / (8.2 * 1.0) (R69, sin redondear a volume_step, R70)
+```
+
+```
+DADO   una CandidateB con atr_stop_frac=1.0 y _atr_value=11.0 ya calentado
+CUANDO ocurre una ruptura LONG con _range_low=4498.0
+ENTONCES stop_loss = 4498.0 - 1.0 * 11.0 = 4487.0 (regla alternativa, R66)
+```
+
+```
+DADO   una CandidateB con atr_stop_frac=1.0 pero _atr_bars_seen < atr_period (ATR no calentado)
+CUANDO ocurre una ruptura
+ENTONCES stop_loss se calcula con la regla primaria (extremo opuesto del rango), no con ATR (R64)
+```
+
+```
+DADO   una secuencia de AnnotatedBar y una CandidateB real, determinista
+CUANDO se ejecuta on_bar(bar_t) y luego se mutan/agregan barras con timestamp_utc > bar_t.timestamp_utc,
+       re-ejecutando on_bar(bar_t) desde el mismo estado previo al punto t
+ENTONCES el resultado (list[EntryIntent]) de ambas ejecuciones es idéntico (>=1000 ejemplos hypothesis, R83)
+```
+
+```
+DADO   una CandidateB tras congelar su rango en una sesión sintética
+CUANDO se agregan barras posteriores a la ventana de formación con valores extremos de high/low
+ENTONCES _range_high/_range_low permanecen sin cambios (cita literal spec §9, R83)
+```
+
+```
+DADO   un EntryIntent ya emitido en un trading_day (self._signal_emitted_today == True)
+CUANDO llega una nueva barra ese mismo trading_day con precio que también rompería el rango
+ENTONCES on_bar retorna [] (máximo una señal por sesión/símbolo, R59)
+```
+
+```
+DADO   risk_levels(intent) invocado sin ninguna señal pendiente asociada
+CUANDO se ejecuta la llamada
+ENTONCES se lanza CandidateBStateError con contexto (R71, R76)
+```
+
+```
+DADO   el archivo src/genesis/strategy/inspector_config.json
+CUANDO rg -n "\"B\"" src/genesis/strategy/inspector_config.json
+ENTONCES retorna >=1 coincidencia bajo la clave "candidates" con los 5 campos n_minutes,
+         atr_stop_frac, risk_pct, atr_period, tp_rr_multiple (R74)
+```
+
+```
+DADO   el diff del commit que cierra este Change
+CUANDO git diff --stat -- src/genesis/data src/genesis/backtest src/genesis/strategy/contract.py
+       src/genesis/strategy/inspector.py src/genesis/strategy/clock.py
+ENTONCES no retorna ninguna línea (R89)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO uv run pytest tests/strategy/candidate_b/ -v
+ENTONCES pasa en verde (exit code 0, R86)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO uv run pytest tests/strategy/ tests/backtest/ -v
+ENTONCES pasa en verde (exit code 0, sin regresiones en las suites de C/G)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO uv run mise run ci
+ENTONCES lint + ty + test pasan en verde (exit code 0, R90)
+```
+
+---
+
+## 7. Riesgos
+
+| # | Riesgo | Impacto | Mitigación |
+|---|---|---|---|
+| Rg-1 | El acumulador ATR (R61-R64) es estado nuevo sin precedente exacto en el repo (VWAPState es el precedente más cercano, pero no calcula true range). | Bajo-medio: superficie de bug nueva si el suavizado de Wilder se implementa mal. | R63 fija la fórmula exacta con ejemplo numérico verificable byte a byte; R82 exige tabla golden calculada a mano. |
+| Rg-2 | El punto de referencia único en `candidates.B.*` (R74) podría no coincidir con el que Issue H eligiera como "punto medio" real del grid si H define el grid con otra convención (p. ej. escala log en `risk_pct`). | Bajo: solo afecta el default de smoke tests de este Change, no bloquea a H (R75 garantiza instanciación directa con cualquier punto). | Documentado explícitamente en R74 como un punto de referencia, no una imposición sobre el diseño de muestreo de H. |
+| Rg-3 | `epsilon` de doji (R56, medio tick) es una elección de este documento, no un valor cerrado por el spec §2.3 (que no menciona doji en absoluto). | Bajo: si en producción se observa que medio tick es demasiado estricto/laxo, requiere un Change de ajuste de parámetro, no de arquitectura. | `epsilon` se deriva de `figure.digits` (dato ya disponible, no hardcodeado), documentado con justificación explícita en R56. |
+| Rg-4 | El ATR nunca se resetea por día (R61); si el histórico de barras `in_session` de una instancia es muy corto (p. ej. un backtest de pocos días con `n_minutes` grande), el ATR puede tardar varios días en calentar. | Bajo: R64 ya cubre el fallback a la regla primaria mientras no está calentado — ninguna señal se bloquea por esto. | Documentado en R64; aceptado como comportamiento esperado de un estimador incremental "cold start". |
+| Rg-5 | La ubicación de `test_integration_simulator.py` bajo `tests/strategy/candidate_b/` (R85) importa fakes/fixtures de `tests.backtest` cruzando el árbol de paquetes de test; si en el futuro `tests/` deja de tener `__init__.py` por subcarpeta, este import se rompe. | Bajo: hoy `tests/{backtest,strategy,data}/__init__.py` existen y son parte del patrón ya establecido del repo. | Riesgo aceptado explícitamente; si el patrón de test cambia, es una decisión de infraestructura de testing fuera de alcance de este Change. |
+
+---
+
+## 8. Preguntas abiertas (no bloquean este Change)
+
+- Nombres exactos de los archivos de test dentro de `tests/strategy/candidate_b/` (más allá de
+  `test_integration_simulator.py`, fijado por R85): `design.md` puede proponer
+  `test_range.py`/`test_trigger.py`/`test_sizing.py`/`test_atr.py`/`test_forward_only_property.py`
+  u otra organización equivalente, siempre que cubra R82-R84.
+- Si Issue H, al instanciar el grid completo de 27 combinaciones, necesitará una función de
+  conveniencia adicional (p. ej. `iter_grid_points()`) en `candidate_b/config.py` — este Change
+  no la incluye (R75 solo garantiza instanciación directa); se decide en el `design.md`/`propose`
+  de Issue H si resulta necesaria.
+- Comportamiento exacto si `figure.digits` no está disponible o es `0` en un dataset real (caso
+  degenerado no observado en los datos de Issue B hasta la fecha) — no bloqueante, `epsilon`
+  degeneraría a `0.5` en ese caso, comportamiento aceptable pero no ejercitado por ningún golden
+  test de este Change.
+
+---
+
+## 9. Referencias
+
+- Issue: https://github.com/bbenja11/genesis/issues/8
+- `idea.md` / `proposal.md` de este Change (fases explore/propose) — 9 preguntas abiertas, 6
+  riesgos Rg-1..Rg-6, 10 decisiones y 6 riesgos delegados a specify, resueltos en este documento.
+- Spec vigente: `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md` — §2.1 (`EntryIntent`),
+  §2.3 (Candidato B, definición normativa completa, tabla de sesiones UTC), §2.x (universo
+  cerrado), §3 (arquitectura 4 capas), §5.1 (`candidate_b/`), §6.2 (grid IS, N_trials_IS=27, 9
+  configuraciones de señal sobre `atr_stop_frac`), §8 (manejo de errores), §9 (testing: propiedad
+  forward-only, invariante del rango, golden de sesión sintética), §11 (Issue E, camino crítico
+  A→B→C→{E,G}→H), §11.1 (las 3 PA normativas resueltas en R56/R58/R78-R79).
+- Delta-spec promovido de Issue C (cerrado): `.pulse/specs/strategy/spec.md` — R1-R7 (contrato),
+  R13-R21 (Inspector, namespace `candidates.<letra>.*`), R38-R42 (patrón de testing). Este
+  documento continúa la numeración en R48 sin colisión.
+- Delta-spec promovido de Issue G (cerrado): `.pulse/specs/backtest/spec.md` — R20-R24
+  (`RiskLevelsProvider`, requisito duro `isinstance`), R23/R24 (cierre forzado proactivo +
+  `SessionBoundaryError`).
+- Código de la capa de estrategia consumido (Issue C, cerrado): `src/genesis/strategy/contract.py`
+  (`StrategyCandidate`, `EntryIntent`, `Direction`, `CANDIDATE_REGISTRY`, `register_candidate`,
+  `CONFIG_VERSION`), `src/genesis/strategy/inspector.py:29-143` (`RejectionReason`,
+  `InspectorVerdict`, `InspectorFunnelConfig`, `inspect`, `load_inspector_funnel_config`),
+  `src/genesis/strategy/errors.py:1-27` (`GenesisStrategyError`, `LookaheadError`,
+  `DuplicateCandidateError`, `InspectorConfigError`).
+- Código de la capa de backtest consumido (Issue G, cerrado): `src/genesis/backtest/simulator.py`
+  (`RiskLevelsProvider:59-70`, `Simulator.__init__:213-280` — verificación `isinstance:229-235`,
+  `_compute_rr:188-200`, `_floating_pnl:332-336`, `_resolve_entry_fill:169-185`,
+  `_enforce_session_close_and_guard:408-432`, `_process_new_entries:463-491`,
+  `_open_position:493-547` — caso "vela única" línea 543), `src/genesis/backtest/errors.py:1-31`
+  (`GenesisBacktestError`, `SessionBoundaryError`, `BacktestConfigError`),
+  `tests/backtest/fakes.py::FakeRiskCandidate` (patrón de asociación `on_bar`→`risk_levels`
+  síncrona, replicado en R71).
+- Código de la capa de datos consumido (Issue B, cerrado): `src/genesis/data/sessions.py`
+  (`SessionSpec:15`, `SESSIONS:23-49`, `session_window:60-83`), `src/genesis/data/store.py`
+  (`AnnotatedBar:28-38` — `in_session:103`, `trading_day`), `src/genesis/data/symbols.py`
+  (`SymbolFigure:12-27` — `tick_value`, `digits`, `volume_step`).
+- Design + ADRs de Change C (archivado):
+  `.pulse/changes/archive/4-c-feat-strategy-contrato-plugin-inspector-compartido-componentes/design.md`.
+- Design + ADRs de Change G (archivado):
+  `.pulse/changes/archive/6-g-feat-backtest-simulador-equity-intrad-a-fills-por-ticks-cierre/design.md`
+  — ADR-G3 (`RiskLevelsProvider` requisito duro), ADR-G4 (breaches continuables vs
+  `SessionBoundaryError` fail-fast).
+- Tests de referencia (patrón a replicar): `tests/strategy/{conftest.py, fakes.py,
+  test_contract_lookahead_property.py}`, `tests/backtest/{fakes.py::FakeRiskCandidate,
+  test_simulator_session_close.py, test_simulator_fills.py, test_simulator_contract.py}`.
+- Reglas de proceso: `.agents/rules/architecture-conventions.md`,
+  `.agents/rules/eval-tdd-conventions.md`, `.agents/rules/tooling-conventions.md`.
+- `AGENTS.md` (raíz) — invariantes de código citados textualmente del spec.
+- `CLAUDE.md` (raíz) — arquitectura de 4 capas, comandos, flujo SDD.
