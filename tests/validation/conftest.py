@@ -2,11 +2,11 @@
 
 Reutiliza `load_firm_profile()`/`load_risk_profile()`/`load_costs_config()` y el
 `SymbolFigure` fake de `tests/data/fakes.py` (patrón `tests/backtest/conftest.py`);
-no duplica su construcción. Extensión Issue I (T2b, `design.md` §5.2): añade
-`wfa_result_fixture` (garantiza `n_windows >= 4`, precondición de CSCV, Rg-3) y
+no duplica su construcción. Extensión Issue I (`design.md` §5.2): añade
+`wfa_result_fixture` (garantiza `n_windows >= 4`, precondición de CSCV, Rg-3),
 `oos_ledger_fixture` (trades con horizonte conocido, golden de purga+embargo y
-anti-leakage). `trial_matrix_fixture` (`SignalTrialMatrix` sintético) se añade en
-`dsr_pbo.py`/T7, una vez existe esa clase (dependencia física, no de requisito).
+anti-leakage) y `trial_matrix_fixture` (`SignalTrialMatrix` sintético, sin re-run,
+para los tests puros de CSCV).
 """
 
 from datetime import UTC, datetime, timedelta
@@ -22,6 +22,7 @@ from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.inspector import InspectorFunnelConfig
+from genesis.validation.dsr_pbo import SignalTrialMatrix
 from genesis.validation.wfa import WfaResult, run_wfa
 from genesis.validation.window_config import WfaWindowConfig
 from tests.data.fakes import _default_symbol_figure
@@ -167,3 +168,27 @@ def oos_ledger_fixture() -> Ledger:
         for k in range(6)
     ]
     return build_ledger_with_trade_intervals(intervals)
+
+
+@pytest.fixture
+def trial_matrix_fixture() -> SignalTrialMatrix:
+    """`SignalTrialMatrix` sintético (3 configs x 4 ventanas), sin ningún re-run de backtest.
+
+    Usado por los tests puros de CSCV (`test_dsr_pbo.py`, R28/R48/R50a) — evita
+    backtests reales (Rg-2). Mismos valores que el golden de
+    `combinatorial_symmetric_cross_validation` (PBO calculado a mano, R50a).
+    """
+    config_a = (5, 0.5)
+    config_b = (15, 1.0)
+    config_c = (30, 1.5)
+    dsr_is_by_window = [
+        {config_a: 2.0, config_b: 1.0, config_c: 0.5},
+        {config_a: 1.8, config_b: 1.2, config_c: 0.6},
+        {config_a: 0.5, config_b: 2.0, config_c: 1.0},
+        {config_a: 0.6, config_b: 1.8, config_c: 1.2},
+    ]
+    return SignalTrialMatrix(
+        signal_configs=[config_a, config_b, config_c],
+        n_windows=4,
+        dsr_is_by_window=dsr_is_by_window,
+    )
