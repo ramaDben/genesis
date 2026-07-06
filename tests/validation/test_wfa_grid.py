@@ -205,3 +205,33 @@ def test_grid_config_personalizado_respeta_presupuesto() -> None:
     grid = GridConfig()
     assert len(grid.execution_combos()) == 27
     assert len(grid.signal_configs()) == 9
+
+
+def test_trials_ceiling(
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    symbol_figure_fixture: SymbolFigure,
+    funnel_config_fixture: InspectorFunnelConfig,
+    costs_config_fixture: CostsConfig,
+    tick_store_fixture: RawParquetStore,
+    reduced_window_config: WfaWindowConfig,
+    short_wfa_frame: pd.DataFrame,
+) -> None:
+    """R55: ninguna ventana ejecuta más de 27 combinaciones de ejecución ni más de 9
+    configuraciones de señal; los agregados del `WfaResult` son exactamente `N*27`/`N*9`.
+    """
+    result = _run(
+        short_wfa_frame,
+        firm_profile=firm_profile_fixture,
+        risk_profile=risk_profile_fixture,
+        symbol_figure=symbol_figure_fixture,
+        funnel_config=funnel_config_fixture,
+        costs_config=costs_config_fixture,
+        dataset_store=tick_store_fixture,
+        window_config=reduced_window_config,
+    )
+    for window in result.windows:
+        assert window.n_trials_execution <= 27
+        assert window.n_trials_signal <= 9
+    assert result.n_trials_execution_total == result.n_windows * 27
+    assert result.n_trials_signal_total == result.n_windows * 9
