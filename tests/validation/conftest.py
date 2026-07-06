@@ -2,22 +2,30 @@
 
 Reutiliza `load_firm_profile()`/`load_risk_profile()`/`load_costs_config()` y el
 `SymbolFigure` fake de `tests/data/fakes.py` (patrón `tests/backtest/conftest.py`);
-no duplica su construcción.
+no duplica su construcción. Extensión Issue I (T2b, `design.md` §5.2): añade
+`wfa_result_fixture` (garantiza `n_windows >= 4`, precondición de CSCV, Rg-3) y
+`oos_ledger_fixture` (trades con horizonte conocido, golden de purga+embargo y
+anti-leakage). `trial_matrix_fixture` (`SignalTrialMatrix` sintético) se añade en
+`dsr_pbo.py`/T7, una vez existe esa clase (dependencia física, no de requisito).
 """
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig, load_costs_config
+from genesis.backtest.ledger import Ledger
 from genesis.backtest.risk_profile import RiskProfile, load_risk_profile
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.inspector import InspectorFunnelConfig
+from genesis.validation.wfa import WfaResult, run_wfa
 from genesis.validation.window_config import WfaWindowConfig
 from tests.data.fakes import _default_symbol_figure
+from tests.validation.fixtures.ledgers import build_ledger_with_trade_intervals
 from tests.validation.fixtures.long_m1_generator import generate_long_m1_frame
 
 _BACKTEST_FIXTURES_DIR = Path(__file__).parent.parent / "backtest" / "fixtures"
@@ -84,3 +92,78 @@ def sample_m1_frame() -> pd.DataFrame:
 def short_wfa_frame() -> pd.DataFrame:
     """Frame M1 sintético de 10 días hábiles (`reduced_window_config` necesita >= 6)."""
     return generate_long_m1_frame("US500", n_trading_days=10, seed=1)
+
+
+@pytest.fixture
+def i_window_config() -> WfaWindowConfig:
+    """`WfaWindowConfig` reducido que, junto a `i_frame`, produce `n_windows >= 4`.
+
+    Precondición de CSCV (Rg-3, R2a): `S`/`n_splits` mínimo es `4`. Reutilizado por
+    `wfa_result_fixture` y por los tests de `build_signal_trial_matrix` (T8) que
+    necesitan reconstruir la misma geometría de ventanas sobre `i_frame`.
+    """
+    return WfaWindowConfig(is_window_trading_days=4, oos_window_trading_days=2, step_trading_days=2)
+
+
+@pytest.fixture
+def i_frame() -> pd.DataFrame:
+    """Frame M1 sintético de 14 días hábiles: produce `n_windows == 5` con `i_window_config`."""
+    return generate_long_m1_frame("US500", n_trading_days=14, seed=5)
+
+
+@pytest.fixture
+def wfa_result_fixture(
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    symbol_figure_fixture: SymbolFigure,
+    funnel_config_fixture: InspectorFunnelConfig,
+    costs_config_fixture: CostsConfig,
+    tick_store_fixture: RawParquetStore,
+    i_window_config: WfaWindowConfig,
+    i_frame: pd.DataFrame,
+) -> WfaResult:
+    """`WfaResult` con `n_windows >= 4` (precondición de CSCV, Rg-3), reutilizado por
+    `test_dsr_pbo.py`/`test_sensitivity.py`/los tests de integración de Issue I.
+    """
+    result = run_wfa(
+        "B",
+        "US500",
+        i_frame,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        symbol_figure_fixture,
+        funnel_config_fixture,
+        costs_config_fixture,
+        [],
+        tick_store_fixture,
+        None,
+        100_000.0,
+        window_config=i_window_config,
+        seed=42,
+    )
+    assert result.n_windows >= 4, (
+        f"wfa_result_fixture produjo n_windows={result.n_windows}, se requiere >= 4 "
+        "(precondición de CSCV, Rg-3)."
+    )
+    return result
+
+
+@pytest.fixture
+def oos_ledger_fixture() -> Ledger:
+    """`Ledger` OOS con 6 trades de 1 día, consecutivos, sin solape entre sí (Issue I).
+
+    Horizonte conocido de antemano (usado por `test_purged_cv.py` para el golden de
+    purga+embargo, R50b, y como base de la propiedad anti-leakage, R20/R47):
+    trade `k` va de `día_k 08:00 UTC` a `día_k 20:00 UTC`, `k = 0..5`, `pnl_delta`
+    alternante `+10.0`/`-5.0`.
+    """
+    base_day = datetime(2024, 1, 1, tzinfo=UTC)
+    intervals = [
+        (
+            base_day + timedelta(days=k, hours=8),
+            base_day + timedelta(days=k, hours=20),
+            10.0 if k % 2 == 0 else -5.0,
+        )
+        for k in range(6)
+    ]
+    return build_ledger_with_trade_intervals(intervals)

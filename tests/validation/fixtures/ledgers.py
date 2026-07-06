@@ -3,7 +3,10 @@
 Usados por los tests de `_extract_exit_returns` (T5) y de `montecarlo.py` (T9/T10):
 producen ledgers cuyo delta de `equity_after` por trade de salida es conocido de
 antemano por el propio test (input/output concreto), sin pasar por el `Simulator`
-real.
+real. `build_ledger_with_trade_intervals` (Issue I) amplía el patrón con
+`entry_timestamp`/`exit_timestamp` explícitos por trade, necesarios para los
+tests de purga por solapamiento de horizonte de `purged_cv.py` (López de Prado,
+*AFML* cap. 7).
 """
 
 from collections.abc import Sequence
@@ -93,6 +96,52 @@ def build_empty_ledger(*, symbol: str = "US500") -> Ledger:
     """`Ledger` sin ninguna entrada (provenance válida, `entries=[]`)."""
     del symbol
     return Ledger(provenance=_TEST_PROVENANCE, entries=[])
+
+
+def build_ledger_with_trade_intervals(
+    intervals: Sequence[tuple[datetime, datetime, float]],
+    *,
+    symbol: str = "US500",
+    starting_equity: float = 100_000.0,
+) -> Ledger:
+    """`Ledger` con un par entrada/salida por cada `(entry_timestamp, exit_timestamp, delta)`.
+
+    A diferencia de `build_ledger` (timestamps secuenciales arbitrarios de 1 minuto),
+    aquí el llamador fija el horizonte exacto de cada trade — usado por los tests de
+    purga por solapamiento de horizonte + embargo de `purged_cv.py` (Issue I, R15,
+    R20/R47, R50b). Los `intervals` se insertan en el orden dado (mismo patrón de
+    pareado secuencial que `extract_trade_returns`, sin exigir orden cronológico de
+    inserción).
+    """
+    ledger = Ledger(provenance=_TEST_PROVENANCE, entries=[])
+    equity = starting_equity
+    for entry_timestamp, exit_timestamp, delta in intervals:
+        ledger.append(
+            FillRecord(
+                candidate_id="B",
+                symbol=symbol,
+                timestamp_utc=entry_timestamp,
+                price=100.0,
+                direction=Direction.LONG,
+                is_exit=False,
+                cost_applied=0.0,
+                equity_after=equity,
+            )
+        )
+        equity += delta
+        ledger.append(
+            FillRecord(
+                candidate_id="B",
+                symbol=symbol,
+                timestamp_utc=exit_timestamp,
+                price=100.0,
+                direction=Direction.LONG,
+                is_exit=True,
+                cost_applied=0.0,
+                equity_after=equity,
+            )
+        )
+    return ledger
 
 
 def build_ledger_with_daily_trades(
