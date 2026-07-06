@@ -6,8 +6,11 @@ from genesis.backtest.errors import GenesisBacktestError
 from genesis.data.errors import GenesisDataError
 from genesis.strategy.errors import GenesisStrategyError
 from genesis.validation.errors import (
+    DsrPboConfigError,
     GenesisValidationError,
     MonteCarloConfigError,
+    PurgedCvConfigError,
+    SensitivityConfigError,
     WfaConfigError,
 )
 
@@ -43,4 +46,34 @@ def test_mensaje_con_contexto_se_conserva_en_str_wfa() -> None:
 def test_mensaje_con_contexto_se_conserva_en_str_montecarlo() -> None:
     contexto = "candidate_id=B symbol=US500 n_paths=-1"
     err = MonteCarloConfigError(f"Configuración inválida: {contexto}")
+    assert contexto in str(err)
+
+
+def test_purged_cv_config_error_hereda_de_genesis_validation_error() -> None:
+    assert issubclass(PurgedCvConfigError, GenesisValidationError) is True
+
+
+def test_dsr_pbo_config_error_hereda_de_genesis_validation_error() -> None:
+    assert issubclass(DsrPboConfigError, GenesisValidationError) is True
+
+
+def test_sensitivity_config_error_hereda_de_genesis_validation_error() -> None:
+    assert issubclass(SensitivityConfigError, GenesisValidationError) is True
+
+
+def test_mensaje_con_contexto_se_conserva_en_str_purged_cv() -> None:
+    contexto = "candidate_id=B symbol=US500 fold_index=2 n_folds=5"
+    err = PurgedCvConfigError(f"Configuración inválida: {contexto}")
+    assert contexto in str(err)
+
+
+def test_mensaje_con_contexto_se_conserva_en_str_dsr_pbo() -> None:
+    contexto = "candidate_id=B symbol=US500 n_windows=3"
+    err = DsrPboConfigError(f"Configuración inválida: {contexto}")
+    assert contexto in str(err)
+
+
+def test_mensaje_con_contexto_se_conserva_en_str_sensitivity() -> None:
+    contexto = "candidate_id=B symbol=US500 axis=risk_pct"
+    err = SensitivityConfigError(f"Configuración inválida: {contexto}")
     assert contexto in str(err)
