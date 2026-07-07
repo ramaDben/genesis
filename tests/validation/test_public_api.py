@@ -1,4 +1,4 @@
-"""Tests de la API pública re-exportada por `genesis.validation.__init__` (R14, R65)."""
+"""Tests de la API pública re-exportada por `genesis.validation.__init__` (R14, R60, R65)."""
 
 import pytest
 
@@ -21,6 +21,24 @@ _EXPECTED_ALL = {
     "monte_carlo_symbol",
     "run_wfa",
     "window_identity_hash",
+    # Issue I (R60, ADR-I5): Purged K-Fold + DSR/PBO + sensibilidad.
+    "CostStressOutcome",
+    "CscvResult",
+    "DsrPboConfigError",
+    "DsrPboResult",
+    "PerturbationOutcome",
+    "PurgedCvConfig",
+    "PurgedCvConfigError",
+    "PurgedCvResult",
+    "PurgedFold",
+    "SensitivityConfig",
+    "SensitivityConfigError",
+    "SensitivityResult",
+    "SignalTrialMatrix",
+    "build_signal_trial_matrix",
+    "run_dsr_pbo",
+    "run_purged_cv",
+    "run_sensitivity",
 }
 
 
@@ -58,3 +76,35 @@ def test_importa_todos_los_simbolos_publicos_normativos_sin_error() -> None:
         run_wfa,
         window_identity_hash,
     )
+
+
+def test_importa_la_superficie_publica_de_issue_i_sin_error() -> None:
+    """R60 (ADR-I5): `build_signal_trial_matrix`/`SignalTrialMatrix` públicos."""
+    from genesis.validation import (  # noqa: F401
+        CostStressOutcome,
+        CscvResult,
+        DsrPboConfigError,
+        DsrPboResult,
+        PerturbationOutcome,
+        PurgedCvConfig,
+        PurgedCvConfigError,
+        PurgedCvResult,
+        PurgedFold,
+        SensitivityConfig,
+        SensitivityConfigError,
+        SensitivityResult,
+        SignalTrialMatrix,
+        build_signal_trial_matrix,
+        run_dsr_pbo,
+        run_purged_cv,
+        run_sensitivity,
+    )
+
+
+def test_detalles_internos_de_issue_i_no_se_reexportan() -> None:
+    """R10/ADR-I5: `_returns`/`_windowing`/`deflated_sharpe_ratio_gate`/CSCV interno ausentes."""
+    assert "extract_trade_returns" not in validation_pkg.__all__
+    assert "TradeReturn" not in validation_pkg.__all__
+    assert "deflated_sharpe_ratio_gate" not in validation_pkg.__all__
+    assert "combinatorial_symmetric_cross_validation" not in validation_pkg.__all__
+    assert not hasattr(validation_pkg, "deflated_sharpe_ratio_gate")

@@ -39,3 +39,32 @@ class MonteCarloConfigError(GenesisValidationError):
     Disparadores normativos: `n_paths <= 0`, `block_size <= 0` (cuando se fija
     explícitamente), o un `Ledger`/mapa de ledgers sin ningún trade OOS extraíble.
     """
+
+
+class PurgedCvConfigError(GenesisValidationError):
+    """Configuración o partición inválida del Purged K-Fold con embargo (Issue I, R1).
+
+    Disparadores normativos: `(a)` `n_folds < 2`; `(b)` `embargo_days < 0`; `(c)`
+    cualquier fold de test o de train que quede vacío tras purga + embargo; `(d)`
+    `oos_ledger` con menos trades OOS que `n_folds` (imposible construir folds no
+    vacíos).
+    """
+
+
+class DsrPboConfigError(GenesisValidationError):
+    """Configuración o geometría inválida del DSR de gate y del PBO vía CSCV (Issue I, R2).
+
+    Disparadores normativos: `(a)` `n_windows < 4` (techo mínimo de CSCV); `(b)`
+    todas las configuraciones de señal de todas las ventanas de la matriz de trials
+    quedan por debajo de `MIN_TRADES_IS`; `(c)` `n_splits` de CSCV no par o mayor que
+    `n_windows`.
+    """
+
+
+class SensitivityConfigError(GenesisValidationError):
+    """Configuración inválida de la perturbación de sensibilidad ±10% (Issue I, R3).
+
+    Disparadores normativos: `(a)` `WfaResult.windows` vacío; `(b)`
+    `cost_stress_multipliers` con algún valor `<= 1.0`; `(c)`
+    `cliff_relative_drop_threshold` fuera de `(0.0, 1.0]` o `cliff_pf_floor <= 0.0`.
+    """
