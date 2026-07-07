@@ -15,10 +15,24 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+import pandas as pd
+
+from genesis.backtest.costs import CostsConfig
+from genesis.backtest.ledger import Ledger
+from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.simulator import Simulator
+from genesis.data.calendar import EconomicEvent
+from genesis.data.mt5_export import RawParquetStore
+from genesis.data.profile import FirmProfile
+from genesis.data.symbols import SymbolFigure
+from genesis.strategy.candidate_b.candidate import CandidateB
+from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation._dsr import deflated_sharpe_ratio
 from genesis.validation._returns import extract_trade_returns
+from genesis.validation._windowing import iter_is_oos_bounds, plan_trading_days, slice_frame_by_days
 from genesis.validation.errors import DsrPboConfigError
 from genesis.validation.wfa import WfaResult
+from genesis.validation.window_config import GridConfig, WfaWindowConfig
 
 CONFIG_VERSION: str = "genesis-validation-i/1"
 """Versión del esquema de configuración de este Change (Issue I, decisión 10 §3)."""
@@ -33,6 +47,10 @@ _MIN_CSCV_SPLITS = 4
 """Techo mínimo de `S`/`n_splits` de CSCV (decisión 4 §3, R2a/R28): con historias
 WFA de pocas ventanas, `C(4, 2) = 6` combinaciones es la resolución mínima
 aceptable."""
+
+_N_TRIALS_SIGNAL_PER_WINDOW = 9
+"""`n_trials` del DSR-IS agregado por ventana en `build_signal_trial_matrix` (R26):
+mismo criterio mecánico que `wfa._N_TRIALS_SIGNAL`, redeclarado localmente."""
 
 _CSCV_OMEGA_EPSILON = 1e-6
 """Recorte de `ω` a `[ε, 1-ε]` (R29d) para evitar división por cero en los
@@ -190,4 +208,193 @@ def combinatorial_symmetric_cross_validation(
         n_splits=resolved_splits,
         n_combinations=n_combinations,
         logit_by_combination=logits,
+    )
+
+
+def _run_combo(
+    combo: tuple[int, float, float],
+    *,
+    frame: pd.DataFrame,
+    symbol: str,
+    firm_profile: FirmProfile,
+    risk_profile: RiskProfile,
+    figure: SymbolFigure,
+    funnel_config: InspectorFunnelConfig,
+    costs_config: CostsConfig,
+    news_events: Sequence[EconomicEvent],
+    tick_store: RawParquetStore | None,
+    starting_balance: float,
+    dataset_hash: str,
+) -> Ledger:
+    """Instancia un candidato/motor de simulación **nuevos** para `combo` y corre `frame` (R26).
+
+    Reimplementación local (no importa `wfa._run_execution_combo`, R25): mismo
+    patrón de kwargs directos que H, sin depender de ningún cargador de
+    configuración de perfil.
+    """
+    n_minutes, atr_stop_frac, risk_pct = combo
+    candidate = CandidateB(
+        figure=figure,
+        reference_balance=starting_balance,
+        n_minutes=n_minutes,
+        atr_stop_frac=atr_stop_frac,
+        risk_pct=risk_pct,
+    )
+    simulator = Simulator(
+        candidate,
+        symbol=symbol,
+        firm_profile=firm_profile,
+        risk_profile=risk_profile,
+        figure=figure,
+        funnel_config=funnel_config,
+        costs_config=costs_config,
+        news_events=news_events,
+        tick_store=tick_store,
+        starting_balance=starting_balance,
+        dataset_hash=dataset_hash,
+    )
+    return simulator.run(frame)
+
+
+def build_signal_trial_matrix(
+    candidate_id: str,
+    symbol: str,
+    frame: pd.DataFrame,
+    firm_profile: FirmProfile,
+    risk_profile: RiskProfile,
+    figure: SymbolFigure,
+    funnel_config: InspectorFunnelConfig,
+    costs_config: CostsConfig,
+    news_events: Sequence[EconomicEvent],
+    dataset_store: RawParquetStore,
+    tick_store: RawParquetStore | None,
+    starting_balance: float,
+    window_config: WfaWindowConfig | None = None,
+    grid_config: GridConfig | None = None,
+) -> SignalTrialMatrix:
+    """Reconstruye, de forma independiente, el DSR-IS de las 9 configs x N ventanas (R24-R27).
+
+    Reproduce la misma geometría IS/OOS que `wfa.py` (vía `_windowing`, sin
+    importar símbolos privados de `wfa.py`, R25). Para cada ventana y cada
+    configuración de señal (`grid_config.signal_configs()`), instancia
+    candidato/motor de simulación **nuevos** (R26) sobre el tramo IS para las 3
+    combinaciones de `risk_pct_levels`, agrega los trades IS extraídos y calcula
+    el DSR-IS agregado (`n_trials=9`) o `-inf` si agrega menos de
+    `MIN_TRADES_IS` (R34) — sin abortar la construcción completa a menos que
+    **todas** las configuraciones de **todas** las ventanas caigan en ese caso
+    (R2b). Único uso deliberado de trades **IS** en este Change (R57): reconstruye
+    la métrica de selección IS del WFA, nunca sustituye al OOS del DSR/PF
+    normativos de los gates. Loop puramente secuencial (R63), sin ninguna forma
+    de paralelismo de hilos ni procesos.
+    """
+    resolved_window_config = window_config if window_config is not None else WfaWindowConfig()
+    resolved_grid_config = grid_config if grid_config is not None else GridConfig()
+
+    days, row_span = plan_trading_days(frame, symbol, firm_profile)
+    bounds = list(iter_is_oos_bounds(len(days), resolved_window_config))
+    if len(bounds) < _MIN_CSCV_SPLITS:
+        message = (
+            f"candidate_id={candidate_id!r} symbol={symbol!r}: n_windows={len(bounds)!r} "
+            f"insuficiente para CSCV, se requiere >= {_MIN_CSCV_SPLITS!r} (R2a)."
+        )
+        raise DsrPboConfigError(message)
+
+    signal_configs = resolved_grid_config.signal_configs()
+    dsr_is_by_window: list[dict[tuple[int, float], float]] = []
+    for _window_index, is_start, is_end, _oos_end in bounds:
+        frame_is = slice_frame_by_days(frame, row_span, days[is_start:is_end])
+        dataset_hash_is = dataset_store.chunk_hash(frame_is)
+
+        dsr_by_config: dict[tuple[int, float], float] = {}
+        for n_minutes, atr_stop_frac in signal_configs:
+            aggregated_returns: list[float] = []
+            for risk_pct in resolved_grid_config.risk_pct_levels:
+                ledger_is = _run_combo(
+                    (n_minutes, atr_stop_frac, risk_pct),
+                    frame=frame_is,
+                    symbol=symbol,
+                    firm_profile=firm_profile,
+                    risk_profile=risk_profile,
+                    figure=figure,
+                    funnel_config=funnel_config,
+                    costs_config=costs_config,
+                    news_events=news_events,
+                    tick_store=tick_store,
+                    starting_balance=starting_balance,
+                    dataset_hash=dataset_hash_is,
+                )
+                aggregated_returns.extend(
+                    trade.pnl_delta for trade in extract_trade_returns(ledger_is)
+                )
+            dsr_by_config[(n_minutes, atr_stop_frac)] = (
+                float("-inf")
+                if len(aggregated_returns) < MIN_TRADES_IS
+                else deflated_sharpe_ratio(aggregated_returns, n_trials=_N_TRIALS_SIGNAL_PER_WINDOW)
+            )
+        dsr_is_by_window.append(dsr_by_config)
+
+    if all(value == float("-inf") for window in dsr_is_by_window for value in window.values()):
+        message = (
+            f"candidate_id={candidate_id!r} symbol={symbol!r}: las {len(signal_configs)!r} "
+            f"configuraciones de señal de las {len(bounds)!r} ventanas quedaron por debajo de "
+            f"MIN_TRADES_IS={MIN_TRADES_IS!r} (R2b/R34)."
+        )
+        raise DsrPboConfigError(message)
+
+    return SignalTrialMatrix(
+        signal_configs=signal_configs,
+        n_windows=len(bounds),
+        dsr_is_by_window=dsr_is_by_window,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DsrPboResult:
+    """Resultado congelado del DSR de gate + PBO vía CSCV para `(candidate_id, symbol)` (R32).
+
+    Ningún campo evalúa el umbral G4 (`>= 0.95`) ni G5 (`< 25%`) contra un
+    booleano de pasa/no-pasa (R33): solo produce los números; la comparación
+    contra el umbral es responsabilidad de `verdict.py` (Issue J).
+    """
+
+    candidate_id: str
+    symbol: str
+    config_version: str
+    dsr: float
+    n_trials_signal_total: int
+    pbo: float
+    cscv: CscvResult
+
+
+def run_dsr_pbo(
+    wfa_result: WfaResult,
+    trial_matrix: SignalTrialMatrix,
+    n_splits: int | None = None,
+) -> DsrPboResult:
+    """Compone `deflated_sharpe_ratio_gate` + `combinatorial_symmetric_cross_validation` (R32-R33).
+
+    `wfa_result` y `trial_matrix` son insumos independientes (el DSR de gate se
+    calcula sobre el `oos_ledger_cosido` de `wfa_result`; el PBO, sobre
+    `trial_matrix`) — no se exige que compartan el mismo `n_windows`. Si
+    `wfa_result.n_windows < 4`, `DsrPboConfigError` (R2a, coherente con la guarda
+    de `build_signal_trial_matrix`).
+    """
+    if wfa_result.n_windows < _MIN_CSCV_SPLITS:
+        message = (
+            f"candidate_id={wfa_result.candidate_id!r} symbol={wfa_result.symbol!r}: "
+            f"n_windows={wfa_result.n_windows!r} insuficiente para CSCV, se requiere >= "
+            f"{_MIN_CSCV_SPLITS!r} (R2a)."
+        )
+        raise DsrPboConfigError(message)
+
+    dsr = deflated_sharpe_ratio_gate(wfa_result)
+    cscv = combinatorial_symmetric_cross_validation(trial_matrix, n_splits)
+    return DsrPboResult(
+        candidate_id=wfa_result.candidate_id,
+        symbol=wfa_result.symbol,
+        config_version=CONFIG_VERSION,
+        dsr=dsr,
+        n_trials_signal_total=wfa_result.n_trials_signal_total,
+        pbo=cscv.pbo,
+        cscv=cscv,
     )

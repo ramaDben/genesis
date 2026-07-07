@@ -1,21 +1,34 @@
 """Tests de `dsr_pbo.py`: DSR de gate (G4) y PBO vía CSCV (G5), R21-R35, R48, R50-R51."""
 
+import math
+
 import numpy as np
+import pandas as pd
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import genesis.validation.dsr_pbo as dsr_pbo_module
+from genesis.backtest.costs import CostsConfig
 from genesis.backtest.ledger import Ledger, RunProvenance
+from genesis.backtest.risk_profile import RiskProfile
+from genesis.data.mt5_export import RawParquetStore
+from genesis.data.profile import FirmProfile
+from genesis.data.symbols import SymbolFigure
+from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation.dsr_pbo import (
     MIN_TRADES_IS,
     CscvResult,
+    DsrPboResult,
     SignalTrialMatrix,
+    build_signal_trial_matrix,
     combinatorial_symmetric_cross_validation,
     deflated_sharpe_ratio_gate,
+    run_dsr_pbo,
 )
 from genesis.validation.errors import DsrPboConfigError
 from genesis.validation.wfa import WfaResult
+from genesis.validation.window_config import GridConfig, WfaWindowConfig
 from tests.validation.fixtures.ledgers import build_ledger
 
 _PROVENANCE = RunProvenance(
@@ -194,3 +207,205 @@ def test_pbo_order_invariant(n_windows: int, n_configs: int, seed: int) -> None:
     result_shuffled = combinatorial_symmetric_cross_validation(shuffled_matrix)
 
     assert result_original.pbo == result_shuffled.pbo
+
+
+def test_build_signal_trial_matrix_no_importa_privados_de_wfa() -> None:
+    """R25: `dsr_pbo.py` no importa ningún símbolo con prefijo `_` de `wfa.py`."""
+    with open(dsr_pbo_module.__file__, encoding="utf-8") as handle:
+        content = handle.read()
+    assert "from genesis.validation.wfa import _" not in content
+    assert "from .wfa import _" not in content
+
+
+def test_build_signal_trial_matrix_no_usa_load_candidate_b_config() -> None:
+    """R26: kwargs directos, sin `load_candidate_b_config`."""
+    with open(dsr_pbo_module.__file__, encoding="utf-8") as handle:
+        content = handle.read()
+    assert "load_candidate_b_config" not in content
+
+
+def test_build_signal_trial_matrix_sin_paralelismo() -> None:
+    """R63: loop secuencial, sin `multiprocessing`/`concurrent.futures`."""
+    with open(dsr_pbo_module.__file__, encoding="utf-8") as handle:
+        content = handle.read()
+    assert "multiprocessing" not in content
+    assert "concurrent.futures" not in content
+
+
+@pytest.mark.unit
+def test_build_signal_trial_matrix_few_windows_raises(
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    symbol_figure_fixture: SymbolFigure,
+    funnel_config_fixture: InspectorFunnelConfig,
+    costs_config_fixture: CostsConfig,
+    tick_store_fixture: RawParquetStore,
+    reduced_window_config: WfaWindowConfig,
+    short_wfa_frame: pd.DataFrame,
+) -> None:
+    """R2a: `n_windows < 4` (aquí 3, `short_wfa_frame`+`reduced_window_config`) -> error
+    antes de intentar ningún backtest."""
+    with pytest.raises(DsrPboConfigError):
+        build_signal_trial_matrix(
+            "B",
+            "US500",
+            short_wfa_frame,
+            firm_profile_fixture,
+            risk_profile_fixture,
+            symbol_figure_fixture,
+            funnel_config_fixture,
+            costs_config_fixture,
+            [],
+            tick_store_fixture,
+            None,
+            100_000.0,
+            window_config=reduced_window_config,
+        )
+
+
+def test_run_dsr_pbo_few_windows_raises(trial_matrix_fixture: SignalTrialMatrix) -> None:
+    """R2a: `wfa_result.n_windows < 4` -> `DsrPboConfigError` antes de CSCV."""
+    ledger = build_ledger([10.0, -5.0, 8.0])
+    wfa_result = _build_synthetic_wfa_result(n_windows=3, oos_ledger=ledger)
+    with pytest.raises(DsrPboConfigError):
+        run_dsr_pbo(wfa_result, trial_matrix_fixture)
+
+
+@pytest.mark.unit
+def test_trial_matrix_min_trades(
+    monkeypatch: pytest.MonkeyPatch,
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    symbol_figure_fixture: SymbolFigure,
+    funnel_config_fixture: InspectorFunnelConfig,
+    costs_config_fixture: CostsConfig,
+    tick_store_fixture: RawParquetStore,
+    i_window_config: WfaWindowConfig,
+    i_frame: pd.DataFrame,
+) -> None:
+    """R34: config de señal con < MIN_TRADES_IS trades IS -> `-inf`, sin abortar la matriz."""
+
+    def _fake_run_combo(combo, **_kwargs):  # type: ignore[no-untyped-def]
+        n_minutes = combo[0]
+        n_trades = 3 if n_minutes == 5 else 4  # 3*3=9 < MIN_TRADES_IS=10; 4*3=12 >= 10
+        return build_ledger([1.0] * n_trades)
+
+    monkeypatch.setattr(dsr_pbo_module, "_run_combo", _fake_run_combo)
+
+    matrix = build_signal_trial_matrix(
+        "B",
+        "US500",
+        i_frame,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        symbol_figure_fixture,
+        funnel_config_fixture,
+        costs_config_fixture,
+        [],
+        tick_store_fixture,
+        None,
+        100_000.0,
+        window_config=i_window_config,
+        grid_config=GridConfig(),
+    )
+
+    for window_map in matrix.dsr_is_by_window:
+        for signal_config, dsr in window_map.items():
+            n_minutes, _atr_stop_frac = signal_config
+            if n_minutes == 5:
+                assert dsr == float("-inf")
+            else:
+                assert math.isfinite(dsr)
+
+
+@pytest.mark.unit
+def test_trial_matrix_todas_inf_lanza_dsr_pbo_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    symbol_figure_fixture: SymbolFigure,
+    funnel_config_fixture: InspectorFunnelConfig,
+    costs_config_fixture: CostsConfig,
+    tick_store_fixture: RawParquetStore,
+    i_window_config: WfaWindowConfig,
+    i_frame: pd.DataFrame,
+) -> None:
+    """R2b/R34: todas las configs de todas las ventanas bajo `MIN_TRADES_IS` -> error."""
+
+    def _fake_run_combo(combo, **_kwargs):  # type: ignore[no-untyped-def]
+        del combo
+        return build_ledger([1.0])  # 1*3=3 < MIN_TRADES_IS=10 siempre
+
+    monkeypatch.setattr(dsr_pbo_module, "_run_combo", _fake_run_combo)
+
+    with pytest.raises(DsrPboConfigError):
+        build_signal_trial_matrix(
+            "B",
+            "US500",
+            i_frame,
+            firm_profile_fixture,
+            risk_profile_fixture,
+            symbol_figure_fixture,
+            funnel_config_fixture,
+            costs_config_fixture,
+            [],
+            tick_store_fixture,
+            None,
+            100_000.0,
+            window_config=i_window_config,
+            grid_config=GridConfig(),
+        )
+
+
+@pytest.mark.integration
+def test_build_signal_trial_matrix_real_pequeno(
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    symbol_figure_fixture: SymbolFigure,
+    funnel_config_fixture: InspectorFunnelConfig,
+    costs_config_fixture: CostsConfig,
+    tick_store_fixture: RawParquetStore,
+    i_window_config: WfaWindowConfig,
+    i_frame: pd.DataFrame,
+) -> None:
+    """R24-R27: integración real (sin mocks) sobre un grid reducido, en segundos."""
+    small_grid = GridConfig(n_minutes_levels=(5, 15), atr_stop_frac_levels=(0.5, 1.0))
+    matrix = build_signal_trial_matrix(
+        "B",
+        "US500",
+        i_frame,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        symbol_figure_fixture,
+        funnel_config_fixture,
+        costs_config_fixture,
+        [],
+        tick_store_fixture,
+        None,
+        100_000.0,
+        window_config=i_window_config,
+        grid_config=small_grid,
+    )
+
+    assert matrix.n_windows == 5
+    assert set(matrix.signal_configs) == set(small_grid.signal_configs())
+    assert len(matrix.dsr_is_by_window) == 5
+    for window_map in matrix.dsr_is_by_window:
+        assert set(window_map) == set(small_grid.signal_configs())
+
+
+def test_run_dsr_pbo_shape(
+    wfa_result_fixture: WfaResult, trial_matrix_fixture: SignalTrialMatrix
+) -> None:
+    """R32-R33: `DsrPboResult` con `dsr`/`pbo` finitos; ningún campo booleano de pasa/no-pasa."""
+    result = run_dsr_pbo(wfa_result_fixture, trial_matrix_fixture)
+
+    assert isinstance(result, DsrPboResult)
+    assert result.candidate_id == wfa_result_fixture.candidate_id
+    assert result.symbol == wfa_result_fixture.symbol
+    assert result.n_trials_signal_total == wfa_result_fixture.n_trials_signal_total
+    assert math.isfinite(result.dsr)
+    assert math.isfinite(result.pbo)
+    assert isinstance(result.cscv, CscvResult)
+    for field_value in (result.dsr, result.n_trials_signal_total, result.pbo):
+        assert not isinstance(field_value, bool)
