@@ -16,15 +16,26 @@ memoria.
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
+from genesis.backtest.ledger import FillRecord, Ledger
 from genesis.validation.errors import PropSimConfigError
 
 _CONFIG_PACKAGE = "genesis.validation"
 _CONFIG_RESOURCE = "prop_economics_the5ers.json"
+
+_MIN_BLOCK_SIZE = 5
+_MAX_BLOCK_SIZE = 60
+"""Cota del tamaño de bloque del bootstrap circular (R18), mismos valores que
+`montecarlo._MIN_BLOCK_SIZE`/`_MAX_BLOCK_SIZE` (`montecarlo.py:27-28`), reimplementados
+localmente sin importar el módulo (ADR-J2/J10, R16)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,3 +209,123 @@ Base de `VerdictResult.economics_confirmed` (`verdict.py`, B4): `True` solo si e
 llamador de `run_verdict` pasó una `PropEconomicsProfile` con un hash distinto de
 este (es decir, una ficha confirmada, no el placeholder de fábrica).
 """
+
+
+def _clip(value: int, low: int, high: int) -> int:
+    return max(low, min(high, value))
+
+
+def _default_block_size(n_days: int) -> int:
+    """`clip(round(n_days ** (1/3)), 5, 60)` (R18), misma fórmula que en `montecarlo.py`."""
+    return _clip(round(n_days ** (1.0 / 3.0)), _MIN_BLOCK_SIZE, _MAX_BLOCK_SIZE)
+
+
+def _extract_exit_deltas_by_day(ledger: Ledger) -> list[tuple[date, float]]:
+    """Deltas de `equity_after` de los `FillRecord` de salida, etiquetados por `trading_day`.
+
+    Proxy `payload.timestamp_utc.date()` (ADR-H8), reimplementado localmente sin
+    importar `montecarlo._extract_exit_returns_by_day` (R16, mismo criterio de
+    aislamiento entre Changes que ADR-H5/ADR-I1).
+    """
+    deltas_by_day: list[tuple[date, float]] = []
+    previous_equity: float | None = None
+    for entry in ledger.entries:
+        payload = entry.payload
+        if isinstance(payload, FillRecord):
+            if previous_equity is not None and payload.is_exit:
+                trading_day = payload.timestamp_utc.date()
+                deltas_by_day.append((trading_day, payload.equity_after - previous_equity))
+            previous_equity = payload.equity_after
+    return deltas_by_day
+
+
+def _build_daily_basket(
+    oos_ledgers_by_symbol: Mapping[str, Ledger],
+) -> tuple[list[date], dict[date, float]]:
+    """Canasta diaria de P&L, sumada across símbolos por `trading_day` (R15).
+
+    A diferencia de `montecarlo._build_basket` (que retiene `(symbol, delta)` por
+    día), aquí se colapsa directamente a un total por día: los gates P de
+    `verdict.py` operan a nivel de cuenta, sin distinguir símbolo (R15). Compartida
+    entre `prop_sim.py` y `verdict.py` dentro del Change (ADR-J10): única fuente de
+    la canasta diaria, evita divergencia entre T1/T2 y `run_prop_sim` (Rg-5).
+    """
+    daily_totals: dict[date, float] = {}
+    for ledger in oos_ledgers_by_symbol.values():
+        for trading_day, delta in _extract_exit_deltas_by_day(ledger):
+            daily_totals[trading_day] = daily_totals.get(trading_day, 0.0) + delta
+    basket_days = sorted(daily_totals)
+    return basket_days, daily_totals
+
+
+def _resample_daily_pnl_path(
+    basket_days: Sequence[date],
+    daily_totals: Mapping[date, float],
+    block_size: int,
+    rng: np.random.Generator,
+    *,
+    target_len: int,
+) -> np.ndarray:
+    """Moving-block bootstrap circular sobre `basket_days`, `target_len` valores exactos (R20).
+
+    Reimplementación local del criterio de `montecarlo._resample_day_sequence`
+    (`montecarlo.py:305-325`, ADR-J2): bloques contiguos de `block_size` días,
+    envueltos circularmente sobre `basket_days`, con reposición entre bloques.
+    """
+    n = len(basket_days)
+    n_blocks_needed = -(-target_len // block_size)  # ceil division
+    starts = rng.integers(0, n, size=n_blocks_needed)
+    values: list[float] = []
+    for start in starts:
+        for offset in range(block_size):
+            day = basket_days[(start + offset) % n]
+            values.append(daily_totals[day])
+    return np.array(values[:target_len], dtype=float)
+
+
+@dataclass(frozen=True, slots=True)
+class PropSimConfig:
+    """Configuración de `simulate_challenge_paths`/`run_prop_sim` (R21).
+
+    `path_horizon_trading_days=750 >= 12*21=252` por defecto: holgura para
+    múltiples reinicios de intento antes de fondear (spec §1.3). `seed` es
+    requerido, sin default, e **independiente** del `seed` de
+    `monte_carlo_portfolio` (R19, decisión 9 §3).
+    """
+
+    n_paths: int
+    seed: int
+    max_attempts: int = 10
+    horizon_months: int = 12
+    trading_days_per_month: int = 21
+    path_horizon_trading_days: int = 750
+    block_size: int | None = None
+
+    def __post_init__(self) -> None:
+        """Valida la configuración, fail-fast vía `PropSimConfigError` (R21)."""
+        if self.n_paths <= 0:
+            message = f"PropSimConfig.n_paths={self.n_paths!r} debe ser > 0 (R21)."
+            raise PropSimConfigError(message)
+        if self.max_attempts < 1:
+            message = f"PropSimConfig.max_attempts={self.max_attempts!r} debe ser >= 1 (R21)."
+            raise PropSimConfigError(message)
+        if self.horizon_months < 1:
+            message = f"PropSimConfig.horizon_months={self.horizon_months!r} debe ser >= 1 (R21)."
+            raise PropSimConfigError(message)
+        if self.trading_days_per_month < 1:
+            message = (
+                f"PropSimConfig.trading_days_per_month={self.trading_days_per_month!r} "
+                "debe ser >= 1 (R21)."
+            )
+            raise PropSimConfigError(message)
+        required_horizon = self.horizon_months * self.trading_days_per_month
+        if self.path_horizon_trading_days < required_horizon:
+            message = (
+                f"PropSimConfig.path_horizon_trading_days={self.path_horizon_trading_days!r} "
+                f"insuficiente: debe ser >= horizon_months*trading_days_per_month="
+                f"{required_horizon!r} (R21)."
+            )
+            raise PropSimConfigError(message)
+        if self.block_size is not None and self.block_size <= 0:
+            message = f"PropSimConfig.block_size={self.block_size!r} debe ser None o > 0 (R21)."
+            raise PropSimConfigError(message)
