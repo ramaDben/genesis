@@ -1,24 +1,39 @@
 """Tests de `verdict.py`: bundle, gates G/C/P/T1/T2, veredicto, tearsheet/manifest (R57-R113)."""
 
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 import genesis.validation.verdict as verdict_module
-from genesis.backtest.ledger import BreachEvent, BreachKind, Ledger, RunProvenance
+from genesis.backtest.ledger import BreachEvent, BreachKind, FillRecord, Ledger, RunProvenance
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
+from genesis.data.profile import FirmProfile
+from genesis.strategy.contract import Direction
 from genesis.validation._dsr import deflated_sharpe_ratio as real_dsr
 from genesis.validation.dsr_pbo import CscvResult, DsrPboResult
 from genesis.validation.errors import VerdictConfigError
 from genesis.validation.montecarlo import McPathsResult, McPortfolioResult, McSymbolResult
-from genesis.validation.prop_sim import PropSimResult
+from genesis.validation.prop_sim import (
+    PhaseSpec,
+    PropEconomicsProfile,
+    PropSimConfig,
+    PropSimResult,
+    load_prop_economics_profile,
+)
 from genesis.validation.sensitivity import CostStressOutcome, PerturbationOutcome, SensitivityResult
 from genesis.validation.verdict import (
     CandidateValidationBundle,
+    VerdictKind,
     _build_symbol_gate_outcome,
     _compute_t1,
+    _compute_t2,
+    _pairwise_correlation,
     build_candidate_gate_summary,
+    run_verdict,
 )
 from genesis.validation.wfa import WfaResult
 from tests.validation.fixtures.ledgers import build_ledger, build_ledger_with_daily_trades
@@ -173,10 +188,10 @@ def _bundle(
     *,
     candidate_id: str = "A",
     symbols: tuple[str, ...] = ("US500",),
-    wfa_by_symbol: dict | None = None,
-    dsr_pbo_by_symbol: dict | None = None,
-    sensitivity_by_symbol: dict | None = None,
-    mc_symbol_by_symbol: dict | None = None,
+    wfa_by_symbol: Mapping[str, WfaResult] | None = None,
+    dsr_pbo_by_symbol: Mapping[str, DsrPboResult] | None = None,
+    sensitivity_by_symbol: Mapping[str, SensitivityResult] | None = None,
+    mc_symbol_by_symbol: Mapping[str, McSymbolResult] | None = None,
     prop_sim_result: PropSimResult | None = None,
 ) -> CandidateValidationBundle:
     return CandidateValidationBundle(
@@ -596,3 +611,496 @@ def test_t1_dsr_invoca_dsr_con_n_trials_deflactado(monkeypatch: pytest.MonkeyPat
 
     assert t1.n_trials_deflactado in calls
     assert 1 in calls  # t1_dsr_pre_deflation invoca con n_trials=1
+
+
+# --- B3: T2 (ensemble por correlación + vol-inversa, R79-R90) ---
+
+_FAST_ENSEMBLE_CONFIG = PropSimConfig(
+    n_paths=20, seed=555, horizon_months=1, trading_days_per_month=5, path_horizon_trading_days=30
+)
+
+
+_TRADES_PER_DAY = 100
+"""Suficientes trades/día (x4 días >= 300) para que G1 pase trivialmente (R64)."""
+
+
+def _daily_ledger(daily_values: list, *, symbol: str = "US500") -> Ledger:
+    """Ledger con `_TRADES_PER_DAY` trades por día, sumando exactamente `daily_values[día]`.
+
+    Distribuye cada total diario en muchos trades pequeños (en vez de 1 solo trade
+    por día) para que `G1` (>=300 trades OOS) pase trivialmente sin alterar el total
+    diario usado por `_build_daily_basket` (suma por día, R15).
+    """
+    base_day = date(2024, 1, 1)
+    ledger = Ledger(provenance=_TEST_PROVENANCE, entries=[])
+    equity = _STARTING_BALANCE
+    for day_index, total in enumerate(daily_values):
+        per_trade = float(total) / _TRADES_PER_DAY
+        day = base_day + timedelta(days=day_index)
+        for trade_index in range(_TRADES_PER_DAY):
+            entry_time = datetime(day.year, day.month, day.day, 8, 0, tzinfo=UTC) + timedelta(
+                seconds=trade_index * 2
+            )
+            exit_time = entry_time + timedelta(seconds=1)
+            ledger.append(
+                FillRecord(
+                    candidate_id="A",
+                    symbol=symbol,
+                    timestamp_utc=entry_time,
+                    price=100.0,
+                    direction=Direction.LONG,
+                    is_exit=False,
+                    cost_applied=0.0,
+                    equity_after=equity,
+                )
+            )
+            equity += per_trade
+            ledger.append(
+                FillRecord(
+                    candidate_id="A",
+                    symbol=symbol,
+                    timestamp_utc=exit_time,
+                    price=100.0,
+                    direction=Direction.LONG,
+                    is_exit=True,
+                    cost_applied=0.0,
+                    equity_after=equity,
+                )
+            )
+    return ledger
+
+
+def _candidate_with_daily_series(
+    candidate_id: str, daily_values: list
+) -> CandidateValidationBundle:
+    ledger = _daily_ledger(daily_values)
+    return _bundle(candidate_id=candidate_id, wfa_by_symbol={"US500": _wfa_result(ledger=ledger)})
+
+
+# Series con PF>=1.3 individualmente (gate G3) y correlación baja entre sí (<0.3, R80);
+# encontradas por búsqueda numérica (no analíticas): profit_factor(_LOW_CORR_A)~=3.95,
+# profit_factor(_LOW_CORR_B)~=1.32, corrcoef~=0.016.
+_LOW_CORR_A = [
+    54.558419206478604,
+    102.16181435011583,
+    53.043707618338715,
+    -110.31572316043608,
+    110.53558666731178,
+    64.63745723640113,
+    -33.69532353602852,
+    78.1118104196353,
+    56.457239618607574,
+    49.4132496655526,
+]
+_LOW_CORR_B = [
+    22.84222413157968,
+    74.67129866124469,
+    -53.6454087001667,
+    3.7090052006947225,
+    -28.211931267997826,
+    79.88462126346275,
+    23.9722107481659,
+    -9.245675096508862,
+    -58.190846235684205,
+    -5.7192240618870684,
+]
+
+
+def test_pairwise_correlation_simetria() -> None:
+    bundle_a = _candidate_with_daily_series("A", _LOW_CORR_A)
+    bundle_b = _candidate_with_daily_series("B", _LOW_CORR_B)
+
+    corr_ab = _pairwise_correlation(bundle_a, bundle_b)
+    corr_ba = _pairwise_correlation(bundle_b, bundle_a)
+
+    assert corr_ab == pytest.approx(corr_ba)
+
+
+def test_pairwise_correlation_menos_de_2_dias_comunes_lanza() -> None:
+    bundle_a = _candidate_with_daily_series("A", [10.0])
+    bundle_b = _candidate_with_daily_series(
+        "B", [20.0]
+    )  # 1 solo día común (mismo trading_day base)
+    with pytest.raises(VerdictConfigError):
+        _pairwise_correlation(bundle_a, bundle_b)
+
+
+def test_t2_elegible_par_baja_correlacion(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {
+        "A": _candidate_with_daily_series("A", _LOW_CORR_A),
+        "B": _candidate_with_daily_series("B", _LOW_CORR_B),
+    }
+    summaries = {
+        cid: build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+        for cid, bundle in candidates.items()
+    }
+
+    ensemble = _compute_t2(
+        candidates,
+        summaries,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert ensemble is not None
+    assert set(ensemble.member_candidate_ids) == {"A", "B"}
+    assert sum(ensemble.weights.values()) == pytest.approx(1.0)
+
+
+def test_t2_no_elegible_par_alta_correlacion(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {
+        "A": _candidate_with_daily_series("A", _LOW_CORR_A),
+        "B": _candidate_with_daily_series("B", _LOW_CORR_A),  # idéntica -> correlación 1.0
+    }
+    summaries = {
+        cid: build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+        for cid, bundle in candidates.items()
+    }
+
+    ensemble = _compute_t2(
+        candidates,
+        summaries,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert ensemble is None
+
+
+def test_t2_ningun_candidato_pasa_g_c_p_retorna_none(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {
+        "A": _bundle(candidate_id="A", prop_sim_result=_prop_sim_result(p_pass=0.1)),
+        "B": _bundle(candidate_id="B", prop_sim_result=_prop_sim_result(p_pass=0.1)),
+    }
+    summaries = {
+        cid: build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+        for cid, bundle in candidates.items()
+    }
+
+    ensemble = _compute_t2(
+        candidates,
+        summaries,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert ensemble is None
+
+
+@given(order=st.permutations(["A", "B"]))
+@settings(
+    max_examples=5, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+def test_t2_order_invariant(
+    order: tuple,
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+) -> None:
+    """R87: permutar el orden de inserción de `candidates` no cambia `weights`."""
+    base_candidates = {
+        "A": _candidate_with_daily_series("A", _LOW_CORR_A),
+        "B": _candidate_with_daily_series("B", _LOW_CORR_B),
+    }
+    reordered_candidates = {cid: base_candidates[cid] for cid in order}
+    summaries = {
+        cid: build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+        for cid, bundle in reordered_candidates.items()
+    }
+
+    ensemble = _compute_t2(
+        reordered_candidates,
+        summaries,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert ensemble is not None
+    reference_std_a = np.std(np.array(_LOW_CORR_A))
+    reference_std_b = np.std(np.array(_LOW_CORR_B))
+    inv_a, inv_b = 1.0 / reference_std_a, 1.0 / reference_std_b
+    expected_weight_a = inv_a / (inv_a + inv_b)
+    expected_weight_b = inv_b / (inv_a + inv_b)
+    assert ensemble.weights["A"] == pytest.approx(expected_weight_a)
+    assert ensemble.weights["B"] == pytest.approx(expected_weight_b)
+
+
+# --- B4: veredicto de torneo (R91-R95bis) ---
+
+
+def _strong_daily_series(seed: int, n: int = 20) -> list:
+    """Serie diaria positiva de alto Sharpe (DSR robusto a deflación, seeds documentales)."""
+    rng = np.random.default_rng(seed)
+    return rng.normal(50.0, 8.0, size=n).tolist()
+
+
+def _go_quality_bundle(candidate_id: str, seed: int) -> CandidateValidationBundle:
+    """Candidato con G/C/P completamente en verde y T1 robusto (DSR alto, R91 rama GO)."""
+    ledger = _daily_ledger(_strong_daily_series(seed))
+    return _bundle(candidate_id=candidate_id, wfa_by_symbol={"US500": _wfa_result(ledger=ledger)})
+
+
+def _bad_bundle(candidate_id: str) -> CandidateValidationBundle:
+    """Candidato que falla todos los gates G/C/P (R91 rama NO_GO)."""
+    return _bundle(
+        candidate_id=candidate_id,
+        wfa_by_symbol={"US500": _wfa_result(wfe=0.01, ledger=build_ledger([-1.0] * 400))},
+        dsr_pbo_by_symbol={"US500": _dsr_pbo_result(dsr=0.1, pbo=0.9)},
+        prop_sim_result=_prop_sim_result(p_pass=0.01, median_funded_survival_months=0.5),
+    )
+
+
+def _partial_bundle(candidate_id: str, seed: int) -> CandidateValidationBundle:
+    """Candidato con `0 < c1_fraction_passing < 0.60` y P1-P6+T1 válidos (R92 rama GO_PARCIAL).
+
+    3 símbolos comparten el mismo ledger de alto Sharpe (T1 robusto); solo `US500`
+    pasa G2 (`wfe`), `NAS100`/`US30` fallan G2 deliberadamente -> `c1_fraction_passing
+    == 1/3`.
+    """
+    ledger = _daily_ledger(_strong_daily_series(seed))
+    return _bundle(
+        candidate_id=candidate_id,
+        symbols=("US500", "NAS100", "US30"),
+        wfa_by_symbol={
+            "US500": _wfa_result(symbol="US500", wfe=0.6, ledger=ledger),
+            "NAS100": _wfa_result(symbol="NAS100", wfe=0.1, ledger=ledger),
+            "US30": _wfa_result(symbol="US30", wfe=0.1, ledger=ledger),
+        },
+    )
+
+
+def test_verdict_kind_tiene_exactamente_4_miembros() -> None:
+    assert len(VerdictKind) == 4
+    assert {member.value for member in VerdictKind} == {"go", "go-ensemble", "go-parcial", "no-go"}
+
+
+def test_verdict_rama_go(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {"A": _go_quality_bundle("A", seed=3)}
+
+    result = run_verdict(
+        candidates,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert result.verdict is VerdictKind.GO
+    assert result.winning_candidate_id == "A"
+    assert result.t1_dsr is not None
+    assert result.t1_dsr >= 0.95
+
+
+def test_verdict_rama_no_go(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {"A": _bad_bundle("A")}
+
+    result = run_verdict(
+        candidates,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert result.verdict is VerdictKind.NO_GO
+    assert result.winning_candidate_id is None
+    assert result.t1_dsr is None
+    assert result.ensemble is None
+
+
+def test_verdict_rama_go_parcial(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {"A": _partial_bundle("A", seed=3)}
+
+    result = run_verdict(
+        candidates,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert result.verdict is VerdictKind.GO_PARCIAL
+    assert result.winning_candidate_id == "A"
+    assert result.candidate_summaries["A"].c1_pass is False
+    assert 0.0 < result.candidate_summaries["A"].c1_fraction_passing < 0.60
+
+
+def _tiny_target_profile() -> PropEconomicsProfile:
+    """Ficha con objetivo casi nulo: fondea casi de inmediato a cualquier escala de $ (test)."""
+    return PropEconomicsProfile(
+        name="TinyTarget",
+        phases=(
+            PhaseSpec(
+                profit_target_pct=0.01,
+                min_profitable_days=1,
+                min_profit_per_day_pct=0.0001,
+                max_calendar_days=None,
+            ),
+        ),
+        challenge_cost_pct_of_balance=0.0,
+        profit_split_pct=80.0,
+        payout_cycle_days=2,
+        max_lots=None,
+        max_positions=None,
+        consistency_rule_pct=None,
+    )
+
+
+_GO_ENSEMBLE_CONFIG = PropSimConfig(
+    n_paths=20, seed=777, horizon_months=6, trading_days_per_month=5, path_horizon_trading_days=60
+)
+
+
+def test_verdict_rama_go_ensemble(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {
+        "A": _candidate_with_daily_series("A", _LOW_CORR_A),
+        "B": _candidate_with_daily_series("B", _LOW_CORR_B),
+    }
+
+    result = run_verdict(
+        candidates,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _tiny_target_profile(),
+        _GO_ENSEMBLE_CONFIG,
+    )
+
+    assert result.verdict is VerdictKind.GO_ENSEMBLE
+    assert result.ensemble is not None
+    assert result.ensemble.passes_p_gates is True
+
+
+def test_verdict_candidates_vacio_lanza(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    with pytest.raises(VerdictConfigError):
+        run_verdict(
+            {},
+            _STARTING_BALANCE,
+            firm_profile_fixture,
+            risk_profile_fixture,
+            load_prop_economics_profile(),
+            _FAST_ENSEMBLE_CONFIG,
+        )
+
+
+def test_verdict_starting_balance_no_positivo_lanza(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {"A": _go_quality_bundle("A", seed=3)}
+    with pytest.raises(VerdictConfigError):
+        run_verdict(
+            candidates,
+            0.0,
+            firm_profile_fixture,
+            risk_profile_fixture,
+            load_prop_economics_profile(),
+            _FAST_ENSEMBLE_CONFIG,
+        )
+
+
+def test_verdict_determinismo(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    candidates = {"A": _go_quality_bundle("A", seed=3), "B": _go_quality_bundle("B", seed=4)}
+
+    result1 = run_verdict(
+        candidates,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+    result2 = run_verdict(
+        candidates,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert result1.verdict == result2.verdict
+    assert result1.winning_candidate_id == result2.winning_candidate_id
+    assert result1.t1_dsr == result2.t1_dsr
+    assert result1.n_trials_deflactado == result2.n_trials_deflactado
+
+
+@given(order=st.permutations(["A", "B", "C"]))
+@settings(
+    max_examples=6, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+def test_verdict_order_invariance(
+    order: tuple,
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+) -> None:
+    """R94/R95bis: permutar el orden de `candidates` no cambia `verdict`/`winning_candidate_id`."""
+    base_candidates = {
+        "A": _go_quality_bundle("A", seed=3),
+        "B": _go_quality_bundle("B", seed=4),
+        "C": _bad_bundle("C"),
+    }
+    reordered = {cid: base_candidates[cid] for cid in order}
+
+    result = run_verdict(
+        reordered,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    assert result.verdict is VerdictKind.GO
+    assert result.winning_candidate_id == "A"  # mayor payout_p25_12m (empate) -> lexicográfico
+
+
+def test_verdict_monotonia_degradar_dsr_nunca_mejora_passes_g_c_p(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    """R111: bajar `dsr` de un candidato pasante nunca mejora su `passes_g_c_p` (solo empeora)."""
+    bundle = _go_quality_bundle("A", seed=3)
+    summary_before = build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+    assert summary_before.passes_g_c_p is True
+
+    degraded_bundle = _bundle(
+        candidate_id="A",
+        wfa_by_symbol=bundle.wfa_results_by_symbol,
+        dsr_pbo_by_symbol={"US500": _dsr_pbo_result(dsr=0.1, pbo=0.1)},
+    )
+    summary_after = build_candidate_gate_summary(
+        degraded_bundle, risk_profile_fixture, _STARTING_BALANCE
+    )
+
+    assert summary_after.passes_g_c_p is False

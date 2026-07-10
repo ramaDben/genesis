@@ -11,18 +11,32 @@ contra los umbrales normativos, declarados como constantes de módulo nombradas
 comparación.
 """
 
-from collections.abc import Mapping
+import itertools
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
+from enum import StrEnum
+
+import numpy as np
 
 from genesis.backtest.ledger import BreachEvent, BreachKind
 from genesis.backtest.metrics import profit_factor
 from genesis.backtest.risk_profile import RiskProfile
+from genesis.data.profile import FirmProfile
 from genesis.validation._dsr import deflated_sharpe_ratio
 from genesis.validation._returns import extract_trade_returns
 from genesis.validation.dsr_pbo import DsrPboResult
 from genesis.validation.errors import VerdictConfigError
 from genesis.validation.montecarlo import McPortfolioResult, McSymbolResult
-from genesis.validation.prop_sim import PropSimResult, _build_daily_basket
+from genesis.validation.prop_sim import (
+    _DEFAULT_PROFILE_HASH,
+    PropEconomicsProfile,
+    PropSimConfig,
+    PropSimResult,
+    _build_daily_basket,
+    prop_economics_profile_hash,
+    simulate_challenge_paths,
+)
 from genesis.validation.purged_cv import PurgedCvResult
 from genesis.validation.sensitivity import SensitivityResult
 from genesis.validation.wfa import WfaResult
@@ -230,6 +244,21 @@ class CandidateGateSummary:
     passes_g_c_p: bool
 
 
+def _evaluate_p1_to_p5(prop_sim_result: PropSimResult) -> tuple[bool, bool, bool, bool, bool]:
+    """`(p1_pass, p2_pass, p3_pass, p4_pass, p5_pass)` contra las constantes `_P1..5` (R70).
+
+    Compartido por `build_candidate_gate_summary` (candidato aislado) y `_compute_t2`
+    (ensemble, R70): mismo criterio de umbrales para ambos, sin duplicar la
+    comparación.
+    """
+    p1_pass = prop_sim_result.p_pass >= _P1_MIN_PASS
+    p2_pass = prop_sim_result.expected_attempts <= _P2_MAX_ATTEMPTS
+    p3_pass = prop_sim_result.p_daily_breach_funded_month <= _P3_MAX_DAILY_BREACH
+    p4_pass = prop_sim_result.median_funded_survival_months >= _P4_MIN_SURVIVAL_MONTHS
+    p5_pass = prop_sim_result.payout_p25_12m >= _P5_MIN_PAYOUT
+    return p1_pass, p2_pass, p3_pass, p4_pass, p5_pass
+
+
 def _p6_violating_symbols(
     wfa_results_by_symbol: Mapping[str, WfaResult],
 ) -> dict[str, tuple[BreachKind, ...]]:
@@ -276,12 +305,7 @@ def build_candidate_gate_summary(
     c2_min_pf_non_passing = min(non_passing_pf) if non_passing_pf else float("inf")
     c2_pass = c2_min_pf_non_passing >= _C2_MIN_PF
 
-    prop_sim_result = bundle.prop_sim_result
-    p1_pass = prop_sim_result.p_pass >= _P1_MIN_PASS
-    p2_pass = prop_sim_result.expected_attempts <= _P2_MAX_ATTEMPTS
-    p3_pass = prop_sim_result.p_daily_breach_funded_month <= _P3_MAX_DAILY_BREACH
-    p4_pass = prop_sim_result.median_funded_survival_months >= _P4_MIN_SURVIVAL_MONTHS
-    p5_pass = prop_sim_result.payout_p25_12m >= _P5_MIN_PAYOUT
+    p1_pass, p2_pass, p3_pass, p4_pass, p5_pass = _evaluate_p1_to_p5(bundle.prop_sim_result)
 
     p6_violating = _p6_violating_symbols(bundle.wfa_results_by_symbol)
     p6_pass = not p6_violating
@@ -412,4 +436,359 @@ def _compute_t1(
         t1_dsr_pre_deflation=t1_dsr_pre_deflation,
         t1_dsr=t1_dsr,
         t1_pass=t1_pass,
+    )
+
+
+def _candidate_daily_basket(
+    bundle: CandidateValidationBundle,
+) -> tuple[list[date], dict[date, float]]:
+    """Canasta diaria combinada de `bundle` (compartida con `prop_sim.py`, ADR-J10, R73)."""
+    oos_ledgers_by_symbol = {
+        symbol: wfa_result.oos_ledger_cosido
+        for symbol, wfa_result in bundle.wfa_results_by_symbol.items()
+    }
+    return _build_daily_basket(oos_ledgers_by_symbol)
+
+
+def _pairwise_correlation(
+    bundle_a: CandidateValidationBundle, bundle_b: CandidateValidationBundle
+) -> float:
+    """Correlación de Pearson (`numpy.corrcoef`) entre las canastas de dos candidatos (R79/R88).
+
+    Restringida a la **intersección** de `trading_day`s; `VerdictConfigError` si
+    quedan `<2` días comunes (R2d/R79). Simétrica por construcción (R88):
+    `corrcoef` es simétrico y la intersección de conjuntos no depende del orden.
+    """
+    _days_a, totals_a = _candidate_daily_basket(bundle_a)
+    _days_b, totals_b = _candidate_daily_basket(bundle_b)
+    common_days = sorted(set(totals_a) & set(totals_b))
+    if len(common_days) < 2:
+        message = (
+            f"_pairwise_correlation(candidate_id={bundle_a.candidate_id!r}, "
+            f"{bundle_b.candidate_id!r}): intersección de trading_day con "
+            f"{len(common_days)} días, se requieren >= 2 (R2d/R79)."
+        )
+        raise VerdictConfigError(message)
+
+    values_a = np.array([totals_a[day] for day in common_days], dtype=float)
+    values_b = np.array([totals_b[day] for day in common_days], dtype=float)
+    return float(np.corrcoef(values_a, values_b)[0, 1])
+
+
+def _pair_key(candidate_id_a: str, candidate_id_b: str) -> tuple[str, str]:
+    """Clave canónica (orden alfabético) para un par de `candidate_id` (R88)."""
+    return (
+        (candidate_id_a, candidate_id_b)
+        if candidate_id_a < candidate_id_b
+        else (
+            candidate_id_b,
+            candidate_id_a,
+        )
+    )
+
+
+def _max_mutually_eligible_subset(
+    candidate_ids: Sequence[str], correlations: Mapping[tuple[str, str], float]
+) -> tuple[str, ...]:
+    """Subconjunto máximo mutuamente elegible dos a dos (correlación `< 0.3`, R80/ADR-J7).
+
+    Enumeración decreciente de subconjuntos, determinista por orden canónico de
+    `candidate_id` (`itertools.combinations` sobre la lista ya ordenada): retorna el
+    primer subconjunto de tamaño máximo donde **todas** las correlaciones por pares
+    son elegibles. `()` si ningún par de 2+ candidatos es mutuamente elegible.
+    """
+    sorted_ids = sorted(candidate_ids)
+    for size in range(len(sorted_ids), 1, -1):
+        for subset in itertools.combinations(sorted_ids, size):
+            if all(
+                correlations[_pair_key(a, b)] < _T2_MAX_CORRELATION
+                for a, b in itertools.combinations(subset, 2)
+            ):
+                return subset
+    return ()
+
+
+def _inverse_volatility_weights(
+    member_ids: Sequence[str],
+    baskets_by_id: Mapping[str, tuple[list[date], dict[date, float]]],
+    common_days: Sequence[date],
+) -> dict[str, float]:
+    """Pesos vol-inversa normalizados (`sum(w_i) == 1.0`) sobre `common_days` (R81).
+
+    `VerdictConfigError` si algún `std_i == 0.0` (canasta constante: peso
+    infinito/indefinido).
+    """
+    stds: dict[str, float] = {}
+    for candidate_id in member_ids:
+        _days, totals = baskets_by_id[candidate_id]
+        values = np.array([totals[day] for day in common_days], dtype=float)
+        std = float(values.std())
+        if std == 0.0:
+            message = (
+                f"_inverse_volatility_weights: candidate_id={candidate_id!r} tiene "
+                "desviación estándar 0.0 sobre la intersección del subconjunto elegible (R81)."
+            )
+            raise VerdictConfigError(message)
+        stds[candidate_id] = std
+
+    inverse = {candidate_id: 1.0 / std for candidate_id, std in stds.items()}
+    total_inverse = sum(inverse.values())
+    return {candidate_id: value / total_inverse for candidate_id, value in inverse.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class EnsembleResult:
+    """Resultado congelado del ensemble T2 (R83): subconjunto elegible + pesos + prop_sim."""
+
+    member_candidate_ids: tuple[str, ...]
+    pairwise_correlations: Mapping[tuple[str, str], float]
+    weights: Mapping[str, float]
+    prop_sim_result: PropSimResult
+    passes_p_gates: bool
+
+
+def _compute_t2(
+    candidates: Mapping[str, CandidateValidationBundle],
+    candidate_summaries: Mapping[str, CandidateGateSummary],
+    starting_balance: float,
+    firm_profile: FirmProfile,
+    risk_profile: RiskProfile,
+    prop_economics_profile: PropEconomicsProfile,
+    ensemble_prop_sim_config: PropSimConfig,
+) -> EnsembleResult | None:
+    """T2: ensemble por correlación Pearson + vol-inversa (R79-R90, ADR-J7).
+
+    `None` si `<2` candidatos pasan G+C+P (R85) o si ningún par G+C+P tiene
+    correlación `< 0.3` (R84). Invoca `simulate_challenge_paths` (núcleo puro
+    reutilizado de `prop_sim.py`, R82) con `ensemble_prop_sim_config.seed`
+    **independiente** de los seeds de cada candidato — responsabilidad del
+    llamador de `run_verdict` de pasar un `PropSimConfig` con seed propio. `P6` no
+    aplica al ensemble (sin `Ledger` real, R83).
+
+    `firm_profile` es un parámetro necesario para invocar `simulate_challenge_paths`
+    (breach diario, R25/R33) que no aparece en la firma pseudocódigo de
+    `run_verdict` en `design.md` §1.9 — omisión del diseño detectada en
+    implementación: sin este parámetro el ensemble no es computable. Se añade aquí y
+    se propaga por `run_verdict` (B4).
+    """
+    passing_ids = sorted(
+        candidate_id
+        for candidate_id, summary in candidate_summaries.items()
+        if summary.passes_g_c_p
+    )
+    if len(passing_ids) < 2:
+        return None
+
+    correlations: dict[tuple[str, str], float] = {}
+    for candidate_id_a, candidate_id_b in itertools.combinations(passing_ids, 2):
+        correlations[_pair_key(candidate_id_a, candidate_id_b)] = _pairwise_correlation(
+            candidates[candidate_id_a], candidates[candidate_id_b]
+        )
+
+    subset = _max_mutually_eligible_subset(passing_ids, correlations)
+    if len(subset) < 2:
+        return None
+
+    baskets_by_id = {
+        candidate_id: _candidate_daily_basket(candidates[candidate_id]) for candidate_id in subset
+    }
+    common_days = set(baskets_by_id[subset[0]][1])
+    for candidate_id in subset[1:]:
+        common_days &= set(baskets_by_id[candidate_id][1])
+    common_days_sorted = sorted(common_days)
+    if len(common_days_sorted) < 2:
+        message = (
+            f"_compute_t2: intersección de trading_day del subconjunto {subset!r} tiene "
+            f"{len(common_days_sorted)} días, se requieren >= 2 (R2d/R79)."
+        )
+        raise VerdictConfigError(message)
+
+    weights = _inverse_volatility_weights(subset, baskets_by_id, common_days_sorted)
+
+    daily_pnl_ensemble = {
+        day: sum(
+            weights[candidate_id] * baskets_by_id[candidate_id][1][day] for candidate_id in subset
+        )
+        for day in common_days_sorted
+    }
+
+    ensemble_prop_sim_result = simulate_challenge_paths(
+        daily_pnl_ensemble,
+        starting_balance,
+        prop_economics_profile,
+        firm_profile,
+        risk_profile,
+        ensemble_prop_sim_config,
+        "ensemble",
+    )
+    passes_p_gates = all(_evaluate_p1_to_p5(ensemble_prop_sim_result))
+
+    return EnsembleResult(
+        member_candidate_ids=subset,
+        pairwise_correlations=correlations,
+        weights=weights,
+        prop_sim_result=ensemble_prop_sim_result,
+        passes_p_gates=passes_p_gates,
+    )
+
+
+class VerdictKind(StrEnum):
+    """Veredicto final del torneo (R91), exactamente 4 miembros."""
+
+    GO = "go"
+    GO_ENSEMBLE = "go-ensemble"
+    GO_PARCIAL = "go-parcial"
+    NO_GO = "no-go"
+
+
+@dataclass(frozen=True, slots=True)
+class VerdictResult:
+    """Resultado congelado del veredicto de torneo completo (R93)."""
+
+    verdict: VerdictKind
+    winning_candidate_id: str | None
+    candidate_summaries: Mapping[str, CandidateGateSummary]
+    t1_dsr: float | None
+    t1_dsr_pre_deflation: float | None
+    n_candidatos_torneo: int
+    n_trials_deflactado: int | None
+    ensemble: EnsembleResult | None
+    economics_confirmed: bool
+    no_go_iteration_used: bool = False
+
+
+def _find_go_parcial_candidate(
+    candidates: Mapping[str, CandidateValidationBundle],
+    candidate_summaries: Mapping[str, CandidateGateSummary],
+    *,
+    no_go_iteration_used: bool,
+) -> tuple[str | None, TournamentDeflationOutcome | None]:
+    """Candidato de rama `GO_PARCIAL` (R92c): subconjunto de símbolos válido.
+
+    `0 < c1_fraction_passing < 0.60` (falla C1 pero no trivialmente vacío) con
+    P1-P6 en verde y T1 (calculado sobre ese candidato como si fuera el ganador)
+    también en verde. Orden canónico total (igual criterio que
+    `_select_winning_candidate`, R94): primer candidato elegible en ese orden.
+    """
+
+    def _sort_key(candidate_id: str) -> tuple[float, float, str]:
+        prop_sim_result = candidates[candidate_id].prop_sim_result
+        return (
+            -prop_sim_result.payout_p25_12m,
+            -prop_sim_result.median_funded_survival_months,
+            candidate_id,
+        )
+
+    for candidate_id in sorted(candidates, key=_sort_key):
+        summary = candidate_summaries[candidate_id]
+        p_gates_pass = (
+            summary.p1_pass
+            and summary.p2_pass
+            and summary.p3_pass
+            and summary.p4_pass
+            and summary.p5_pass
+            and summary.p6_pass
+        )
+        if 0.0 < summary.c1_fraction_passing < _C1_MIN_FRACTION and p_gates_pass:
+            t1_candidate = _compute_t1(
+                candidate_id, candidates, no_go_iteration_used=no_go_iteration_used
+            )
+            if t1_candidate.t1_pass:
+                return candidate_id, t1_candidate
+    return None, None
+
+
+def run_verdict(
+    candidates: Mapping[str, CandidateValidationBundle],
+    starting_balance: float,
+    firm_profile: FirmProfile,
+    risk_profile: RiskProfile,
+    prop_economics_profile: PropEconomicsProfile,
+    ensemble_prop_sim_config: PropSimConfig,
+    *,
+    no_go_iteration_used: bool = False,
+) -> VerdictResult:
+    """Veredicto de torneo completo (R91-R95bis).
+
+    `firm_profile` es un parámetro necesario para `_compute_t2`/
+    `simulate_challenge_paths` (breach diario, R25/R33) que no aparece en la firma
+    pseudocódigo de `run_verdict` en `design.md` §1.9 — omisión de diseño detectada
+    en implementación (sin este parámetro el ensemble no es computable); se añade
+    aquí, inmediatamente después de `starting_balance`, siguiendo el mismo orden de
+    parámetros que `prop_sim.run_prop_sim`.
+
+    Prioridad estricta (R92): (a) `ensemble is not None and
+    ensemble.passes_p_gates` -> `GO_ENSEMBLE`; (b) ganador `passes_g_c_p and
+    t1_pass` -> `GO`; (c) algún candidato con subconjunto de símbolos válido
+    (`0 < c1_fraction_passing < 0.60` con P1-P6+T1 válidos) -> `GO_PARCIAL`; (d)
+    resto -> `NO_GO`. Invariancia al orden (R94/R95bis): el ganador y el candidato
+    de `GO_PARCIAL` se eligen por criterio total ordenado (`payout_p25_12m`,
+    desempate `median_funded_survival_months`, desempate final `candidate_id`
+    lexicográfico); T2 itera en orden canónico de `candidate_id`. Permutar
+    `candidates` no cambia `verdict`/`winning_candidate_id`.
+    """
+    if not candidates:
+        message = "run_verdict: candidates está vacío, no hay ningún candidato que evaluar (R2a)."
+        raise VerdictConfigError(message)
+    if starting_balance <= 0:
+        message = f"run_verdict: starting_balance={starting_balance!r} debe ser > 0 (R2c)."
+        raise VerdictConfigError(message)
+
+    candidate_summaries = {
+        candidate_id: build_candidate_gate_summary(bundle, risk_profile, starting_balance)
+        for candidate_id, bundle in candidates.items()
+    }
+    n_candidatos_torneo = len(candidates)
+    economics_confirmed = (
+        prop_economics_profile_hash(prop_economics_profile) != _DEFAULT_PROFILE_HASH
+    )
+
+    winning_candidate_id = _select_winning_candidate(candidates, candidate_summaries)
+    t1: TournamentDeflationOutcome | None = None
+    if winning_candidate_id is not None:
+        t1 = _compute_t1(
+            winning_candidate_id, candidates, no_go_iteration_used=no_go_iteration_used
+        )
+
+    ensemble = _compute_t2(
+        candidates,
+        candidate_summaries,
+        starting_balance,
+        firm_profile,
+        risk_profile,
+        prop_economics_profile,
+        ensemble_prop_sim_config,
+    )
+
+    if ensemble is not None and ensemble.passes_p_gates:
+        verdict = VerdictKind.GO_ENSEMBLE
+    elif (
+        winning_candidate_id is not None
+        and candidate_summaries[winning_candidate_id].passes_g_c_p
+        and t1 is not None
+        and t1.t1_pass
+    ):
+        verdict = VerdictKind.GO
+    else:
+        partial_candidate_id, partial_t1 = _find_go_parcial_candidate(
+            candidates, candidate_summaries, no_go_iteration_used=no_go_iteration_used
+        )
+        if partial_candidate_id is not None:
+            verdict = VerdictKind.GO_PARCIAL
+            winning_candidate_id = partial_candidate_id
+            t1 = partial_t1
+        else:
+            verdict = VerdictKind.NO_GO
+
+    return VerdictResult(
+        verdict=verdict,
+        winning_candidate_id=winning_candidate_id,
+        candidate_summaries=candidate_summaries,
+        t1_dsr=t1.t1_dsr if t1 is not None else None,
+        t1_dsr_pre_deflation=t1.t1_dsr_pre_deflation if t1 is not None else None,
+        n_candidatos_torneo=n_candidatos_torneo,
+        n_trials_deflactado=t1.n_trials_deflactado if t1 is not None else None,
+        ensemble=ensemble,
+        economics_confirmed=economics_confirmed,
+        no_go_iteration_used=no_go_iteration_used,
     )
