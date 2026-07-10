@@ -17,11 +17,12 @@ from dataclasses import dataclass
 from genesis.backtest.ledger import BreachEvent, BreachKind
 from genesis.backtest.metrics import profit_factor
 from genesis.backtest.risk_profile import RiskProfile
+from genesis.validation._dsr import deflated_sharpe_ratio
 from genesis.validation._returns import extract_trade_returns
 from genesis.validation.dsr_pbo import DsrPboResult
 from genesis.validation.errors import VerdictConfigError
 from genesis.validation.montecarlo import McPortfolioResult, McSymbolResult
-from genesis.validation.prop_sim import PropSimResult
+from genesis.validation.prop_sim import PropSimResult, _build_daily_basket
 from genesis.validation.purged_cv import PurgedCvResult
 from genesis.validation.sensitivity import SensitivityResult
 from genesis.validation.wfa import WfaResult
@@ -304,4 +305,111 @@ def build_candidate_gate_summary(
         p6_pass=p6_pass,
         p6_violating_symbols=p6_violating,
         passes_g_c_p=passes_g_c_p,
+    )
+
+
+def _select_winning_candidate(
+    candidates: Mapping[str, CandidateValidationBundle],
+    candidate_summaries: Mapping[str, CandidateGateSummary],
+) -> str | None:
+    """Ganador del torneo entre los candidatos con `passes_g_c_p=True` (R72).
+
+    Criterio total ordenado: mayor `prop_sim_result.payout_p25_12m`; desempate por
+    mayor `median_funded_survival_months`; desempate final por `candidate_id`
+    lexicográfico (determinismo, R94). `None` si ningún candidato pasa G+C+P.
+    """
+    passing_ids = [
+        candidate_id
+        for candidate_id, summary in candidate_summaries.items()
+        if summary.passes_g_c_p
+    ]
+    if not passing_ids:
+        return None
+
+    def _sort_key(candidate_id: str) -> tuple[float, float, str]:
+        prop_sim_result = candidates[candidate_id].prop_sim_result
+        return (
+            -prop_sim_result.payout_p25_12m,
+            -prop_sim_result.median_funded_survival_months,
+            candidate_id,
+        )
+
+    return min(passing_ids, key=_sort_key)
+
+
+@dataclass(frozen=True, slots=True)
+class TournamentDeflationOutcome:
+    """Resultado congelado de la deflación de torneo T1 para el ganador (R71-R78)."""
+
+    winning_candidate_id: str
+    n_candidatos_torneo: int
+    n_trials_signal_total_ganador: int
+    n_trials_deflactado: int
+    t1_dsr_pre_deflation: float
+    t1_dsr: float
+    t1_pass: bool
+
+
+def _dsr_or_zero(returns: list[float], n_trials: int) -> float:
+    """Invoca `deflated_sharpe_ratio` (R76); `0.0` si `n_trials=1` cae fuera del dominio del ppf.
+
+    `_dsr.py` (H, cerrado, R119/R125) no admite `n_trials=1`
+    (`_standard_normal_ppf(1.0 - 1.0/1) == _standard_normal_ppf(0.0)` queda fuera de
+    `(0, 1)`; su propio docstring documenta que solo espera `n_trials` de `wfa.py`,
+    `{9, 27}`). T1 sí necesita `n_trials=1` como referencia de trazabilidad "sin
+    deflación" (R76); se captura el `ValueError` de dominio y se trata como
+    degenerado — mismo criterio de "fail-soft a 0.0" que `deflated_sharpe_ratio` ya
+    aplica para `len(returns)<2`/`std==0`/`denom<=0` — sin modificar el módulo
+    cerrado.
+    """
+    try:
+        return deflated_sharpe_ratio(returns, n_trials=n_trials)
+    except ValueError:
+        return 0.0
+
+
+def _compute_t1(
+    winning_candidate_id: str,
+    candidates: Mapping[str, CandidateValidationBundle],
+    *,
+    no_go_iteration_used: bool = False,
+) -> TournamentDeflationOutcome:
+    """T1: deflación de torneo sobre la canasta diaria combinada del ganador (R71-R78).
+
+    Reutiliza `_dsr.deflated_sharpe_ratio` **tal cual** (sin duplicar la fórmula,
+    ADR-J6) y `_build_daily_basket` (compartida con `prop_sim.py`, ADR-J10).
+    `n_candidatos_torneo = len(candidates)` (R71, nunca hardcodeado);
+    `n_trials_deflactado = n_trials_signal_total_ganador + (n_candidatos_torneo - 1)`
+    (R75), `+1` adicional si `no_go_iteration_used=True` (R95, la iteración cuenta
+    como trial).
+    """
+    n_candidatos_torneo = len(candidates)
+    winner_bundle = candidates[winning_candidate_id]
+    n_trials_signal_total_ganador = sum(
+        wfa_result.n_trials_signal_total
+        for wfa_result in winner_bundle.wfa_results_by_symbol.values()
+    )
+    n_trials_deflactado = n_trials_signal_total_ganador + (n_candidatos_torneo - 1)
+    if no_go_iteration_used:
+        n_trials_deflactado += 1
+
+    oos_ledgers_by_symbol = {
+        symbol: wfa_result.oos_ledger_cosido
+        for symbol, wfa_result in winner_bundle.wfa_results_by_symbol.items()
+    }
+    _basket_days, daily_totals = _build_daily_basket(oos_ledgers_by_symbol)
+    daily_returns = [daily_totals[day] for day in sorted(daily_totals)]
+
+    t1_dsr_pre_deflation = _dsr_or_zero(daily_returns, n_trials=1)
+    t1_dsr = deflated_sharpe_ratio(daily_returns, n_trials=n_trials_deflactado)
+    t1_pass = t1_dsr >= _T1_MIN_DSR
+
+    return TournamentDeflationOutcome(
+        winning_candidate_id=winning_candidate_id,
+        n_candidatos_torneo=n_candidatos_torneo,
+        n_trials_signal_total_ganador=n_trials_signal_total_ganador,
+        n_trials_deflactado=n_trials_deflactado,
+        t1_dsr_pre_deflation=t1_dsr_pre_deflation,
+        t1_dsr=t1_dsr,
+        t1_pass=t1_pass,
     )

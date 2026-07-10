@@ -1,12 +1,14 @@
 """Tests de `verdict.py`: bundle, gates G/C/P/T1/T2, veredicto, tearsheet/manifest (R57-R113)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 import pytest
 
+import genesis.validation.verdict as verdict_module
 from genesis.backtest.ledger import BreachEvent, BreachKind, Ledger, RunProvenance
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
+from genesis.validation._dsr import deflated_sharpe_ratio as real_dsr
 from genesis.validation.dsr_pbo import CscvResult, DsrPboResult
 from genesis.validation.errors import VerdictConfigError
 from genesis.validation.montecarlo import McPathsResult, McPortfolioResult, McSymbolResult
@@ -15,10 +17,11 @@ from genesis.validation.sensitivity import CostStressOutcome, PerturbationOutcom
 from genesis.validation.verdict import (
     CandidateValidationBundle,
     _build_symbol_gate_outcome,
+    _compute_t1,
     build_candidate_gate_summary,
 )
 from genesis.validation.wfa import WfaResult
-from tests.validation.fixtures.ledgers import build_ledger
+from tests.validation.fixtures.ledgers import build_ledger, build_ledger_with_daily_trades
 
 pytestmark = pytest.mark.unit
 
@@ -522,3 +525,74 @@ def test_passes_g_c_p_false_si_falla_p1() -> None:
     summary = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
     assert summary.p1_pass is False
     assert summary.passes_g_c_p is False
+
+
+# --- B2: T1 (deflación de torneo, R71-R78) ---
+
+
+def _winner_bundle_with_daily_pnl(
+    daily_deltas: list, *, n_trials_signal_total_a: int = 45, n_trials_signal_total_b: int = 27
+) -> CandidateValidationBundle:
+    ledger_a = build_ledger_with_daily_trades(daily_deltas, symbol="US500")
+    wfa_a = _wfa_result(symbol="US500", ledger=ledger_a)
+    wfa_a = _replace_wfa_n_trials(wfa_a, n_trials_signal_total_a)
+    wfa_b = _wfa_result(symbol="NAS100", ledger=_passing_ledger())
+    wfa_b = _replace_wfa_n_trials(wfa_b, n_trials_signal_total_b)
+    return _bundle(
+        symbols=("US500", "NAS100"),
+        wfa_by_symbol={"US500": wfa_a, "NAS100": wfa_b},
+    )
+
+
+def _replace_wfa_n_trials(wfa_result: WfaResult, n_trials_signal_total: int) -> WfaResult:
+    return WfaResult(
+        candidate_id=wfa_result.candidate_id,
+        symbol=wfa_result.symbol,
+        config_version=wfa_result.config_version,
+        windows=wfa_result.windows,
+        oos_ledger_cosido=wfa_result.oos_ledger_cosido,
+        wfe=wfa_result.wfe,
+        n_windows=wfa_result.n_windows,
+        n_trials_signal_total=n_trials_signal_total,
+        n_trials_execution_total=wfa_result.n_trials_execution_total,
+        seed=wfa_result.seed,
+    )
+
+
+def test_t1_n_trials() -> None:
+    base_day = date(2024, 1, 1)
+    daily_deltas = [(base_day + timedelta(days=i), 100.0 + i) for i in range(10)]
+    winner_bundle = _winner_bundle_with_daily_pnl(
+        daily_deltas, n_trials_signal_total_a=45, n_trials_signal_total_b=27
+    )
+    candidates = {
+        "A": winner_bundle,
+        "B": _bundle(candidate_id="B"),
+        "C": _bundle(candidate_id="C"),
+    }
+
+    t1 = _compute_t1("A", candidates)
+
+    assert t1.n_trials_signal_total_ganador == 72
+    assert t1.n_candidatos_torneo == 3
+    assert t1.n_trials_deflactado == 72 + (3 - 1)
+
+
+def test_t1_dsr_invoca_dsr_con_n_trials_deflactado(monkeypatch: pytest.MonkeyPatch) -> None:
+    base_day = date(2024, 1, 1)
+    daily_deltas = [(base_day + timedelta(days=i), 100.0 + i) for i in range(10)]
+    winner_bundle = _winner_bundle_with_daily_pnl(daily_deltas)
+    candidates = {"A": winner_bundle, "B": _bundle(candidate_id="B")}
+
+    calls: list[int] = []
+
+    def _spy(returns: list, n_trials: int) -> float:
+        calls.append(n_trials)
+        return real_dsr(returns, n_trials)
+
+    monkeypatch.setattr(verdict_module, "deflated_sharpe_ratio", _spy)
+
+    t1 = _compute_t1("A", candidates)
+
+    assert t1.n_trials_deflactado in calls
+    assert 1 in calls  # t1_dsr_pre_deflation invoca con n_trials=1
