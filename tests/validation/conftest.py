@@ -9,9 +9,10 @@ anti-leakage) y `trial_matrix_fixture` (`SignalTrialMatrix` sintético, sin re-r
 para los tests puros de CSCV).
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -26,7 +27,10 @@ from genesis.validation.dsr_pbo import SignalTrialMatrix
 from genesis.validation.wfa import WfaResult, run_wfa
 from genesis.validation.window_config import WfaWindowConfig
 from tests.data.fakes import _default_symbol_figure
-from tests.validation.fixtures.ledgers import build_ledger_with_trade_intervals
+from tests.validation.fixtures.ledgers import (
+    build_ledger_with_daily_trades,
+    build_ledger_with_trade_intervals,
+)
 from tests.validation.fixtures.long_m1_generator import generate_long_m1_frame
 
 _BACKTEST_FIXTURES_DIR = Path(__file__).parent.parent / "backtest" / "fixtures"
@@ -192,3 +196,23 @@ def trial_matrix_fixture() -> SignalTrialMatrix:
         n_windows=4,
         dsr_is_by_window=dsr_is_by_window,
     )
+
+
+@pytest.fixture
+def oos_ledgers_by_symbol_fixture() -> dict[str, Ledger]:
+    """Canasta sintética de 2 símbolos, 40 días, deriva positiva (Issue J, `prop_sim.py`).
+
+    Usada por los tests de integración/slow de `run_prop_sim`/`run_verdict`
+    (R54/R55/R112/R113): deriva positiva moderada (media > 0 por símbolo) para que
+    una fracción no trivial de trayectorias alcance el fondeo, sin garantizar
+    ningún valor exacto (los tests solo verifican rangos/finitud, no golden).
+    """
+    rng = np.random.default_rng(11)
+    base_day = date(2024, 1, 1)
+    days = [base_day + timedelta(days=i) for i in range(40)]
+    deltas_a = list(zip(days, rng.normal(300.0, 800.0, size=40).tolist(), strict=True))
+    deltas_b = list(zip(days, rng.normal(250.0, 700.0, size=40).tolist(), strict=True))
+    return {
+        "US500": build_ledger_with_daily_trades(deltas_a, symbol="US500"),
+        "NAS100": build_ledger_with_daily_trades(deltas_b, symbol="NAS100"),
+    }

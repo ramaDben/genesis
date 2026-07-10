@@ -727,3 +727,38 @@ def simulate_challenge_paths(
         seed=config.seed,
         trading_days_per_month=config.trading_days_per_month,
     )
+
+
+def run_prop_sim(
+    oos_ledgers_by_symbol: Mapping[str, Ledger],
+    starting_balance: float,
+    firm_profile: FirmProfile,
+    risk_profile: RiskProfile,
+    prop_economics_profile: PropEconomicsProfile,
+    config: PropSimConfig,
+    candidate_id: str,
+) -> PropSimResult:
+    """Envoltorio de `simulate_challenge_paths` sobre los `Ledger` OOS reales (R50).
+
+    Construye la canasta diaria (`_build_daily_basket`, R15) y delega en
+    `simulate_challenge_paths` (núcleo puro). `PropSimConfigError` si la canasta
+    resultante queda vacía (R17): ningún trade OOS extraíble de
+    `oos_ledgers_by_symbol` en ningún símbolo.
+    """
+    basket_days, daily_totals = _build_daily_basket(oos_ledgers_by_symbol)
+    if not basket_days:
+        message = (
+            f"run_prop_sim: candidate_id={candidate_id!r} sin ningún trade OOS extraíble de "
+            f"oos_ledgers_by_symbol (símbolos={list(oos_ledgers_by_symbol)!r}, R17)."
+        )
+        raise PropSimConfigError(message)
+
+    return simulate_challenge_paths(
+        daily_totals,
+        starting_balance,
+        prop_economics_profile,
+        firm_profile,
+        risk_profile,
+        config,
+        candidate_id,
+    )

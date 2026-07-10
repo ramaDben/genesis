@@ -1,11 +1,15 @@
 """Tests de `prop_sim.py`: resampleo diario + máquina de estados + agregación (R15-R56)."""
 
+import math
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
+from genesis.backtest.ledger import Ledger
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
 from genesis.data.profile import FirmProfile
 from genesis.validation.errors import PropSimConfigError
@@ -14,10 +18,13 @@ from genesis.validation.prop_sim import (
     PropEconomicsProfile,
     PropSimConfig,
     PropSimOutcomeKind,
+    PropSimResult,
     _build_daily_basket,
     _default_block_size,
     _resample_daily_pnl_path,
     _simulate_single_path,
+    run_prop_sim,
+    simulate_challenge_paths,
 )
 from tests.validation.fixtures.ledgers import build_empty_ledger, build_ledger_with_daily_trades
 
@@ -357,3 +364,178 @@ def test_funded_survived_horizon_censura_al_horizonte(
     assert outcome.outcome is PropSimOutcomeKind.FUNDED_SURVIVED_HORIZON
     assert outcome.funded_survival_trading_days == 3
     assert outcome.n_funded_months_observed == 1
+
+
+# --- A5: agregación P1-P6 + run_prop_sim (R41-R56) ---
+
+_FAST_CONFIG = PropSimConfig(
+    n_paths=50, seed=123, horizon_months=2, trading_days_per_month=10, path_horizon_trading_days=100
+)
+
+
+def _synthetic_daily_pnl(
+    n_days: int, seed: int, *, drift: float = 300.0, scale: float = 800.0
+) -> dict:
+    rng = np.random.default_rng(seed)
+    base_day = date(2024, 1, 1)
+    values = rng.normal(drift, scale, size=n_days)
+    return {base_day + timedelta(days=i): float(value) for i, value in enumerate(values)}
+
+
+def _harden_profile(
+    profile: PropEconomicsProfile, *, cost_delta: float, split_delta: float, target_delta: float
+) -> PropEconomicsProfile:
+    return PropEconomicsProfile(
+        name=profile.name,
+        phases=tuple(
+            replace(phase, profit_target_pct=phase.profit_target_pct + target_delta)
+            for phase in profile.phases
+        ),
+        challenge_cost_pct_of_balance=profile.challenge_cost_pct_of_balance + cost_delta,
+        profit_split_pct=max(0.01, profile.profit_split_pct - split_delta),
+        payout_cycle_days=profile.payout_cycle_days,
+        max_lots=profile.max_lots,
+        max_positions=profile.max_positions,
+        consistency_rule_pct=profile.consistency_rule_pct,
+    )
+
+
+def test_run_prop_sim_canasta_vacia_lanza(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    with pytest.raises(PropSimConfigError):
+        run_prop_sim(
+            {"US500": build_empty_ledger()},
+            _STARTING_BALANCE,
+            firm_profile_fixture,
+            risk_profile_fixture,
+            _default_profile(),
+            _FAST_CONFIG,
+            "cand-A",
+        )
+
+
+@given(
+    cost_delta=st.floats(min_value=0.1, max_value=10.0),
+    split_delta=st.floats(min_value=0.1, max_value=20.0),
+    target_delta=st.floats(min_value=0.1, max_value=5.0),
+)
+@settings(
+    max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+def test_monotonia_ficha(
+    cost_delta: float,
+    split_delta: float,
+    target_delta: float,
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+) -> None:
+    """R52: endurecer la ficha nunca mejora p_pass/payout_p25_12m/median_funded_survival_months."""
+    daily_pnl_by_day = _synthetic_daily_pnl(60, seed=7)
+    base_profile = _single_phase_profile(
+        profit_target_pct=5.0, min_profitable_days=1, min_profit_per_day_pct=0.1
+    )
+    hardened_profile = _harden_profile(
+        base_profile, cost_delta=cost_delta, split_delta=split_delta, target_delta=target_delta
+    )
+
+    result_base = simulate_challenge_paths(
+        daily_pnl_by_day,
+        _STARTING_BALANCE,
+        base_profile,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _FAST_CONFIG,
+        "cand-A",
+    )
+    result_hardened = simulate_challenge_paths(
+        daily_pnl_by_day,
+        _STARTING_BALANCE,
+        hardened_profile,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _FAST_CONFIG,
+        "cand-A",
+    )
+
+    assert result_hardened.p_pass <= result_base.p_pass + 1e-9
+    assert result_hardened.payout_p25_12m <= result_base.payout_p25_12m + 1e-6
+    assert (
+        result_hardened.median_funded_survival_months
+        <= result_base.median_funded_survival_months + 1e-9
+    )
+
+
+def test_determinismo(firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile) -> None:
+    """R51/R53: dos `run_prop_sim` con mismos insumos producen `PropSimResult` idéntico."""
+    daily_pnl_by_day = _synthetic_daily_pnl(60, seed=3)
+    ledger = build_ledger_with_daily_trades(list(daily_pnl_by_day.items()), symbol="US500")
+
+    result1 = run_prop_sim(
+        {"US500": ledger},
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _default_profile(),
+        _FAST_CONFIG,
+        "cand-A",
+    )
+    result2 = run_prop_sim(
+        {"US500": ledger},
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _default_profile(),
+        _FAST_CONFIG,
+        "cand-A",
+    )
+
+    assert result1 == result2
+
+
+@pytest.mark.integration
+def test_integracion_run_prop_sim(
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    oos_ledgers_by_symbol_fixture: dict[str, Ledger],
+) -> None:
+    """R54: `run_prop_sim` en segundos; campos finitos, fracciones/probabilidades en [0,1]."""
+    result = run_prop_sim(
+        oos_ledgers_by_symbol_fixture,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _default_profile(),
+        replace(_FAST_CONFIG, n_paths=100),
+        "cand-A",
+    )
+
+    assert isinstance(result, PropSimResult)
+    assert 0.0 <= result.p_pass <= 1.0
+    assert 0.0 <= result.p_daily_breach_funded_month <= 1.0
+    assert math.isfinite(result.payout_p25_12m)
+    assert math.isfinite(result.median_funded_survival_months)
+    assert result.expected_attempts > 0.0  # finito o inf, nunca <=0
+    assert result.n_paths == 100
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(60)
+def test_slow_volumen(
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    oos_ledgers_by_symbol_fixture: dict[str, Ledger],
+) -> None:
+    """R55: `n_paths >= 2000`, separado de la suite rápida por defecto."""
+    result = run_prop_sim(
+        oos_ledgers_by_symbol_fixture,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _default_profile(),
+        replace(_FAST_CONFIG, n_paths=2_000, seed=99),
+        "cand-A",
+    )
+
+    assert result.n_paths == 2_000
+    assert 0.0 <= result.p_pass <= 1.0
