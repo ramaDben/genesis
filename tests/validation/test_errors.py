@@ -9,8 +9,10 @@ from genesis.validation.errors import (
     DsrPboConfigError,
     GenesisValidationError,
     MonteCarloConfigError,
+    PropSimConfigError,
     PurgedCvConfigError,
     SensitivityConfigError,
+    VerdictConfigError,
     WfaConfigError,
 )
 
@@ -76,4 +78,36 @@ def test_mensaje_con_contexto_se_conserva_en_str_dsr_pbo() -> None:
 def test_mensaje_con_contexto_se_conserva_en_str_sensitivity() -> None:
     contexto = "candidate_id=B symbol=US500 axis=risk_pct"
     err = SensitivityConfigError(f"Configuración inválida: {contexto}")
+    assert contexto in str(err)
+
+
+def test_prop_sim_config_error_hereda_de_genesis_validation_error() -> None:
+    assert issubclass(PropSimConfigError, GenesisValidationError) is True
+
+
+def test_verdict_config_error_hereda_de_genesis_validation_error() -> None:
+    assert issubclass(VerdictConfigError, GenesisValidationError) is True
+
+
+def test_prop_sim_config_error_no_hereda_de_excepciones_de_h_i() -> None:
+    assert not issubclass(PropSimConfigError, WfaConfigError)
+    assert not issubclass(PropSimConfigError, MonteCarloConfigError)
+    assert not issubclass(PropSimConfigError, DsrPboConfigError)
+
+
+def test_verdict_config_error_no_hereda_de_excepciones_de_h_i() -> None:
+    assert not issubclass(VerdictConfigError, WfaConfigError)
+    assert not issubclass(VerdictConfigError, MonteCarloConfigError)
+    assert not issubclass(VerdictConfigError, DsrPboConfigError)
+
+
+def test_mensaje_con_contexto_se_conserva_en_str_prop_sim() -> None:
+    contexto = "candidate_id=B symbol=US500 n_paths=-1"
+    err = PropSimConfigError(f"Configuración inválida: {contexto}")
+    assert contexto in str(err)
+
+
+def test_mensaje_con_contexto_se_conserva_en_str_verdict() -> None:
+    contexto = "candidate_id=B symbol=US500 starting_balance=-1.0"
+    err = VerdictConfigError(f"Configuración inválida: {contexto}")
     assert contexto in str(err)

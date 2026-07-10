@@ -68,3 +68,25 @@ class SensitivityConfigError(GenesisValidationError):
     `cost_stress_multipliers` con algún valor `<= 1.0`; `(c)`
     `cliff_relative_drop_threshold` fuera de `(0.0, 1.0]` o `cliff_pf_floor <= 0.0`.
     """
+
+
+class PropSimConfigError(GenesisValidationError):
+    """Configuración inválida de la simulación de challenge, `prop_sim.py` (Issue J, R1).
+
+    Disparadores normativos: `(a)` `n_paths <= 0`; `(b)` `max_attempts < 1`;
+    `(c)` `horizon_months < 1`; `(d)` `path_horizon_trading_days` insuficiente
+    respecto a `horizon_months * trading_days_per_month`; `(e)` canasta diaria
+    vacía (`_build_daily_basket` sin ningún trade OOS extraíble); `(f)` ficha
+    `PropEconomicsProfile` inválida (`phases` vacío, umbrales fuera de rango).
+    """
+
+
+class VerdictConfigError(GenesisValidationError):
+    """Configuración o insumos inválidos del veredicto de torneo, `verdict.py` (Issue J, R2).
+
+    Disparadores normativos: `(a)` `candidates` vacío; `(b)` símbolos
+    inconsistentes entre los mapas por símbolo de `CandidateValidationBundle`;
+    `(c)` `starting_balance <= 0`; `(d)` intersección de `trading_day` entre dos
+    candidatos para T2 con menos de 2 días; `(e)` desviación estándar `std_i == 0`
+    de la canasta de un candidato en los pesos vol-inversa del ensemble.
+    """
