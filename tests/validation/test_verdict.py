@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -24,6 +25,7 @@ from genesis.validation.prop_sim import (
     PropSimResult,
     load_prop_economics_profile,
 )
+from genesis.validation.purged_cv import PurgedCvConfig, PurgedCvResult, PurgedFold
 from genesis.validation.sensitivity import CostStressOutcome, PerturbationOutcome, SensitivityResult
 from genesis.validation.verdict import (
     CandidateValidationBundle,
@@ -33,7 +35,11 @@ from genesis.validation.verdict import (
     _compute_t2,
     _pairwise_correlation,
     build_candidate_gate_summary,
+    manifest_json_to_verdict_summary,
+    render_tearsheet,
     run_verdict,
+    verdict_result_to_manifest_json,
+    write_verdict_artifacts,
 )
 from genesis.validation.wfa import WfaResult
 from tests.validation.fixtures.ledgers import build_ledger, build_ledger_with_daily_trades
@@ -1104,3 +1110,135 @@ def test_verdict_monotonia_degradar_dsr_nunca_mejora_passes_g_c_p(
     )
 
     assert summary_after.passes_g_c_p is False
+
+
+# --- B5: tearsheet + manifest + escritura (R96-R108) ---
+
+_MANIFEST_KWARGS: dict[str, Any] = {
+    "config_version": "genesis-validation-j/1",
+    "dataset_hash_by_symbol": {"US500": "hash-us500"},
+    "firm_profile_hash": "hash-firm",
+    "risk_profile_hash": "hash-risk",
+    "prop_economics_profile_hash_value": "hash-economics",
+    "seeds": {"A": {"mc_seed": 1, "prop_sim_seed": 2}},
+    "git_commit": "deadbeef",
+}
+
+
+def _go_result(firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile):
+    candidates = {"A": _go_quality_bundle("A", seed=3)}
+    return run_verdict(
+        candidates,
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+
+def test_tearsheet_manifest_parity(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+
+    tearsheet = render_tearsheet(result)
+    manifest_raw = verdict_result_to_manifest_json(result, **_MANIFEST_KWARGS)
+    manifest = manifest_json_to_verdict_summary(manifest_raw)
+
+    assert result.verdict.value.upper() in tearsheet
+    assert manifest["verdict"] == result.verdict.value
+    assert manifest["winning_candidate_id"] == result.winning_candidate_id
+    assert manifest["t1_dsr"] == pytest.approx(result.t1_dsr)
+    assert f"{result.t1_dsr:.4f}" in tearsheet
+    assert "P3" in tearsheet  # advertencia de cota inferior conservadora, siempre presente
+    assert "placeholder" in tearsheet.lower()  # economics_confirmed=False por defecto
+
+
+def test_manifest_roundtrip(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+
+    raw = verdict_result_to_manifest_json(result, **_MANIFEST_KWARGS)
+    summary = manifest_json_to_verdict_summary(raw)
+
+    assert summary["config_version"] == "genesis-validation-j/1"
+    assert summary["n_candidatos_torneo"] == result.n_candidatos_torneo
+    assert summary["economics_confirmed"] == result.economics_confirmed
+    assert summary["git_commit"] == "deadbeef"
+
+
+def test_write_verdict_artifacts_ambos_archivos_deterministas(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile, tmp_path
+) -> None:
+    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+    output_dir = tmp_path / "artifacts"
+
+    manifest_path1, tearsheet_path1 = write_verdict_artifacts(
+        result, output_dir, **_MANIFEST_KWARGS
+    )
+    manifest_bytes1 = manifest_path1.read_bytes()
+    tearsheet_bytes1 = tearsheet_path1.read_bytes()
+
+    manifest_path2, _tearsheet_path2 = write_verdict_artifacts(
+        result, output_dir, **_MANIFEST_KWARGS
+    )
+    manifest_bytes2 = manifest_path2.read_bytes()
+
+    assert manifest_path1 == output_dir / "manifest.json"
+    assert tearsheet_path1 == output_dir / "tearsheet.md"
+    assert len(manifest_bytes1) > 0
+    assert len(tearsheet_bytes1) > 0
+    assert manifest_bytes1 == manifest_bytes2  # determinista byte a byte
+
+
+def test_purged_cv_summary_incluido_cuando_presente(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+    purged_cv_result = PurgedCvResult(
+        candidate_id="A",
+        symbol="US500",
+        config=PurgedCvConfig(n_folds=2),
+        folds=[
+            PurgedFold(
+                index=0,
+                test_trade_count=3,
+                train_trade_count=5,
+                purged_trade_count=1,
+                test_period=(datetime(2024, 1, 1, tzinfo=UTC), datetime(2024, 1, 5, tzinfo=UTC)),
+            ),
+            PurgedFold(
+                index=1,
+                test_trade_count=3,
+                train_trade_count=5,
+                purged_trade_count=2,
+                test_period=(datetime(2024, 1, 6, tzinfo=UTC), datetime(2024, 1, 10, tzinfo=UTC)),
+            ),
+        ],
+        total_trades=8,
+        embargo_days_effective=1,
+    )
+
+    raw = verdict_result_to_manifest_json(
+        result,
+        **_MANIFEST_KWARGS,
+        purged_cv_results_by_candidate={"A": {"US500": purged_cv_result}},
+    )
+    summary = manifest_json_to_verdict_summary(raw)
+
+    assert "purged_cv_summary" in summary
+    purged_cv_summary = cast("dict[str, Any]", summary["purged_cv_summary"])
+    assert purged_cv_summary["A"]["US500"]["n_folds"] == 2
+    assert purged_cv_summary["A"]["US500"]["total_trades"] == 8
+    assert purged_cv_summary["A"]["US500"]["purged_trade_count_sum"] == 3
+
+
+def test_render_tearsheet_no_hace_io(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+    tearsheet1 = render_tearsheet(result)
+    tearsheet2 = render_tearsheet(result)
+    assert tearsheet1 == tearsheet2

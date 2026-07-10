@@ -12,16 +12,19 @@ comparación.
 """
 
 import itertools
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
+from pathlib import Path
 
 import numpy as np
 
 from genesis.backtest.ledger import BreachEvent, BreachKind
 from genesis.backtest.metrics import profit_factor
 from genesis.backtest.risk_profile import RiskProfile
+from genesis.data.metadata import current_git_commit
 from genesis.data.profile import FirmProfile
 from genesis.validation._dsr import deflated_sharpe_ratio
 from genesis.validation._returns import extract_trade_returns
@@ -792,3 +795,270 @@ def run_verdict(
         economics_confirmed=economics_confirmed,
         no_go_iteration_used=no_go_iteration_used,
     )
+
+
+_P3_WARNING = (
+    "**Advertencia (decisión 4):** P3 (probabilidad de breach diario en un mes fondeado) se "
+    "evalúa **solo** sobre la base balance-a-balance (cierre-a-cierre); es una **cota inferior "
+    "conservadora**. La base de equity flotante intradía real puede disparar el breach diario "
+    "antes de lo que este proxy indica."
+)
+_ECONOMICS_WARNING = (
+    "**Advertencia (decisión 2):** la economía del challenge "
+    "(`challenge_cost_pct_of_balance`/`profit_split_pct`) usa valores **placeholder**, aún no "
+    "confirmados contra los términos vigentes de The5ers. Un veredicto GO no debe leerse como "
+    "decisión de negocio definitiva hasta confirmar ambos valores."
+)
+
+
+def _candidate_summary_payload(summary: CandidateGateSummary) -> dict:
+    """Payload serializable de `summary`, compartido por `render_tearsheet` y el manifest (R97).
+
+    Única fuente de las cifras por candidato: tearsheet y manifest se generan a
+    partir del **mismo** diccionario, garantizando paridad por construcción (no
+    solo por convención).
+    """
+    return {
+        "passes_g_c_p": summary.passes_g_c_p,
+        "c1_fraction_passing": summary.c1_fraction_passing,
+        "c1_pass": summary.c1_pass,
+        "c2_min_pf_non_passing": summary.c2_min_pf_non_passing,
+        "c2_pass": summary.c2_pass,
+        "p1_pass": summary.p1_pass,
+        "p2_pass": summary.p2_pass,
+        "p3_pass": summary.p3_pass,
+        "p4_pass": summary.p4_pass,
+        "p5_pass": summary.p5_pass,
+        "p6_pass": summary.p6_pass,
+        "p6_violating_symbols": {
+            symbol: [kind.value for kind in kinds]
+            for symbol, kinds in summary.p6_violating_symbols.items()
+        },
+        "symbol_gate_outcomes": {
+            symbol: {
+                "trades_oos_total": outcome.trades_oos_total,
+                "g1_pass": outcome.g1_pass,
+                "wfe": outcome.wfe,
+                "g2_pass": outcome.g2_pass,
+                "profit_factor": outcome.profit_factor,
+                "g3_pass": outcome.g3_pass,
+                "dsr": outcome.dsr,
+                "g4_pass": outcome.g4_pass,
+                "pbo": outcome.pbo,
+                "g5_pass": outcome.g5_pass,
+                "mc_maxdd_p95_pct_of_limit": outcome.mc_maxdd_p95_pct_of_limit,
+                "g6_pass": outcome.g6_pass,
+                "mc_breach_probability_12m": outcome.mc_breach_probability_12m,
+                "g7_pass": outcome.g7_pass,
+                "sensitivity_has_cliff": outcome.sensitivity_has_cliff,
+                "sensitivity_max_degradation_pct": outcome.sensitivity_max_degradation_pct,
+                "g8_pass": outcome.g8_pass,
+                "pf_cost_stress_1_5x": outcome.pf_cost_stress_1_5x,
+                "g9_pass": outcome.g9_pass,
+                "all_pass": outcome.all_pass,
+            }
+            for symbol, outcome in summary.symbol_gate_outcomes.items()
+        },
+    }
+
+
+def render_tearsheet(result: VerdictResult) -> str:
+    """Tearsheet Markdown puro de `result`, sin I/O (R96/R104).
+
+    Generado del **mismo** `VerdictResult` que el manifest (R97, única fuente de
+    verdad, vía `_candidate_summary_payload`). Siempre incluye la advertencia de
+    cota inferior de P3 (decisión 4); si `economics_confirmed=False`, añade también
+    la advertencia de economía placeholder (decisión 2, R107). Sin
+    `quantstats`/`matplotlib` (R104): Markdown puro.
+    """
+    lines: list[str] = [
+        f"# Veredicto de torneo: {result.verdict.value.upper()}",
+        "",
+        f"- **Ganador**: {result.winning_candidate_id or '(ninguno)'}",
+        f"- **Candidatos en torneo**: {result.n_candidatos_torneo}",
+        f"- **Economía confirmada**: {result.economics_confirmed}",
+        "",
+        f"> {_P3_WARNING}",
+    ]
+    if not result.economics_confirmed:
+        lines.append(">")
+        lines.append(f"> {_ECONOMICS_WARNING}")
+    lines.append("")
+
+    lines.append("## Candidatos")
+    for candidate_id, summary in result.candidate_summaries.items():
+        payload = _candidate_summary_payload(summary)
+        lines.append(f"### `{candidate_id}`")
+        lines.append(f"- `passes_g_c_p`: {payload['passes_g_c_p']}")
+        lines.append(
+            f"- C1: {payload['c1_fraction_passing']:.4f} (pass={payload['c1_pass']}); "
+            f"C2: {payload['c2_min_pf_non_passing']:.4f} (pass={payload['c2_pass']})"
+        )
+        lines.append("- P1..P6: " + ", ".join(f"P{i}={payload[f'p{i}_pass']}" for i in range(1, 7)))
+        lines.append("")
+        lines.append(
+            "| symbol | trades | g1 | wfe | g2 | pf | g3 | dsr | g4 | pbo | g5 | "
+            "maxdd/lim | g6 | breach% | g7 | cliff | degrad% | g8 | pf_stress | g9 | all |"
+        )
+        lines.append(
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+        )
+        for symbol, outcome in payload["symbol_gate_outcomes"].items():
+            lines.append(
+                f"| {symbol} | {outcome['trades_oos_total']} | {outcome['g1_pass']} | "
+                f"{outcome['wfe']:.3f} | {outcome['g2_pass']} | {outcome['profit_factor']:.3f} | "
+                f"{outcome['g3_pass']} | {outcome['dsr']:.3f} | {outcome['g4_pass']} | "
+                f"{outcome['pbo']:.3f} | {outcome['g5_pass']} | "
+                f"{outcome['mc_maxdd_p95_pct_of_limit']:.3f} | {outcome['g6_pass']} | "
+                f"{outcome['mc_breach_probability_12m']:.3f} | {outcome['g7_pass']} | "
+                f"{outcome['sensitivity_has_cliff']} | "
+                f"{outcome['sensitivity_max_degradation_pct']:.3f} | {outcome['g8_pass']} | "
+                f"{outcome['pf_cost_stress_1_5x']:.3f} | {outcome['g9_pass']} | "
+                f"{outcome['all_pass']} |"
+            )
+        lines.append("")
+
+    lines.append("## T1 (deflación de torneo)")
+    if result.t1_dsr is not None:
+        lines.append(f"- DSR pre-deflación: {result.t1_dsr_pre_deflation:.4f}")
+        lines.append(f"- DSR post-deflación: {result.t1_dsr:.4f}")
+        lines.append(f"- n_trials_deflactado: {result.n_trials_deflactado}")
+    else:
+        lines.append("- No evaluado (ningún candidato pasó G+C+P).")
+    lines.append("")
+
+    lines.append("## T2 (ensemble)")
+    if result.ensemble is not None:
+        ensemble = result.ensemble
+        lines.append(f"- Miembros: {', '.join(ensemble.member_candidate_ids)}")
+        lines.append(f"- Pasa gates P: {ensemble.passes_p_gates}")
+        lines.append("- Correlaciones por par:")
+        for (candidate_a, candidate_b), corr in sorted(ensemble.pairwise_correlations.items()):
+            lines.append(f"  - ({candidate_a}, {candidate_b}): {corr:.4f}")
+        lines.append("- Pesos:")
+        for candidate_id, weight in sorted(ensemble.weights.items()):
+            lines.append(f"  - {candidate_id}: {weight:.4f}")
+    else:
+        lines.append("- No aplica (ningún subconjunto mutuamente elegible).")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _purged_cv_summary_payload(
+    purged_cv_results_by_candidate: Mapping[str, Mapping[str, PurgedCvResult]],
+) -> dict:
+    """Bloque informativo de diagnóstico del Purged K-Fold (R106), no participa en el veredicto."""
+    summary: dict = {
+        candidate_id: {
+            symbol: {
+                "n_folds": result.config.n_folds,
+                "total_trades": result.total_trades,
+                "purged_trade_count_sum": sum(fold.purged_trade_count for fold in result.folds),
+            }
+            for symbol, result in by_symbol.items()
+        }
+        for candidate_id, by_symbol in purged_cv_results_by_candidate.items()
+    }
+    summary["_note"] = "diagnóstico informativo, no participa en el veredicto (R106)"
+    return summary
+
+
+def verdict_result_to_manifest_json(
+    result: VerdictResult,
+    config_version: str,
+    dataset_hash_by_symbol: Mapping[str, str],
+    firm_profile_hash: str,
+    risk_profile_hash: str,
+    prop_economics_profile_hash_value: str,
+    seeds: Mapping[str, Mapping[str, int]],
+    git_commit: str,
+    purged_cv_results_by_candidate: Mapping[str, Mapping[str, PurgedCvResult]] | None = None,
+) -> str:
+    """Serializa `result` a JSON determinista byte a byte (`sort_keys=True`, R98/R103).
+
+    Campos mínimos de R98: `config_version`, `dataset_hash_by_symbol`,
+    `firm_profile_hash`, `risk_profile_hash`, `prop_economics_profile_hash`,
+    `candidate_ids`, `winning_candidate_id`, `verdict`, `seeds`, `git_commit`,
+    `n_candidatos_torneo`, `n_trials_deflactado`, `t1_dsr`/`t1_dsr_pre_deflation`,
+    `economics_confirmed`, resultados por candidato (mismos campos que el
+    tearsheet, R97) y `purged_cv_summary` si `purged_cv_results_by_candidate` no es
+    `None` (R106). Fuera de `__all__` (§1.10): detalle de composición de
+    `write_verdict_artifacts`.
+    """
+    payload: dict = {
+        "config_version": config_version,
+        "dataset_hash_by_symbol": dict(dataset_hash_by_symbol),
+        "firm_profile_hash": firm_profile_hash,
+        "risk_profile_hash": risk_profile_hash,
+        "prop_economics_profile_hash": prop_economics_profile_hash_value,
+        "candidate_ids": sorted(result.candidate_summaries),
+        "winning_candidate_id": result.winning_candidate_id,
+        "verdict": result.verdict.value,
+        "seeds": {candidate_id: dict(value) for candidate_id, value in seeds.items()},
+        "git_commit": git_commit,
+        "n_candidatos_torneo": result.n_candidatos_torneo,
+        "n_trials_deflactado": result.n_trials_deflactado,
+        "t1_dsr": result.t1_dsr,
+        "t1_dsr_pre_deflation": result.t1_dsr_pre_deflation,
+        "economics_confirmed": result.economics_confirmed,
+        "no_go_iteration_used": result.no_go_iteration_used,
+        "candidates": {
+            candidate_id: _candidate_summary_payload(summary)
+            for candidate_id, summary in result.candidate_summaries.items()
+        },
+    }
+    if purged_cv_results_by_candidate is not None:
+        payload["purged_cv_summary"] = _purged_cv_summary_payload(purged_cv_results_by_candidate)
+
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def manifest_json_to_verdict_summary(raw: str) -> Mapping[str, object]:
+    """Reconstruye los escalares serializables de `raw` (round-trip, R99/R105).
+
+    No reconstruye las dataclasses anidadas (`WfaResult`/`DsrPboResult`/etc., que
+    nunca se serializan); solo los escalares/mapas ya presentes en el JSON. Fuera de
+    `__all__` (§1.10).
+    """
+    return json.loads(raw)
+
+
+def write_verdict_artifacts(
+    result: VerdictResult,
+    output_dir: Path,
+    config_version: str,
+    dataset_hash_by_symbol: Mapping[str, str],
+    firm_profile_hash: str,
+    risk_profile_hash: str,
+    prop_economics_profile_hash_value: str,
+    seeds: Mapping[str, Mapping[str, int]],
+    git_commit: str | None = None,
+    purged_cv_results_by_candidate: Mapping[str, Mapping[str, PurgedCvResult]] | None = None,
+) -> tuple[Path, Path]:
+    """Única I/O de escritura del Change (R100-R102): `manifest.json` + `tearsheet.md`.
+
+    `output_dir` siempre provisto por el llamador (sin ruta por defecto).
+    `git_commit is None` -> `current_git_commit()` (`genesis.data.metadata`),
+    propagando `GenesisDataError` sin capturar (R101).
+    """
+    resolved_git_commit = git_commit if git_commit is not None else current_git_commit()
+    manifest_json = verdict_result_to_manifest_json(
+        result,
+        config_version,
+        dataset_hash_by_symbol,
+        firm_profile_hash,
+        risk_profile_hash,
+        prop_economics_profile_hash_value,
+        seeds,
+        resolved_git_commit,
+        purged_cv_results_by_candidate,
+    )
+    tearsheet_markdown = render_tearsheet(result)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "manifest.json"
+    tearsheet_path = output_dir / "tearsheet.md"
+    manifest_path.write_text(manifest_json, encoding="utf-8")
+    tearsheet_path.write_text(tearsheet_markdown, encoding="utf-8")
+    return manifest_path, tearsheet_path
