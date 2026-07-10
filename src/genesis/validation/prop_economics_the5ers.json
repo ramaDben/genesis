@@ -1,0 +1,23 @@
+{
+  "name": "The5ers",
+  "phases": [
+    {
+      "profit_target_pct": 8.0,
+      "min_profitable_days": 3,
+      "min_profit_per_day_pct": 0.5,
+      "max_calendar_days": null
+    },
+    {
+      "profit_target_pct": 5.0,
+      "min_profitable_days": 3,
+      "min_profit_per_day_pct": 0.5,
+      "max_calendar_days": null
+    }
+  ],
+  "challenge_cost_pct_of_balance": 3.0,
+  "profit_split_pct": 80.0,
+  "payout_cycle_days": 14,
+  "max_lots": null,
+  "max_positions": null,
+  "consistency_rule_pct": null
+}
