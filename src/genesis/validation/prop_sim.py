@@ -19,6 +19,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,12 @@ from typing import Any
 import numpy as np
 
 from genesis.backtest.ledger import FillRecord, Ledger
+from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
+from genesis.data.profile import FirmProfile
 from genesis.validation.errors import PropSimConfigError
+
+CONFIG_VERSION: str = "genesis-validation-j/1"
+"""Versión del esquema de configuración de este Change (Issue J, decisión 10 §3)."""
 
 _CONFIG_PACKAGE = "genesis.validation"
 _CONFIG_RESOURCE = "prop_economics_the5ers.json"
@@ -329,3 +335,395 @@ class PropSimConfig:
         if self.block_size is not None and self.block_size <= 0:
             message = f"PropSimConfig.block_size={self.block_size!r} debe ser None o > 0 (R21)."
             raise PropSimConfigError(message)
+
+
+class PropSimOutcomeKind(StrEnum):
+    """Estado terminal de una trayectoria de challenge (R23), exactamente 4 miembros.
+
+    Ampliar esta enumeración es un cambio de alcance que requiere un Change nuevo
+    (mismo criterio que `BreachKind`, `ledger.py:22-32`): no relajar el contrato
+    silenciosamente.
+    """
+
+    FUNDED_SURVIVED_HORIZON = "funded_survived_horizon"
+    FUNDED_BREACHED_TOTAL = "funded_breached_total"
+    NEVER_FUNDED_ATTEMPTS_EXHAUSTED = "never_funded_attempts_exhausted"
+    IN_PROGRESS_UNFUNDED_AT_PATH_END = "in_progress_unfunded_at_path_end"
+
+
+@dataclass(frozen=True, slots=True)
+class PathOutcome:
+    """Resultado congelado de una única trayectoria de challenge (R31).
+
+    `funded_trading_day_index`/`breach_trading_day_index` son índices posicionales
+    (0-based) dentro de la secuencia de P&L diario de la trayectoria, `None` si el
+    evento correspondiente nunca ocurrió. `funded_survival_trading_days` es `None`
+    únicamente si la trayectoria nunca llegó a fondearse (`outcome ==
+    NEVER_FUNDED_ATTEMPTS_EXHAUSTED`); si llegó a fondearse (incluida
+    `IN_PROGRESS_UNFUNDED_AT_PATH_END` con financiamiento parcial sin resolución),
+    contiene el conteo de días fondeados observados. Ningún campo evalúa un umbral
+    de gate P contra un booleano (R32): solo produce números, la comparación es
+    responsabilidad de `verdict.py`.
+    """
+
+    outcome: PropSimOutcomeKind
+    n_attempts_used: int
+    funded_trading_day_index: int | None
+    breach_trading_day_index: int | None
+    funded_survival_trading_days: int | None
+    net_payout_12m: float
+    n_funded_months_observed: int
+    n_funded_months_with_daily_breach: int
+
+
+def _simulate_single_path(
+    daily_pnl: Sequence[float] | np.ndarray,
+    starting_balance: float,
+    prop_economics_profile: PropEconomicsProfile,
+    firm_profile: FirmProfile,
+    risk_profile: RiskProfile,
+    config: PropSimConfig,
+) -> tuple[PathOutcome, float]:
+    """Recorre `daily_pnl` día a día para UNA trayectoria (forward-only, R24).
+
+    Reproduce la semántica de ancla de `simulator._evaluate_total_breach`
+    (`simulator.py:380-406`): base balance-a-balance para el breach DIARIO (R25/R33,
+    **nunca** la base de equity flotante intradía: ADR-J4, R34/R35 — el proxy
+    cierre-a-cierre es una **cota inferior conservadora** de la probabilidad real de
+    breach diario, la equity flotante intradía real puede disparar antes) y ancla
+    dual `STATIC`/`TRAILING` para el breach TOTAL (R25/R27/R36). Retorna
+    `(PathOutcome, challenge_cost_paid)`: el costo del challenge se acumula aparte
+    porque `PathOutcome` no lo expone (R31) — se agrega a
+    `PropSimResult.total_challenge_cost_paid` en `simulate_challenge_paths`/
+    `run_prop_sim` (R37, informativo, no es un gate).
+    """
+    is_trailing = risk_profile.max_loss_limit_kind is MaxLossLimitKind.TRAILING
+    phases = prop_economics_profile.phases
+    challenge_cost = starting_balance * prop_economics_profile.challenge_cost_pct_of_balance / 100.0
+    horizon_days = config.horizon_months * config.trading_days_per_month
+
+    attempt = 1
+    phase_index = 0
+    balance = starting_balance
+    phase_start_balance = starting_balance
+    phase_profitable_days = 0
+    attempt_peak_balance = starting_balance
+    is_funded = False
+    funded_trading_day_index: int | None = None
+    funded_reference_balance = 0.0
+    days_since_last_payout = 0
+    n_funded_days_observed = 0
+    cumulative_net_payout = 0.0
+    n_funded_months_observed = 0
+    n_funded_months_with_daily_breach = 0
+    current_month_had_daily_breach = False
+    total_challenge_cost_paid = 0.0
+
+    for day_index, pnl in enumerate(daily_pnl):
+        phase_start_of_day_balance = balance
+        balance += pnl
+        attempt_peak_balance = max(attempt_peak_balance, balance)
+
+        daily_loss = max(0.0, phase_start_of_day_balance - balance)
+        daily_threshold = phase_start_of_day_balance * firm_profile.daily_loss_limit_pct / 100.0
+        breach_daily = daily_loss >= daily_threshold
+
+        if is_funded:
+            attempt_reference = attempt_peak_balance if is_trailing else funded_reference_balance
+        else:
+            attempt_reference = attempt_peak_balance if is_trailing else starting_balance
+        total_loss = max(0.0, attempt_reference - balance)
+        total_threshold = attempt_reference * risk_profile.max_loss_limit_pct / 100.0
+        breach_total = total_loss >= total_threshold
+
+        if not is_funded:
+            if breach_daily or breach_total:
+                if attempt < config.max_attempts:
+                    attempt += 1
+                    balance = starting_balance
+                    phase_index = 0
+                    phase_start_balance = starting_balance
+                    phase_profitable_days = 0
+                    attempt_peak_balance = starting_balance
+                    total_challenge_cost_paid += challenge_cost
+                    continue
+                return (
+                    PathOutcome(
+                        outcome=PropSimOutcomeKind.NEVER_FUNDED_ATTEMPTS_EXHAUSTED,
+                        n_attempts_used=attempt,
+                        funded_trading_day_index=None,
+                        breach_trading_day_index=day_index,
+                        funded_survival_trading_days=None,
+                        net_payout_12m=0.0,
+                        n_funded_months_observed=0,
+                        n_funded_months_with_daily_breach=0,
+                    ),
+                    total_challenge_cost_paid,
+                )
+
+            phase = phases[phase_index]
+            daily_return_pct = (
+                0.0
+                if phase_start_of_day_balance == 0.0
+                else 100.0 * pnl / phase_start_of_day_balance
+            )
+            if daily_return_pct >= phase.min_profit_per_day_pct:
+                phase_profitable_days += 1
+            profit_since_phase_start = balance - phase_start_balance
+            target_amount = phase_start_balance * phase.profit_target_pct / 100.0
+            if (
+                profit_since_phase_start >= target_amount
+                and phase_profitable_days >= phase.min_profitable_days
+            ):
+                if phase_index + 1 == len(phases):
+                    is_funded = True
+                    funded_trading_day_index = day_index
+                    funded_reference_balance = balance
+                    days_since_last_payout = 0
+                else:
+                    phase_index += 1
+                    phase_start_balance = balance
+                    phase_profitable_days = 0
+            continue
+
+        # Rama fondeada (R27/R28/R29): breach DIARIO es continuable, solo TOTAL termina.
+        if breach_daily:
+            current_month_had_daily_breach = True
+        if breach_total:
+            return (
+                PathOutcome(
+                    outcome=PropSimOutcomeKind.FUNDED_BREACHED_TOTAL,
+                    n_attempts_used=attempt,
+                    funded_trading_day_index=funded_trading_day_index,
+                    breach_trading_day_index=day_index,
+                    funded_survival_trading_days=n_funded_days_observed,
+                    net_payout_12m=cumulative_net_payout,
+                    n_funded_months_observed=n_funded_months_observed,
+                    n_funded_months_with_daily_breach=n_funded_months_with_daily_breach,
+                ),
+                total_challenge_cost_paid,
+            )
+
+        days_since_last_payout += 1
+        if days_since_last_payout == prop_economics_profile.payout_cycle_days:
+            payout = (
+                max(0.0, balance - funded_reference_balance)
+                * prop_economics_profile.profit_split_pct
+                / 100.0
+            )
+            cumulative_net_payout += payout
+            funded_reference_balance = balance
+            days_since_last_payout = 0
+
+        n_funded_days_observed += 1
+        if n_funded_days_observed % config.trading_days_per_month == 0:
+            n_funded_months_observed += 1
+            if current_month_had_daily_breach:
+                n_funded_months_with_daily_breach += 1
+            current_month_had_daily_breach = False
+
+        if n_funded_days_observed >= horizon_days:
+            return (
+                PathOutcome(
+                    outcome=PropSimOutcomeKind.FUNDED_SURVIVED_HORIZON,
+                    n_attempts_used=attempt,
+                    funded_trading_day_index=funded_trading_day_index,
+                    breach_trading_day_index=None,
+                    funded_survival_trading_days=n_funded_days_observed,
+                    net_payout_12m=cumulative_net_payout,
+                    n_funded_months_observed=n_funded_months_observed,
+                    n_funded_months_with_daily_breach=n_funded_months_with_daily_breach,
+                ),
+                total_challenge_cost_paid,
+            )
+
+    return (
+        PathOutcome(
+            outcome=PropSimOutcomeKind.IN_PROGRESS_UNFUNDED_AT_PATH_END,
+            n_attempts_used=attempt,
+            funded_trading_day_index=funded_trading_day_index,
+            breach_trading_day_index=None,
+            funded_survival_trading_days=n_funded_days_observed if is_funded else None,
+            net_payout_12m=cumulative_net_payout,
+            n_funded_months_observed=n_funded_months_observed,
+            n_funded_months_with_daily_breach=n_funded_months_with_daily_breach,
+        ),
+        total_challenge_cost_paid,
+    )
+
+
+_FUNDED_OUTCOME_KINDS = frozenset(
+    {PropSimOutcomeKind.FUNDED_SURVIVED_HORIZON, PropSimOutcomeKind.FUNDED_BREACHED_TOTAL}
+)
+"""Trayectorias que "alcanzaron el fondeo" a efectos de P1/P2/P4 (R42-R47).
+
+`IN_PROGRESS_UNFUNDED_AT_PATH_END` queda **fuera** de este conjunto aunque la
+trayectoria haya llegado a fondearse parcialmente (financiamiento sin resolución al
+agotar `path_horizon_trading_days`): no alcanzó ni la censura al horizonte ni un
+breach total, por lo que no cuenta como "fondeo resuelto" para los agregados P.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class PropSimResult:
+    """Resultado agregado de `simulate_challenge_paths`/`run_prop_sim` (R41)."""
+
+    candidate_id: str
+    config_version: str
+    seed: int
+    n_paths: int
+    p_pass: float
+    expected_attempts: float
+    expected_attempts_p50: float
+    expected_attempts_p90: float
+    p_daily_breach_funded_month: float
+    median_funded_survival_months: float
+    payout_p25_12m: float
+    n_paths_never_funded: int
+    n_paths_funded_breached_total: int
+    n_paths_funded_survived_horizon: int
+    total_challenge_cost_paid: float
+
+
+def _aggregate_path_outcomes(
+    outcomes: Sequence[PathOutcome],
+    total_challenge_cost_paid: float,
+    *,
+    candidate_id: str,
+    config_version: str,
+    seed: int,
+    trading_days_per_month: int,
+) -> PropSimResult:
+    """Agregados P1-P5 sobre `outcomes` (R42-R48), censura por la derecha (ADR-J5)."""
+    n_paths = len(outcomes)
+    funded_outcomes = [outcome for outcome in outcomes if outcome.outcome in _FUNDED_OUTCOME_KINDS]
+
+    p_pass = len(funded_outcomes) / n_paths
+
+    if funded_outcomes:
+        attempts_used = np.array(
+            [outcome.n_attempts_used for outcome in funded_outcomes], dtype=float
+        )
+        expected_attempts = float(attempts_used.mean())
+        expected_attempts_p50 = float(np.percentile(attempts_used, 50))
+        expected_attempts_p90 = float(np.percentile(attempts_used, 90))
+    else:
+        expected_attempts = float("inf")
+        expected_attempts_p50 = float("inf")
+        expected_attempts_p90 = float("inf")
+
+    months_observed_total = sum(outcome.n_funded_months_observed for outcome in outcomes)
+    months_with_breach_total = sum(
+        outcome.n_funded_months_with_daily_breach for outcome in outcomes
+    )
+    p_daily_breach_funded_month = (
+        months_with_breach_total / months_observed_total if months_observed_total > 0 else 0.0
+    )
+
+    if funded_outcomes:
+        survival_months = np.array(
+            [
+                (outcome.funded_survival_trading_days or 0) / trading_days_per_month
+                for outcome in funded_outcomes
+            ],
+            dtype=float,
+        )
+        median_funded_survival_months = float(np.percentile(survival_months, 50))
+    else:
+        median_funded_survival_months = 0.0
+
+    payouts = np.array([outcome.net_payout_12m for outcome in outcomes], dtype=float)
+    payout_p25_12m = float(np.percentile(payouts, 25))
+
+    return PropSimResult(
+        candidate_id=candidate_id,
+        config_version=config_version,
+        seed=seed,
+        n_paths=n_paths,
+        p_pass=p_pass,
+        expected_attempts=expected_attempts,
+        expected_attempts_p50=expected_attempts_p50,
+        expected_attempts_p90=expected_attempts_p90,
+        p_daily_breach_funded_month=p_daily_breach_funded_month,
+        median_funded_survival_months=median_funded_survival_months,
+        payout_p25_12m=payout_p25_12m,
+        n_paths_never_funded=sum(
+            1
+            for outcome in outcomes
+            if outcome.outcome is PropSimOutcomeKind.NEVER_FUNDED_ATTEMPTS_EXHAUSTED
+        ),
+        n_paths_funded_breached_total=sum(
+            1 for outcome in outcomes if outcome.outcome is PropSimOutcomeKind.FUNDED_BREACHED_TOTAL
+        ),
+        n_paths_funded_survived_horizon=sum(
+            1
+            for outcome in outcomes
+            if outcome.outcome is PropSimOutcomeKind.FUNDED_SURVIVED_HORIZON
+        ),
+        total_challenge_cost_paid=total_challenge_cost_paid,
+    )
+
+
+def simulate_challenge_paths(
+    daily_pnl_by_day: Mapping[date, float],
+    starting_balance: float,
+    prop_economics_profile: PropEconomicsProfile,
+    firm_profile: FirmProfile,
+    risk_profile: RiskProfile,
+    config: PropSimConfig,
+    candidate_id: str,
+) -> PropSimResult:
+    """Núcleo puro: resamplea `config.n_paths` trayectorias y agrega P1-P5 (ADR-J3).
+
+    Opera sobre una serie de P&L diario ya combinada (`daily_pnl_by_day`), sin
+    depender de `Ledger`: reutilizado también por `verdict.py` (T2, R82) sobre la
+    canasta ponderada del ensemble sin fabricar `Ledger`s sintéticos.
+    `PropSimConfigError` si `daily_pnl_by_day` está vacío (guarda defensiva; el
+    disparo normativo R17 vive en `run_prop_sim`/la construcción del ensemble en
+    `verdict.py`). RNG explícito (`numpy.random.default_rng(config.seed)`), loop
+    secuencial sobre `n_paths` (R22/R124): determinismo bit a bit (R51).
+    """
+    if not daily_pnl_by_day:
+        message = (
+            f"simulate_challenge_paths: daily_pnl_by_day vacío para "
+            f"candidate_id={candidate_id!r} (R17)."
+        )
+        raise PropSimConfigError(message)
+
+    basket_days = sorted(daily_pnl_by_day)
+    resolved_block_size = (
+        config.block_size
+        if config.block_size is not None
+        else _default_block_size(len(basket_days))
+    )
+    rng = np.random.default_rng(config.seed)
+
+    outcomes: list[PathOutcome] = []
+    total_challenge_cost_paid = 0.0
+    for _path_index in range(config.n_paths):
+        resampled_pnl = _resample_daily_pnl_path(
+            basket_days,
+            daily_pnl_by_day,
+            resolved_block_size,
+            rng,
+            target_len=config.path_horizon_trading_days,
+        )
+        outcome, cost_paid = _simulate_single_path(
+            resampled_pnl,
+            starting_balance,
+            prop_economics_profile,
+            firm_profile,
+            risk_profile,
+            config,
+        )
+        outcomes.append(outcome)
+        total_challenge_cost_paid += cost_paid
+
+    return _aggregate_path_outcomes(
+        outcomes,
+        total_challenge_cost_paid,
+        candidate_id=candidate_id,
+        config_version=CONFIG_VERSION,
+        seed=config.seed,
+        trading_days_per_month=config.trading_days_per_month,
+    )
