@@ -1,1 +1,1 @@
-﻿"""Whitelist de falsos positivos para vulture."""
+"""Whitelist de falsos positivos para vulture."""

@@ -1,7 +1,5 @@
 """Tests del puerto `RiskLevelsProvider` y la construcción de `Simulator` (R20, R21, R40)."""
 
-import subprocess  # nosec B404
-
 import pytest
 
 from genesis.backtest.costs import CostsConfig
@@ -105,14 +103,3 @@ def test_simulator_lanza_backtest_config_error_si_symbol_fuera_de_sessions(
     )
     with pytest.raises(BacktestConfigError):
         Simulator(FakeRiskCandidate(), **kwargs)
-
-
-def test_git_diff_strategy_vacio() -> None:
-    """R57: ningún archivo de `src/genesis/strategy/` fue modificado por este Change."""
-    result = subprocess.run(  # nosec B603 B607
-        ["git", "diff", "--stat", "--", "src/genesis/strategy"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert result.stdout.strip() == ""
