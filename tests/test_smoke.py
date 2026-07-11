@@ -1,4 +1,4 @@
-﻿"""Smoke test del esqueleto del paquete."""
+"""Smoke test del esqueleto del paquete."""
 
 import genesis
 import genesis.backtest

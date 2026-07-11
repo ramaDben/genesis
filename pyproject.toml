@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 mt5-export = "genesis.data.mt5_export:main"
+genesis-validate = "genesis.validation.signal_diagnostic:main"
 
 [dependency-groups]
 dev = [

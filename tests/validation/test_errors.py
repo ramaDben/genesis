@@ -12,6 +12,7 @@ from genesis.validation.errors import (
     PropSimConfigError,
     PurgedCvConfigError,
     SensitivityConfigError,
+    SignalDiagnosticConfigError,
     VerdictConfigError,
     WfaConfigError,
 )
@@ -110,4 +111,14 @@ def test_mensaje_con_contexto_se_conserva_en_str_prop_sim() -> None:
 def test_mensaje_con_contexto_se_conserva_en_str_verdict() -> None:
     contexto = "candidate_id=B symbol=US500 starting_balance=-1.0"
     err = VerdictConfigError(f"Configuración inválida: {contexto}")
+    assert contexto in str(err)
+
+
+def test_signal_diagnostic_config_error_hereda_de_genesis_validation_error() -> None:
+    assert issubclass(SignalDiagnosticConfigError, GenesisValidationError) is True
+
+
+def test_mensaje_con_contexto_se_conserva_en_str_signal_diagnostic() -> None:
+    contexto = "candidate_id=A symbol=XAUUSD allow_placeholder_figures=False"
+    err = SignalDiagnosticConfigError(f"Configuración inválida: {contexto}")
     assert contexto in str(err)

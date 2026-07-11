@@ -61,6 +61,13 @@ _EXPECTED_ALL = {
     "run_verdict",
     "simulate_challenge_paths",
     "write_verdict_artifacts",
+    # Issue D (R119-R122): diagnóstico de señal desnuda (kill-switch del Candidato A).
+    "ArchiveOrContinue",
+    "SignalDiagnosticConfigError",
+    "SignalDiagnosticReport",
+    "render_signal_diagnostic_markdown",
+    "run_signal_diagnostic",
+    "write_signal_diagnostic_artifacts",
 }
 
 
@@ -166,3 +173,23 @@ def test_detalles_internos_de_issue_j_no_se_reexportan() -> None:
     assert "manifest_json_to_verdict_summary" not in validation_pkg.__all__
     assert not hasattr(validation_pkg, "_build_daily_basket")
     assert not hasattr(validation_pkg, "verdict_result_to_manifest_json")
+
+
+def test_importa_la_superficie_publica_de_issue_d_sin_error() -> None:
+    """R119-R122: superficie normativa de `signal_diagnostic.py` importa sin error."""
+    from genesis.validation import (  # noqa: F401
+        ArchiveOrContinue,
+        SignalDiagnosticConfigError,
+        SignalDiagnosticReport,
+        render_signal_diagnostic_markdown,
+        run_signal_diagnostic,
+        write_signal_diagnostic_artifacts,
+    )
+
+
+def test_detalles_internos_de_issue_d_no_se_reexportan() -> None:
+    """`estimate_roundtrip_cost`/`decide_verdict`/`signal_diagnostic_report_to_json` internos."""
+    assert "estimate_roundtrip_cost" not in validation_pkg.__all__
+    assert "decide_verdict" not in validation_pkg.__all__
+    assert "signal_diagnostic_report_to_json" not in validation_pkg.__all__
+    assert not hasattr(validation_pkg, "estimate_roundtrip_cost")
