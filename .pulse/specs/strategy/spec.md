@@ -1257,3 +1257,614 @@ ENTONCES lint + ty + test pasan en verde (exit code 0, R90)
   `.agents/rules/eval-tdd-conventions.md`, `.agents/rules/tooling-conventions.md`.
 - `AGENTS.md` (raíz) — invariantes de código citados textualmente del spec.
 - `CLAUDE.md` (raíz) — arquitectura de 4 capas, comandos, flujo SDD.
+
+<!-- change:16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi -->
+<!-- change:16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi -->
+# Specification: `smc_engine` + diagnóstico de señal desnuda (kill-switch del Candidato A) — Issue #16 / D
+
+SSoT: `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md` (en adelante «el spec») — §2.2, §2.2.1,
+§2.x (universos, en particular "Universo del Candidato A"), §2.5, §3, §4, §5.1, §6/§6.1, §8, §9,
+§11/§11.1 (PA-1..PA-5), §11.2. Este documento formaliza `idea.md` y `proposal.md` de este Change en
+requisitos verificables. Los gates G/C/P/T del spec **nunca se relajan**; ningún requisito de este
+documento puede contradecirlos.
+
+Convención de rutas: el spec usa pseudocódigo `python/...` (§3, §5.1, §6); el repo real usa
+`src/genesis/...` (`[project] name = "genesis"` en `pyproject.toml`). Todas las rutas de este
+documento son las reales del repo.
+
+Numeración: continúa la numeración acumulada de `.pulse/specs/strategy/spec.md` (Issues C/E, hasta
+R90). Este Change usa **R91 en adelante**.
+
+---
+
+## 1. Objetivo y alcance
+
+### 1.1. Objetivo
+
+Construir `smc_engine` (estructura de mercado: fractales con doble timestamp, agregación M1→TF,
+EQH/EQL, máquina de estados de sweep de 5 estados, "camino libre") sobre los componentes comunes ya
+cerrados en Issue C (`common/vwap_engine.py`, `common/zones.py`), y ejecutar con él el **diagnóstico
+de señal desnuda** (§2.2.1): un kill-switch mecánico que decide, sin ningún filtro del embudo y antes
+de construir `risk`/gatillo del Candidato A (Issue F), si el edge condicional bruto de un sweep
+confirmado en zona CT supera el coste round-trip real. Este Change resuelve normativamente las
+preguntas que el issue #16 delega explícitamente a specify (semántica de doble timestamp/camino
+libre, umbral `ct_zscore_min` y TF de diagnóstico, definición de "distancia de stop típica", forma
+del bootstrap, formato del informe y alcance de la ejecución real, patrón de metadata, layout de
+`candidate_a/`, gap de universo de sesiones) y dos preguntas adicionales de arquitectura descubiertas
+en esta fase (ubicación de capa del módulo de diagnóstico con coste de ticks; ver §3.9).
+
+### 1.2. Alcance IN
+
+- `src/genesis/data/sessions.py`: extensión aditiva (nunca ruptura) para soportar la ventana de
+  solapamiento Londres–NY de XAUUSD/EURUSD/GBPUSD/USDJPY (§2.x).
+- `src/genesis/strategy/candidate_a/smc/`: motor de estructura de mercado completo — agregación
+  M1→TF, fractales con doble timestamp, EQH/EQL con mitigación, máquina de estados de sweep de 5
+  estados, "camino libre", ATR-Wilder incremental multi-TF.
+- `src/genesis/strategy/candidate_a/config.py`: `CandidateAConfig` (`smc: SmcEngineConfig` +
+  `diagnostics: DiagnosticsConfig`) + `load_candidate_a_config`, namespace `candidates.A.*` de
+  `inspector_config.json`.
+- `src/genesis/strategy/candidate_a/diagnostics.py`: núcleo estadístico puro del diagnóstico §2.2.1
+  (evento CT, retornos condicionales por horizonte, tasa de toque de VWAP antes de la distancia de
+  stop típica, bootstrap por bloques `numpy` puro) — **sin** dependencia de ticks/costos reales.
+- `src/genesis/strategy/candidate_a/errors.py`: jerarquía propia (`CandidateAConfigError`,
+  `SmcEngineStateError`).
+- `src/genesis/validation/signal_diagnostic.py` (nuevo): orquestación de capa 4 que combina el
+  núcleo estadístico de `candidate_a/diagnostics.py` con el coste round-trip real (spread de ticks
+  vía `genesis.backtest.ticks`), aplica el criterio mecánico de archivo/continuación, construye
+  `SignalDiagnosticReport` (JSON + Markdown, reproducible) y expone el CLI `diagnose`.
+- `src/genesis/validation/errors.py`: `SignalDiagnosticConfigError`.
+- Placeholders explícitamente no-autoritativos de `SymbolFigure` para XAUUSD/EURUSD/GBPUSD/USDJPY,
+  con guard fail-fast que exige una bandera explícita para usarlos.
+- Nuevo script `genesis-validate` (`[project.scripts]`) con subcomando `diagnose --candidate
+  --firm`, patrón `argparse`/`add_subparsers` de `mt5_export.py`.
+- Testing según §9: unit+property (`hypothesis`), golden, integración (pipeline en CI sobre
+  dataset de muestra), estadístico (bootstrap contra edge sintético conocido).
+
+### 1.3. Alcance OUT (YAGNI explícito)
+
+- **`risk` del Candidato A** (SL banda-vs-swing + buffer ATR+spread, TP `FIXED_RR`/`STRUCT_TRAIL`/
+  `STATIC`/`DYNAMIC`) y el **gatillo CT** de entrada/salida: Issue F, condicional al veredicto de
+  este diagnóstico (§11 tabla de issues). Este Change **no** registra `"A"` en
+  `CANDIDATE_REGISTRY` (`contract.py:register_candidate`): `smc_engine`/`diagnostics.py` son
+  módulos de análisis, no un `StrategyCandidate` ejecutable.
+- Los campos `sl_buffer_atr`, `tp_ct_mode`, `trail_timeframe`, `risk_percent`, `min_rr` (los 5
+  restantes de los 14 recortados por ADR-C5 de Issue C que aún faltan) permanecen **fuera** de
+  `candidates.A.*` en este Change; siguen reservados a Issue F.
+- Confirmación definitiva de `SymbolFigure` (tick_value/volume_step/etc.) de oro y majors contra la
+  cuenta demo real de The5ers: sigue pendiente de una extensión futura de Issue B o de Issue F. Este
+  Change solo entrega placeholders explícitos, guardados detrás de una bandera (R107).
+- Extensión de `profiles/the5ers.json` (`symbols.*`, tabla de alias MT5): fuera de este Change. La
+  extensión de `sessions.py` (§3.1) es suficiente y necesaria para que `iter_bars` produzca barras
+  anotadas de los 4 símbolos nuevos; `profile.symbols` no lo consulta `iter_bars`/`session_window`
+  (`src/genesis/data/store.py:68-115` no referencia `profile.symbols` en ningún punto) — la tabla de
+  alias solo es relevante para la resolución MT5 real de `mt5_export.py`, un paso operativo diferido.
+- Adición de `scipy`/`statsmodels` a `pyproject.toml`: el bootstrap de este Change es `numpy` puro
+  (§3.6); ningún consumidor real de `scipy` se introduce en este Change (§11.2 del spec los da por
+  asumidos, pero ninguna necesidad concreta lo exige aquí).
+- Ejecución del Candidato B (Issue E, cerrado): no depende de este diagnóstico.
+- Un CLI unificado `genesis` con todos los verbos de §6 (`export`/`quality`/`diagnose`/`backtest`/
+  `wfa`/`mc`/`prop-sim`/`full-validation`/`verdict`): este Change solo entrega el script
+  `genesis-validate diagnose`; la consolidación en un único entrypoint queda para un Change futuro
+  de la capa `validation` (no bloquea a este).
+- Reafinar el solapamiento Londres-NY con intersección real de sesiones (ver §3.1, Riesgos): la
+  ventana fija en UTC (12:00–17:00, "aprox.") es la decisión normativa de este Change.
+
+---
+
+## 2. Convenciones de esta especificación
+
+- **DEBE / NO DEBE / PUEDE** (RFC 2119, informal): obligación, prohibición, opción.
+- Cada requisito cita el `file:line` del hallazgo que lo origina cuando aplica.
+- "Capa 2" = `genesis.strategy`; "capa 3" = `genesis.backtest`; "capa 4" = `genesis.validation`;
+  "capa 1" = `genesis.data`. La dirección de dependencia es unidireccional: 4→3,2,1; 3→2,1; 2→1;
+  1→∅ (spec §3 diagrama de 4 capas; invariante explícita en
+  `src/genesis/strategy/candidate_b/candidate.py:3-8`, R50 heredado).
+
+---
+
+## 3. Decisiones normativas fijadas en este Change
+
+Esta sección responde punto por punto a las preguntas que el issue #16 delega a specify. Los
+requisitos ejecutables correspondientes están en §4.
+
+### 3.1. Gap de universo — extensión de `sessions.py` (capa 1)
+
+**Decisión**: se extiende `src/genesis/data/sessions.py` (opción (a) del proposal), no se define una
+tabla de sesión local en `candidate_a/`. Confirmado en código: `session_window(symbol, date)`
+(`sessions.py:60-83`) hoy asume un único par open/close por símbolo/día y lanza `KeyError` para
+cualquier símbolo fuera de `SESSIONS` (`sessions.py:24-49`, 4 filas: US500/NAS100/US30/GER40).
+
+La extensión es **aditiva**: se añade un segundo tipo de entrada al mapa `SESSIONS`,
+`FixedUtcWindowSpec` (ventana dada directamente en UTC), distinto de `SessionSpec` (ventana en hora
+local del mercado subyacente, resuelta vía `zoneinfo`). Motivo de la distinción: el spec (§2.x) da la
+tabla de solapamiento Londres–NY directamente en UTC ("12:00–17:00 UTC aprox."), a diferencia de la
+tabla de sesiones de contado de índices (§2.3), que se da en hora local del mercado subyacente. Usar
+un tipo distinto evita forzar una intersección de dos `SessionSpec` (Londres + Nueva York) cuyas
+horas de "sesión FX/metal" no están normadas en ningún lugar del spec ni del repo — inventar esa
+descomposición sería especular sin base normativa, mientras que la ventana fija en UTC ya está dada.
+
+**Trade-off aceptado y documentado (Riesgo, §8)**: `FixedUtcWindowSpec` no resuelve DST del "lado
+Londres" ni del "lado Nueva York" por separado; es una ventana UTC fija todo el año, coherente con
+el "aprox." del propio SSoT. Los 4 símbolos existentes (`SessionSpec`) no se tocan.
+
+### 3.2. Placeholders de `SymbolFigure` — no autoritativos, con guard explícito
+
+**Decisión**: no se extiende `profiles/the5ers.json` (que no tiene una noción de "ficha numérica de
+símbolo": `FirmProfile.symbols` solo mapea alias, `src/genesis/data/profile.py:31-48`). Se definen
+placeholders de `SymbolFigure` (`src/genesis/data/symbols.py:11-28`) para XAUUSD/EURUSD/GBPUSD/
+USDJPY **dentro del namespace `candidates.A.diagnostics.*`** de `inspector_config.json` (capa 2,
+ámbito exclusivo del diagnóstico), explícitamente marcados como no confirmados contra una cuenta
+real. El CLI (§4.6) exige una bandera explícita (`--allow-placeholder-figures`) para usarlos; sin
+ella, `diagnose` rechaza con `SignalDiagnosticConfigError` los símbolos sin ficha confirmada. Esto
+resuelve el bloqueo operativo (idea.md pregunta 2) sin reabrir el esquema autoritativo de Issue B ni
+fingir que el valor es real.
+
+### 3.3. `smc_engine` — base normativa citada, clean-room
+
+**Decisión**: se adopta `C:\Users\bbrav\ABON\vwap-smc-inspector\docs\specs\VWAP_SMC_Inspector_Spec_v2.md`
+§4 como base normativa **citada** (no copiada, no importada como código — confirmado que no existe
+implementación de `SMC_Engine.mqh` en ese repo, ni en MQL5 ni en Python, cero tests) para: fractales
+con doble timestamp (§4.1), agregación M1→TF (§4.2), EQH/EQL con tolerancia ATR (§4.3), máquina de
+estados de sweep de 5 estados (§4.4), "camino libre" (§4.5). Los defaults exactos de esa fuente
+(`fractal_n=3`, `eq_tolerance_atr=0.15`, `sweep_tolerance_atr=0.05`, `sweep_window_k=5`,
+`sweep_validity_m=30`, `free_path_radius_sigma=1.0`, `atr_period=14`) se adoptan como defaults de
+`SmcEngineConfig` (§4.4 de este documento). Motivo: es la única fuente ya cuantificada; re-derivar
+desde cero con solo el SSoT (§2.2/§2.2.1, más escueto) introduciría parámetros arbitrarios sin
+grounding, y el propio SSoT delega esta semántica a Issue D.
+
+### 3.4. `ct_zscore_min` y TF(s) del evento de diagnóstico
+
+**Decisión**: `ct_zscore_min = 2.0` (perfil base de la fuente externa) como default de
+`SmcEngineConfig`, ajustable vía config (perfil conservador `3.0` documentado como alternativa, no
+default). El diagnóstico corre sobre **sweeps confirmados en M1** (el evento normativo de §2.2 es
+"sweep confirmado... por símbolo y sesión", y el contrato `StrategyCandidate.on_bar` de Issue C solo
+recibe `AnnotatedBar` M1 — `contract.py:58-59` — por lo que la futura señal ejecutable de Issue F
+también operará en M1). M15/H1 se construyen y mantienen internamente por `smc_engine` **solo** para
+resolver la jerarquía de "camino libre" (§4.5 de la fuente externa: H1 > M15 > M1); no se emite un
+informe de diagnóstico separado por TF. Esto responde la pregunta 4 de idea.md: no son "tres
+diagnósticos", es un diagnóstico M1 que consume estructura multi-TF internamente.
+
+### 3.5. Definición operativa de "distancia de stop típica"
+
+**Decisión**: se deriva de estructura SMC (opción preferida del proposal), **no** de `sl_buffer_atr`
+(reservado a Issue F, §1.3). Se define un campo nuevo, propio de este Change y sin acoplamiento al
+futuro namespace de riesgo: `diagnostics.stop_distance_atr_buffer_multiple` (default `1.0`). La
+distancia de stop típica para un evento CT es:
+
+```
+distancia_stop = |precio_extremo_del_sweep − nivel_barrido| + stop_distance_atr_buffer_multiple × ATR(atr_period, M1)
+```
+
+donde `nivel_barrido` es el precio del nivel de liquidez (EQH/EQL o swing) que produjo el sweep
+confirmado (§4.4 de la fuente externa) y `precio_extremo_del_sweep` es el `high`/`low` de la vela que
+lo tocó. Es una heurística de **medición**, agnóstica al veredicto de riesgo real (que no existe
+todavía): reutiliza la misma forma conceptual que usará el `risk` de Issue F (banda/estructura +
+buffer ATR) sin definir su campo de configuración final, evitando coupling prematuro con F.
+
+### 3.6. Bootstrap — `numpy` puro
+
+**Decisión**: se reutiliza el patrón de bloques temporales de
+`genesis.validation.montecarlo._block_resample`/`_block_bootstrap_paths`
+(`src/genesis/validation/montecarlo.py:129-167`) y su convención de RNG explícito
+(`numpy.random.default_rng(seed)`, nunca estado global — `montecarlo.py:8`). No se introduce
+`scipy.stats`. Confirmado en `pyproject.toml:1-13`: `dependencies` no incluye `scipy`/`statsmodels`
+hoy; este Change no es su primer consumidor real.
+
+### 3.7. Formato del informe y alcance de la ejecución real
+
+**Decisión (formato)**: dual **JSON + Markdown**, replicando el patrón ya establecido de
+`genesis.validation.verdict` (`render_tearsheet` produce Markdown puro desde el mismo payload que
+`verdict_result_to_manifest_json` serializa a JSON — `src/genesis/validation/verdict.py:826-1026`,
+`write_verdict_artifacts` escribe ambos — `verdict.py:1039-1076`). El JSON es la fuente canónica
+(reproducible, con metadata); el Markdown se renderiza del mismo payload, sin I/O propio.
+
+**Decisión (alcance de ejecución)**: este Change **entrega y ejecuta** el pipeline completo
+(`store → smc_engine → diagnostics → signal_diagnostic`) contra el dataset de muestra ya versionado
+en el repo (mismo patrón que `tests/strategy/fixtures/sample_m1.csv`, usado por los golden tests de
+`candidate_b`), produciendo al menos un `SignalDiagnosticReport` real y determinista en CI (criterio
+de éxito verificable, §6). La ejecución **definitiva** sobre el histórico completo real de The5ers
+(vía `mt5-export` contra la cuenta de datos, spec §4.1) — la que produce la decisión de negocio real
+archivar/continuar que desbloquea Issue F — es una tarea operativa posterior que usa el mismo CLI
+`genesis-validate diagnose`, fuera de la autoría de este Change SDD (no hay acceso a cuenta MT5 real
+desde este entorno de agente). Se documenta como Pregunta abierta operativa (§8).
+
+### 3.8. Patrón de metadata del informe
+
+**Decisión**: `SignalDiagnosticReport` (capa 4, `signal_diagnostic.py`) **compone** (no hereda, no
+reimplementa) `genesis.data.metadata.ArtifactMetadata` (`src/genesis/data/metadata.py:51-99`) como
+campo `data_metadata: ArtifactMetadata`, reutilizando `sha256_of`/`current_git_commit` sin duplicar
+lógica de hash — la dirección capa 4 → capa 1 ya está permitida. Se le añaden campos propios de
+capa 2/4 que `ArtifactMetadata` no modela: `candidate_id`, `symbol`, `session_label`,
+`horizons_minutes`, `bootstrap_seed`, `bootstrap_resamples`, y el veredicto (`verdict`,
+`ArchiveOrContinue`). Esto evita el patrón "ligero" puro de H/I/J (que no llevan `ArtifactMetadata`)
+porque este informe sí necesita la reproducibilidad institucional completa de capa 1 (dataset_hash,
+firm_profile_hash) al ser un punto de decisión de negocio real (§2.2.1), no solo un resultado
+intermedio de validación.
+
+### 3.9. Ubicación de capa del módulo de diagnóstico (hallazgo de esta fase, no anticipado por el issue)
+
+**Hallazgo**: §5.1 del spec dice literalmente "`candidate_a/` | `smc_engine` + gatillo CT + riesgo
+propio (§2.2). **Incluye el módulo del diagnóstico §2.2.1**" — es decir, el spec ubica todo el
+diagnóstico dentro de la capa 2. Pero §2.2.1 exige el coste round-trip "con spread de ticks reales en
+el momento del sweep", y `ticks.py`/`has_sufficient_tick_coverage`/`ticks_in_bar_window` viven en
+`genesis.backtest` (capa 3). `candidate_b/candidate.py:3-8` fija como invariante explícita que
+`genesis.strategy.candidate_*` **nunca** importa `genesis.backtest` (dirección de dependencia 2→1,
+nunca 2→3). Además, §6 lista `diagnose` junto a `wfa`/`mc`/`prop-sim`/`verdict` como verbos del CLI de
+**capa 4**, y el diagrama de flujo §6.1 sitúa "diagnóstico señal desnuda §2.2.1" en el mismo nivel que
+"WFA por candidato", ambos consumiendo el Parquet versionado de calidad — es decir, es un paso de
+**validación**, no de estrategia pura.
+
+**Decisión (resuelve la tensión sin contradecir el spec)**: se divide el diagnóstico en dos módulos,
+preservando la dirección de dependencia:
+
+- `candidate_a/diagnostics.py` (capa 2): el **núcleo estadístico puro** de §2.2.1 — detección del
+  evento CT, agregación de retornos condicionales por horizonte, tasa de toque de VWAP antes de la
+  distancia de stop típica, bootstrap. Depende solo de capa 1 (`AnnotatedBar`) y capa 2
+  (`smc_engine`, `common.zones`) + `numpy`. Sigue viviendo, literalmente, "en `candidate_a/`" —
+  honra §5.1.
+- `genesis/validation/signal_diagnostic.py` (capa 4, nuevo): la **orquestación** que añade el coste
+  real de ticks (`genesis.backtest.ticks`), aplica el criterio mecánico de archivo (§2.2.1), arma
+  `SignalDiagnosticReport` y expone el CLI. Consume `candidate_a.diagnostics` (2), `genesis.backtest.
+  ticks` (3) y `genesis.data.*` (1) — dirección 4→3,2,1, sin violar ninguna capa.
+
+Esta división es análoga a cómo `genesis.validation.verdict` combina insumos de múltiples capas
+inferiores sin que ninguna de ellas conozca a `validation`. Se documenta como decisión elevada, no
+como reinterpretación libre de §5.1: el "módulo del diagnóstico" sigue existiendo en `candidate_a/`
+(la parte que no requiere costes), y la parte que sí los requiere se ubica donde la arquitectura de 4
+capas ya la exige.
+
+### 3.10. Layout de `candidate_a/`
+
+**Decisión** (fijada aquí pese a que proposal.md la marcaba "no bloquea specify", por instrucción
+explícita de esta fase): submódulo `candidate_a/smc/` para el motor de estructura (fractales +
+agregación + EQH/EQL + sweep + camino libre — sustancialmente mayor que `candidate_b/candidate.py`,
+único módulo de referencia de un candidato completo), y archivos planos para el resto:
+
+```
+src/genesis/strategy/candidate_a/
+├── __init__.py
+├── smc/
+│   ├── __init__.py       # API pública re-exportada (SmcEngineState, update_smc_engine, tipos)
+│   └── ...                # split interno (p. ej. timeframe.py, fractals.py, liquidity.py,
+│                           #  sweep.py, atr.py) a discreción de design — detalle no bloqueante
+├── config.py               # CandidateAConfig + load_candidate_a_config
+├── diagnostics.py           # núcleo estadístico puro de §2.2.1 (§3.9)
+└── errors.py                # CandidateAConfigError, SmcEngineStateError
+```
+
+El split de archivos **dentro** de `smc/` queda a discreción de design (detalle de implementación no
+bloqueante); la decisión fijada aquí es únicamente submódulo-vs-plano al nivel de `candidate_a/`.
+
+---
+
+## 4. Requisitos por módulo
+
+### 4.1. `sessions.py` — extensión de ventana fija en UTC (capa 1)
+
+- **R91** (DEBE). `sessions.py` DEBE añadir un tipo `FixedUtcWindowSpec` (`dataclass(frozen=True,
+  slots=True)`, campos `symbol: str`, `open_utc: time`, `close_utc: time`), sin modificar
+  `SessionSpec` (`sessions.py:14-22`) ni las 4 entradas existentes de `SESSIONS`.
+- **R92** (DEBE). `SESSIONS` DEBE ampliar su anotación de tipo a `Mapping[str, SessionSpec |
+  FixedUtcWindowSpec]` y añadir 4 entradas nuevas: `XAUUSD`, `EURUSD`, `GBPUSD`, `USDJPY`, cada una
+  `FixedUtcWindowSpec(symbol=..., open_utc=time(12, 0), close_utc=time(17, 0))` (§2.x del spec:
+  "Solapamiento Londres–NY (12:00–17:00 UTC aprox.)").
+- **R93** (DEBE). `session_window(symbol, session_date)` DEBE despachar por `isinstance(spec,
+  FixedUtcWindowSpec)`: si es `FixedUtcWindowSpec`, construir `open_utc`/`close_utc` combinando
+  `session_date` con las horas directamente en `UTC` (sin `zoneinfo` de mercado subyacente); si es
+  `SessionSpec`, preservar el comportamiento exacto actual (`sessions.py:71-83`, sin cambios).
+- **R94** (NO DEBE). `session_window` NO DEBE lanzar `KeyError` para ninguno de los 8 símbolos del
+  universo del Candidato A (§2.x) tras esta extensión; el mensaje de `KeyError` para símbolos no
+  soportados DEBE seguir listando las claves válidas (ahora 8), sin cambiar su formato.
+
+### 4.2. Placeholders de `SymbolFigure` (capa 2, ámbito diagnóstico)
+
+- **R95** (DEBE). `inspector_config.json` DEBE añadir, bajo `candidates.A.diagnostics.
+  symbol_figures_placeholder`, una entrada `SymbolFigure`-compatible (mismos 9 campos de
+  `symbols.py:11-28`) por cada uno de XAUUSD/EURUSD/GBPUSD/USDJPY, con valores plausibles de un
+  broker MT5 estándar (documentados en el propio JSON o en el docstring del loader como no
+  confirmados).
+- **R96** (DEBE). `candidate_a/config.py` DEBE exponer una función de carga de estos placeholders
+  (p. ej. `load_placeholder_symbol_figures`) que retorne `Mapping[str, SymbolFigure]`, separada de
+  `load_candidate_a_config` (separación de responsabilidad: parámetros de señal vs. fichas de
+  contrato).
+- **R107** (DEBE). El CLI `diagnose` (§4.6) DEBE rechazar, con `SignalDiagnosticConfigError` (mensaje
+  con el símbolo afectado), cualquier ejecución sobre XAUUSD/EURUSD/GBPUSD/USDJPY que no incluya
+  explícitamente la bandera `--allow-placeholder-figures`; con la bandera, DEBE registrar en
+  `SignalDiagnosticReport` que la ficha usada es un placeholder no confirmado.
+
+### 4.3. `smc_engine` — motor de estructura de mercado (`candidate_a/smc/`, capa 2)
+
+- **R97** (DEBE). `smc/` DEBE definir `Timeframe` (`StrEnum`: `M1`, `M15`, `H1`) y una función/estado
+  de agregación M1→TF que solo emite una vela agregada de un TF cuando su última M1 componente
+  cierra, alineada al ancla estándar (minuto 0/15/30/45 para M15; minuto 0 para H1), sin pedir jamás
+  series nativas M15/H1 (base normativa: fuente externa §4.2, citada en §3.3 de este documento).
+- **R98** (DEBE). `smc/` DEBE definir un tipo `Swing` (`frozen`, `slots`) con campos `timeframe:
+  Timeframe`, `direction` (`StrEnum` `HIGH`/`LOW`), `price: float`, `pivot_time: datetime`,
+  `confirmed_time: datetime`.
+- **R99** (DEBE). Un `Swing` HIGH en un TF se confirma cuando la vela pivote tiene `high` estrictamente
+  mayor que las `fractal_n` velas anteriores y las `fractal_n` posteriores del mismo TF (simétrico
+  para `Swing` LOW con `low` estrictamente menor); `confirmed_time` es el cierre de la N-ésima vela
+  posterior del mismo TF.
+- **R100** (NO DEBE). Ningún `Swing` DEBE entrar al estado público del motor (visible a
+  `diagnostics.py` o a cualquier consumidor) antes de su propia `confirmed_time`: la invariante es
+  **estructural** (el motor solo agrega el swing a su mapa de niveles en la vela de confirmación),
+  no un chequeo posterior sobre timestamps ya expuestos.
+- **R101** (DEBE). `SmcEngineState` DEBE componer una instancia interna de `BarClock`
+  (`clock.py:14-67`), avanzada en cada llamada a la función de actualización con la barra M1
+  recibida; cualquier consulta interna de vigencia de un nivel/swing DEBE pasar por
+  `BarClock.require`, reutilizando `LookaheadError` (`errors.py:12-17`) sin duplicar su lógica.
+- **R102** (DEBE). `smc/` DEBE definir `LiquidityLevel` (EQH/EQL): dos o más `Swing` del mismo TF
+  forman un nivel si la diferencia entre sus precios extremos es ≤ `eq_tolerance_atr × ATR(atr_period)`
+  del TF correspondiente (ATR incremental, R106); el precio del nivel es el máximo (EQH) o mínimo
+  (EQL) del grupo. Un nivel se marca `mitigated=True` cuando una vela posterior del mismo TF cierra
+  más allá del nivel; los niveles mitigados salen del mapa de consulta activo.
+- **R103** (DEBE). `smc/` DEBE definir `SweepState` (`StrEnum`: `ARMADO`, `TOCADO`, `BARRIDO`,
+  `EXPIRADO`, `MITIGADO`) y una función de transición pura, simétrica para liquidez superior/
+  inferior:
+  - `ARMADO`: el nivel existe y no está mitigado.
+  - `TOCADO`: una vela M1 hace `high > nivel + sweep_tolerance_atr × ATR(14, M1)` (o `low <` para
+    inferior).
+  - `BARRIDO`: dentro de `sweep_window_k` velas M1 desde el toque (incluida la del toque), una vela
+    M1 CIERRA de vuelta dentro del nivel.
+  - `EXPIRADO`: el estado `BARRIDO` habilita entradas durante `sweep_validity_m` velas M1; agotado
+    ese plazo sin nueva confirmación, el nivel vuelve a `ARMADO`.
+  - `MITIGADO`: si en cualquier momento una vela CIERRA más allá del nivel sin volver dentro de la
+    ventana `sweep_window_k`, el nivel se marca mitigado y sale del mapa.
+- **R104** (DEBE). `smc/` DEBE definir la función de "camino libre": para un sweep candidato en M1,
+  buscar liquidez macro no mitigada (EQH/EQL o `Swing` de H1/M15) dentro de un radio
+  `free_path_radius_sigma × sigma_t` (sigma del VWAP vigente, provisto por el caller desde
+  `common.vwap_engine`) desde el precio extremo del sweep; si existe, el sweep válido DEBE ser el del
+  nivel macro (jerarquía H1 > M15 > M1); si no existe, se acepta el sweep M1 directamente.
+- **R105** (NO DEBE). `smc/` NO DEBE importar `numpy`, `pandas` ni ningún paquete de `genesis.backtest`
+  o `genesis.validation` (dominio puro, mismo criterio que `common/vwap_engine.py:1-4`; `rg -n
+  "^import numpy|^import pandas|genesis\.backtest|genesis\.validation" src/genesis/strategy/
+  candidate_a/smc/` DEBE retornar 0 coincidencias).
+- **R106** (DEBE). `smc/` DEBE mantener un ATR-Wilder incremental por `Timeframe` (M1/M15/H1),
+  generalizando el patrón `_update_atr` de `candidate_b/candidate.py:136-162` (continuo cross-día,
+  nunca reseteado), consumido por R102/R103.
+
+### 4.4. `candidates.A.*` — configuración de estructura y diagnóstico (capa 2)
+
+- **R108** (DEBE). `inspector_config.json` DEBE poblar `candidates.A.smc` con exactamente los 8
+  campos de estructura (`fractal_n`, `eq_tolerance_atr`, `sweep_tolerance_atr`, `sweep_window_k`,
+  `sweep_validity_m`, `free_path_radius_sigma`, `ct_zscore_min`, `atr_period`) con los defaults de
+  §3.3, y `candidates.A.diagnostics` con `horizons_minutes` (`[5, 15, 30, 60]`),
+  `bootstrap_resamples`, `bootstrap_block_size` (nullable, mismo criterio que `_default_block_size`
+  de `montecarlo.py:111-114`), `bootstrap_seed`, `stop_distance_atr_buffer_multiple` (default `1.0`,
+  §3.5) y `symbol_figures_placeholder` (R95).
+- **R109** (NO DEBE). `candidates.A.*` NO DEBE incluir en este Change ninguno de los 5 campos
+  reservados a Issue F (`sl_buffer_atr`, `tp_ct_mode`, `trail_timeframe`, `risk_percent`, `min_rr`);
+  `rg -n "sl_buffer_atr|tp_ct_mode|trail_timeframe|risk_percent" src/genesis/strategy/
+  inspector_config.json` DEBE retornar 0 coincidencias.
+- **R110** (DEBE). `candidate_a/config.py` DEBE definir `SmcEngineConfig` y `DiagnosticsConfig`
+  (`frozen`, `slots`) más una función compuesta `load_candidate_a_config` que replica el patrón
+  fail-fast de `load_candidate_b_config` (`candidate_b/config.py:36-66`): recurso empaquetado
+  `genesis.strategy/inspector_config.json` por defecto, `path` explícito opcional, lanza
+  `CandidateAConfigError` con el campo/fuente faltante ante cualquier esquema inválido o incompleto.
+
+### 4.5. `candidate_a/diagnostics.py` — núcleo estadístico puro (capa 2, §3.9)
+
+- **R111** (NO DEBE). `diagnostics.py` NO DEBE importar `genesis.backtest` ni `genesis.validation`
+  (mismo criterio que R50 de `candidate_b/candidate.py:3-8`; `rg -n "genesis\.backtest|genesis\.
+  validation" src/genesis/strategy/candidate_a/diagnostics.py` DEBE retornar 0 coincidencias).
+- **R112** (DEBE). `diagnostics.py` DEBE definir el evento CT: para cada barra M1 con
+  `zones.classify_zone(zscore, ct_zscore_min=config.smc.ct_zscore_min) == Zone.CT` (reutilizando
+  `common/zones.py:21-53` sin reimplementar el umbral, per idea.md) y un `SmcEngineResult` con sweep
+  vigente (`BARRIDO`/`EXPIRADO`, R103) sobre el nivel resuelto por "camino libre" (R104), producir un
+  `ConditionalReturnEvent` (símbolo, sesión, timestamp del evento, dirección esperada de reversión).
+- **R113** (DEBE). Para cada `ConditionalReturnEvent`, `diagnostics.py` DEBE calcular el retorno
+  forward a 5/15/30/60 minutos (o el subconjunto de `horizons_minutes` disponible antes de que la
+  serie de barras se agote) frente a la distribución incondicional del mismo símbolo/sesión (misma
+  ventana temporal, sin filtro CT), y la tasa de toque del VWAP (`vwap_engine.VWAPResult.vwap`)
+  **antes** de recorrer la distancia de stop típica (§3.5).
+- **R114** (DEBE). `diagnostics.py` DEBE producir intervalos por bootstrap de bloques temporales,
+  reimplementado localmente con el mismo patrón de `montecarlo._block_resample`
+  (`montecarlo.py:129-148`) — `numpy.random.default_rng(seed)` explícito, nunca estado global — en
+  vez de importar `genesis.validation` (que violaría R111); ADR-H5 (Change I) ya documenta que
+  reimplementar localmente entre Changes distintos es preferible a acoplar.
+- **R115** (DEBE). `diagnostics.py` DEBE retornar una estructura agnóstica al coste (`RawEdgeSummary`
+  o similar): retornos condicionales por horizonte (media, intervalo bootstrap), tasa de toque de
+  VWAP, distancia de stop típica calculada, y el conteo de eventos CT usados — sin aplicar todavía el
+  criterio de archivo (eso vive en capa 4, R118).
+
+### 4.6. `genesis/validation/signal_diagnostic.py` — orquestación, coste, veredicto, CLI (capa 4, §3.9)
+
+- **R116** (DEBE). `signal_diagnostic.py` DEBE consumir `genesis.backtest.ticks.iter_ticks`/
+  `ticks_in_bar_window`/`has_sufficient_tick_coverage` (`ticks.py:58-132`) para estimar el spread
+  round-trip real en el instante del sweep (`(T-60s, T]`, mismo criterio de borde que el motor de
+  fills — `ticks.py:93-100`).
+- **R117** (DEBE). Si no hay cobertura suficiente de ticks para un evento CT (`has_sufficient_
+  tick_coverage` retorna `False`), `signal_diagnostic.py` DEBE excluir ese evento del cómputo de
+  coste y reportarlo explícitamente en `SignalDiagnosticReport` (conteo de eventos excluidos por
+  falta de ticks) — nunca degradarlo silenciosamente a un spread promedio (§2.2.1: "no promedio").
+- **R118** (DEBE). El criterio de archivo mecánico DEBE comparar el edge bruto condicional (límite
+  inferior del intervalo bootstrap de `RawEdgeSummary`, R115) contra el coste round-trip estimado
+  (R116): si el edge bruto es inferior al coste, el veredicto es `ARCHIVE`; si lo supera, `CONTINUE`.
+  Sin discrecionalidad humana en la decisión (criterio de éxito 4 del proposal).
+- **R119** (DEBE). `SignalDiagnosticReport` (`frozen`, `slots`) DEBE componer `data_metadata:
+  ArtifactMetadata` (§3.8) y añadir `candidate_id`, `symbol`, `session_label`, `horizons_minutes`,
+  `bootstrap_seed`, `bootstrap_resamples`, `verdict` (`ArchiveOrContinue`, `StrEnum`:
+  `ARCHIVE`/`CONTINUE`), `excluded_events_no_tick_coverage` (R117), y
+  `symbol_figure_is_placeholder: bool` (R107).
+- **R120** (DEBE). `signal_diagnostic.py` DEBE exponer `render_signal_diagnostic_markdown(report) ->
+  str` (Markdown puro, sin I/O, mismo patrón que `render_tearsheet` — `verdict.py:877-960`) y
+  `signal_diagnostic_report_to_json(report) -> str` (mismo payload serializado, `json.dumps(...,
+  sort_keys=True)`), y una única función de escritura (`write_signal_diagnostic_artifacts`) que
+  persiste ambos en un directorio de salida (mismo patrón que `write_verdict_artifacts` —
+  `verdict.py:1039-1076`).
+- **R121** (DEBE). `signal_diagnostic.py` DEBE exponer un CLI `diagnose --candidate A --firm the5ers
+  [--allow-placeholder-figures]`, registrado como `genesis-validate` en `[project.scripts]` de
+  `pyproject.toml`, con `argparse` + `add_subparsers(dest="command", required=True)` (mismo patrón
+  estructural que `mt5_export.py:640-684`).
+- **R122** (DEBE). `genesis.validation.errors` DEBE añadir `SignalDiagnosticConfigError`
+  (`GenesisValidationError`, mismo criterio de mensaje con contexto que las excepciones hermanas —
+  `errors.py:1-93`).
+
+### 4.7. Testing (§9 del spec)
+
+- **R123** (DEBE). Unit + property (`hypothesis`) para: doble timestamp de fractales (ningún `Swing`
+  es visible antes de `confirmed_time`, sobre secuencias generadas), la máquina de estados de sweep
+  de 5 estados (transiciones válidas exhaustivas, ninguna transición fuera de las 5 definidas),
+  EQH/EQL (agrupación por tolerancia ATR, mitigación). Propiedad central del spec §9: **ningún output
+  de una actualización de `smc_engine` en `t` cambia si se mutan barras posteriores a `t`**
+  (property test explícito, análogo a `tests/strategy/test_contract_lookahead_property.py`).
+- **R124** (DEBE). Golden tests: dataset sintético fijo de sweep de libro (EQH conocido, toque, cierre
+  de vuelta, expiración) reproduce exactamente el `SweepState`/`LiquidityLevel` esperado; golden test
+  del `SignalDiagnosticReport` completo con semilla de bootstrap fija reproduce byte a byte el mismo
+  JSON en dos ejecuciones.
+- **R125** (DEBE). Estadístico: el criterio de archivo mecánico (R118) DEBE dispararse correctamente
+  sobre datasets sintéticos con edge conocido positivo (veredicto `CONTINUE`) y edge conocido nulo/
+  negativo (veredicto `ARCHIVE`), sin ajuste manual del umbral entre ambos casos.
+- **R126** (DEBE). Integración: pipeline completo `store.iter_bars → smc_engine → diagnostics →
+  signal_diagnostic` sobre el dataset de muestra del repo (mismo patrón que
+  `tests/strategy/fixtures/sample_m1.csv`) en CI, en segundos, para al menos un símbolo del universo
+  de índices (US500/NAS100/US30/GER40, con `SessionSpec` ya existente) y, con
+  `--allow-placeholder-figures`, para al menos uno de XAUUSD/EURUSD/GBPUSD/USDJPY (verifica R91-R94 +
+  R95-R107 end-to-end).
+
+---
+
+## 5. Invariantes transversales
+
+- **Aislamiento entre candidatos** (spec §2.1/§2.5): `smc_engine`/`diagnostics.py` nunca comparten
+  estado entre símbolos; una instancia de `SmcEngineState` está ligada a un único símbolo/TF-set de
+  construcción (mismo patrón que `CandidateB`, `candidate_b/candidate.py:38-52`).
+- **Forward-only / anti-lookahead** (spec §3, §8): ningún output de `smc_engine` en el instante `t`
+  puede depender de barras con `timestamp_utc > t` (R100, R101, R123).
+- **Determinismo byte a byte** (spec §3, §8): misma semilla + dataset + config + ficha de firma ⇒
+  `SignalDiagnosticReport` idéntico (R124).
+- **Fail-fast tipificado, nunca degradación silenciosa** (spec §8): configuración incompleta →
+  `CandidateAConfigError`/`SignalDiagnosticConfigError`; cobertura de ticks insuficiente → exclusión
+  explícita reportada (R117), nunca un promedio sustituto; símbolo sin ficha confirmada → rechazo
+  explícito salvo bandera (R107).
+- **Dirección de dependencia unidireccional** (spec §3): `candidate_a/smc/` y `candidate_a/
+  diagnostics.py` (capa 2) nunca importan `genesis.backtest`/`genesis.validation` (R105, R111);
+  `genesis/validation/signal_diagnostic.py` (capa 4) es el único punto que cruza a capa 3 para el
+  coste real de ticks (§3.9).
+
+---
+
+## 6. Manejo de errores (resumen normativo, spec §8)
+
+| Excepción | Módulo | Disparador |
+|---|---|---|
+| `LookaheadError` (reusada) | `smc/` | Consulta de vigencia de nivel/swing posterior al `current_time` del `BarClock` interno (R101) |
+| `CandidateAConfigError` (nueva) | `candidate_a/errors.py` | `candidates.A.smc`/`candidates.A.diagnostics` faltante o inválido en `inspector_config.json` (R110) |
+| `SmcEngineStateError` (nueva) | `candidate_a/errors.py` | Invariante interna imposible del motor (p. ej. ATR consultado antes de calentamiento, mismo criterio que `CandidateBStateError`) |
+| `SignalDiagnosticConfigError` (nueva) | `genesis.validation.errors` | Símbolo sin ficha confirmada sin bandera (R107); config de horizontes/bootstrap inválida |
+| `BacktestConfigError` (reusada, capa 3) | — | Se propaga sin envolver desde `ticks.py` (mismo criterio R5 de `validation/errors.py:11-13`) |
+
+---
+
+## 7. Criterios de aceptación (evals ejecutables)
+
+1. **DADO** `sessions.SESSIONS` tras esta implementación, **CUANDO** se invoca
+   `session_window("XAUUSD", session_date)` para cualquier `session_date`, **ENTONCES** retorna
+   `(open_utc, close_utc)` con `open_utc.time() == time(12, 0)` y `close_utc.time() == time(17, 0)`,
+   sin lanzar `KeyError` (verifica R91-R94).
+   - Assertion ejecutable: `rg -n "XAUUSD|EURUSD|GBPUSD|USDJPY" src/genesis/data/sessions.py` DEBE
+     retornar ≥ 4 coincidencias.
+2. **DADO** una secuencia de barras M1 sintéticas con un swing high conocido en la posición `i`,
+   **CUANDO** se alimentan al motor bar a bar hasta la posición `i + fractal_n`, **ENTONCES** el
+   `Swing` correspondiente NO es visible en el estado público del motor hasta la barra
+   `i + fractal_n` inclusive (verifica R98-R100).
+   - Assertion ejecutable: property test `hypothesis` con `@given` sobre secuencias de barras;
+     `assert swing not in engine.active_swings(timeframe)` para todo índice `< i + fractal_n`.
+3. **DADO** un nivel EQH `ARMADO`, **CUANDO** una vela M1 hace `high > nivel + sweep_tolerance_atr *
+   atr` y, dentro de `sweep_window_k` velas, una vela cierra de vuelta bajo el nivel, **ENTONCES** el
+   estado transiciona `ARMADO → TOCADO → BARRIDO` y, tras `sweep_validity_m` velas sin nueva
+   confirmación, retorna a `ARMADO` (verifica R103).
+   - Assertion ejecutable: golden test con secuencia fija de barras produce exactamente la traza de
+     estados `[ARMADO, TOCADO, BARRIDO, EXPIRADO, ARMADO]` esperada.
+4. **DADO** un dataset sintético con edge condicional positivo conocido (retornos forward
+   sistemáticamente favorables tras el evento CT) y coste round-trip sintético bajo, **CUANDO** se
+   ejecuta `signal_diagnostic` completo, **ENTONCES** `SignalDiagnosticReport.verdict ==
+   ArchiveOrContinue.CONTINUE`; con el mismo dataset y coste round-trip sintético alto (o edge nulo),
+   **ENTONCES** `verdict == ArchiveOrContinue.ARCHIVE` (verifica R118, R125).
+5. **DADO** el CLI `genesis-validate diagnose --candidate A --firm the5ers` ejecutado dos veces con
+   la misma semilla sobre el mismo dataset de muestra, **ENTONCES** el JSON producido por
+   `signal_diagnostic_report_to_json` es byte a byte idéntico en ambas ejecuciones (verifica R124).
+   - Assertion ejecutable: `diff <(genesis-validate diagnose ...) <(genesis-validate diagnose ...)`
+     (o equivalente `pytest` comparando dos runs) DEBE retornar sin diferencias.
+6. **DADO** `--candidate A --firm the5ers` sin `--allow-placeholder-figures` sobre XAUUSD,
+   **ENTONCES** el CLI termina con `SignalDiagnosticConfigError` (código de salida ≠ 0) sin producir
+   ningún `SignalDiagnosticReport` (verifica R107).
+7. **DADO** un día de `trading_day` sin chunk de ticks persistido para un evento CT detectado,
+   **ENTONCES** ese evento aparece en `SignalDiagnosticReport.excluded_events_no_tick_coverage` y no
+   contribuye al coste round-trip promedio reportado (verifica R117).
+8. **DADO** el árbol `src/genesis/strategy/candidate_a/smc/` y `diagnostics.py`, **ENTONCES**
+   `rg -n "genesis\.backtest|genesis\.validation" src/genesis/strategy/candidate_a/` retorna 0
+   coincidencias (verifica R105, R111).
+9. **DADO** el pipeline de integración de R126, **CUANDO** se ejecuta en CI, **ENTONCES** completa en
+   segundos (no minutos) para al menos un índice y al menos un símbolo con placeholder de figura,
+   sin degradación silenciosa (excepción tipificada o exclusión reportada ante historia/tick
+   insuficiente).
+
+---
+
+## 8. Riesgos
+
+- **Aproximación de la ventana Londres–NY sin DST** (§3.1): `FixedUtcWindowSpec` no distingue
+  horario de verano/invierno de Londres o Nueva York por separado; el propio SSoT acepta esta
+  imprecisión ("aprox."), pero si el diagnóstico revela sensibilidad material del edge a los bordes
+  exactos de la ventana, una futura iteración debería derivar la intersección real de dos sesiones
+  con `zoneinfo` (documentado como decisión revisable, no como deuda oculta).
+- **Placeholders de `SymbolFigure` no confirmados** (§3.2): el coste round-trip para XAUUSD/EURUSD/
+  GBPUSD/USDJPY calculado con placeholders puede diferir materialmente del real; el guard (R107)
+  hace la limitación visible, pero cualquier decisión de negocio real sobre esos símbolos requiere
+  confirmación contra la cuenta demo antes de asignar capital.
+- **Ejecución diferida sobre histórico real** (§3.7): la decisión de negocio definitiva
+  archivar/continuar para producción depende de una ejecución posterior fuera de este Change (sin
+  acceso a MT5 real desde este entorno); Issue F no debería arrancar hasta que esa ejecución operativa
+  se complete con datos reales, aunque el pipeline ya esté demostrado end-to-end sobre el dataset de
+  muestra.
+- **División de capas del diagnóstico (§3.9)**: el spec (§5.1) dice literalmente que `candidate_a/`
+  "incluye" el diagnóstico; la división en dos módulos (2 y 4) es una interpretación razonada, no
+  una cita literal — si un humano revisando design/PR prefiere una ubicación única (todo en capa 4,
+  o relajar la invariante de aislamiento 2→3 solo para este caso), esta decisión debe revisarse
+  explícitamente antes de `APPLY` (bloqueante de diseño, no de este documento).
+- **Presupuesto de grid y trials**: `smc_engine`/`diagnostics.py` no generan trials WFA (Issue H);
+  el diagnóstico de este Change no cuenta contra `N_trials_IS = 27` (§6.2), pero si design decide
+  barrer `ct_zscore_min` (2.0 vs 3.0) como parte del diagnóstico, esa búsqueda debe declararse y
+  contarse en la gobernanza de trials de Issue H/I para no contaminar el DSR del candidato.
+
+---
+
+## 9. Preguntas abiertas (no bloquean este Change)
+
+- Confirmación definitiva de `SymbolFigure` de oro/majors contra la cuenta demo real de The5ers
+  (extiende PA-1, Issue B/F).
+- Ejecución operativa del diagnóstico sobre el histórico completo real (fuera de la autoría SDD de
+  este Change, §3.7/§8).
+- Si el edge observado en la ejecución real resulta sensible a los bordes exactos de la ventana de
+  solapamiento Londres–NY, evaluar una intersección real de sesiones con DST (§8).
+- Consolidación futura de un único entrypoint `genesis` con todos los verbos de §6 (`export`,
+  `quality`, `diagnose`, `backtest`, `wfa`, `mc`, `prop-sim`, `full-validation`, `verdict`) — fuera
+  de alcance de este Change.
+
+---
+
+## 10. Referencias
+
+- Issue: https://github.com/bbenja11/genesis/issues/16
+- `idea.md`, `proposal.md` de este Change:
+  `.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/`
+- Spec vigente: `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md` — §2.2, §2.2.1, §2.x, §2.5,
+  §3, §4, §5.1, §6/§6.1, §8, §9, §11/§11.1, §11.2.
+- Spec promovido de la capa strategy (R1-R90 de Issues C/E): `.pulse/specs/strategy/spec.md`.
+- Fuente funcional externa (clean-room, citada, no portada):
+  `C:\Users\bbrav\ABON\vwap-smc-inspector\docs\specs\VWAP_SMC_Inspector_Spec_v2.md` §2-§4,
+  `C:\Users\bbrav\ABON\vwap-smc-inspector\python\inspector_config.json`.
+- Código de capa 1 consumido/extendido: `src/genesis/data/sessions.py`, `store.py`, `symbols.py`,
+  `metadata.py`, `profile.py`, `profiles/the5ers.json`.
+- Código de capa 2 consumido: `src/genesis/strategy/contract.py`, `clock.py`, `errors.py`,
+  `inspector.py`, `common/vwap_engine.py`, `common/zones.py`, `candidate_b/candidate.py`,
+  `candidate_b/config.py`, `inspector_config.json`.
+- Código de capa 3 consumido: `src/genesis/backtest/ticks.py`.
+- Código de capa 4 consumido/extendido: `src/genesis/validation/montecarlo.py`, `prop_sim.py`,
+  `verdict.py`, `errors.py`.
+- Precedente de CLI: `src/genesis/data/mt5_export.py`, `pyproject.toml` (`[project.scripts]`).
+- Tests de referencia: `tests/strategy/candidate_b/`, `tests/strategy/common/test_zones.py`,
+  `tests/strategy/test_contract_lookahead_property.py`, `tests/strategy/fixtures/sample_m1.csv`.
+- Reglas de proceso: `.agents/rules/architecture-conventions.md`,
+  `.agents/rules/eval-tdd-conventions.md`, `.agents/rules/tooling-conventions.md`.

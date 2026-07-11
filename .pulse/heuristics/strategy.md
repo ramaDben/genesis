@@ -14,3 +14,11 @@
 **Contexto:** Cierre del Change #8 (dominio strategy); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-07-05T15:33:23.813067+00:00; tests_passed_at=2026-07-05T16:04:49.828813+00:00; artefactos: /work/.pulse/changes/8-e-feat-strategy-candidato-b-completo-rango-de-apertura-gatillo-s/idea.md, /work/.pulse/changes/8-e-feat-strategy-candidato-b-completo-rango-de-apertura-gatillo-s/proposal.md, /work/.pulse/changes/8-e-feat-strategy-candidato-b-completo-rango-de-apertura-gatillo-s/design.md, /work/.pulse/changes/8-e-feat-strategy-candidato-b-completo-rango-de-apertura-gatillo-s/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de strategy.
+### Heurística: cierre Change #16 strategy [#16 · strategy · 2026-07-11]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi
+**Contexto:** Cierre del Change #16 (dominio strategy); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-07-11T14:50:32.651956+00:00; tests_passed_at=2026-07-11T15:49:07.258518+00:00; artefactos: /work/.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/idea.md, /work/.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/proposal.md, /work/.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/design.md, /work/.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de strategy.
