@@ -1345,3 +1345,1049 @@ ENTONCES ambos pasan en verde (exit code 0, R55, R62)
   `.agents/rules/eval-tdd-conventions.md`, `.agents/rules/tooling-conventions.md`.
 - `CLAUDE.md` (raíz) — arquitectura de 4 capas, flujo SDD, cadena de dependencias
   A→B→C→{D/E,G}→H→I→J→K.
+
+<!-- change:14-j-feat-validation-prop-sim-verdict-con-gates-t-tearsheet-manifes -->
+<!-- change:14-j-feat-validation-prop-sim-verdict-con-gates-t-tearsheet-manifes -->
+# Specification: `prop_sim.py` + `verdict.py` con gates T + tearsheet + manifest (Issue #14 / J)
+
+SSoT: `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md` (en adelante «el spec») — §1.1, §1.2,
+§1.3, §2.4, §2.5, §3, §6, §6.1, §6.2, §7.1–§7.6, §8, §9, §11, §11.2. Este documento formaliza
+`idea.md` y `proposal.md` de este Change en requisitos verificables. Los gates G/C/P/T del spec
+**nunca se relajan**; ningún requisito de este documento puede contradecirlos. Este Change cierra
+la capa 4 de validación (`src/genesis/validation/`) con `prop_sim.py` (economía prop a nivel de
+cuenta, gates P1–P6) y `verdict.py` (agregación G+C+P por candidato, deflación de torneo T1,
+ensemble T2, veredicto, tearsheet y manifest reproducible) — último módulo del camino crítico
+A → B → C → {E, G} → H → I → **J**, habilita K (Candidato C + ensemble).
+
+Convención de rutas: el spec usa pseudocódigo `python/validation/...` (§6); el repo real usa
+`src/genesis/validation/...`. Todas las rutas de este documento son las reales del repo.
+
+Este documento **corrige una decisión de `proposal.md` con evidencia técnica nueva** (§3, decisión
+4): la propuesta de usar `metrics.worst_daily_floating_excursion` (`src/genesis/backtest/
+metrics.py:86-93`) como "factor de ensanchamiento" del proxy de base dual de P3 es inviable —
+verificado en código, esa función retorna `max(magnitudes de BreachEvent(DAILY), default=0.0)`:
+es **idénticamente `0.0`** para cualquier `Ledger` OOS sin infracciones diarias registradas, y el
+gate P6 (§7.3: "Violaciones de reglas de firma en simulación OOS = 0") **garantiza exactamente esa
+condición** para todo candidato que llega a `prop_sim.py`/`verdict.py`. La función no puede
+"ensanchar" nada: es cero en el escenario en el que `prop_sim.py` la necesitaría. Este documento
+fija una resolución distinta (§3, decisión 4; R33-R35).
+
+---
+
+## 1. Objetivo y alcance
+
+### 1.1. Objetivo
+
+Cerrar la capa 4 de validación con dos módulos nuevos — `src/genesis/validation/prop_sim.py` y
+`src/genesis/validation/verdict.py` — que consumen exclusivamente la API pública ya cerrada de H
+(`WfaResult`, `McSymbolResult`, `McPortfolioResult`) e I (`DsrPboResult`, `SensitivityResult`,
+`PurgedCvResult`) y la de las capas 1-3 (`FirmProfile`, `RiskProfile`, `Ledger`, `ArtifactMetadata`),
+sin modificar ningún archivo de esas capas. `prop_sim.py` aplica la ficha de economía del challenge
+a trayectorias de portafolio resampleadas desde `oos_ledgers_by_symbol`, produciendo los insumos de
+los gates P1-P6. `verdict.py` agrega G+C+P por candidato, aplica T1 (deflación de torneo) y T2
+(ensemble), y emite el veredicto de torneo (§7.5) con tearsheet Markdown y manifest JSON
+reproducible con un comando — sin esto, ningún candidato recibe veredicto y K (Candidato C +
+ensemble) queda bloqueado (spec §11).
+
+### 1.2. Alcance IN
+
+- `src/genesis/validation/errors.py` (extendido, sin tocar las clases existentes de H/I):
+  `PropSimConfigError`, `VerdictConfigError`.
+- `src/genesis/validation/prop_sim.py`: `PhaseSpec`, `PropEconomicsProfile`,
+  `load_prop_economics_profile`, `prop_economics_profile_hash`, `PropSimConfig`,
+  `PropSimOutcomeKind`, `PathOutcome`, `PropSimResult`, `simulate_challenge_paths`,
+  `run_prop_sim`.
+- `src/genesis/validation/verdict.py`: `CandidateValidationBundle`, `SymbolGateOutcome`,
+  `CandidateGateSummary`, `VerdictKind`, `EnsembleResult`, `VerdictResult`, `run_verdict`,
+  `render_tearsheet`, `write_verdict_artifacts`.
+- `src/genesis/validation/__init__.py`: extensión del `__all__` mínimo y curado (patrón R65 de H,
+  R60 de I) con la superficie normativa de este Change.
+- Fixture JSON empaquetado de `PropEconomicsProfile` para The5ers (nombre/ruta exactos se fijan en
+  `design.md`, colocado junto a `prop_sim.py` en `src/genesis/validation/`, mismo patrón de
+  empaquetado de `risk_profile.json`).
+- `tests/validation/`: `test_prop_economics.py`, `test_prop_sim.py`, `test_verdict.py`, extensión de
+  `conftest.py`/`fixtures/` según necesidad, con los niveles unit/property/golden/integración/slow
+  del spec §9.
+
+### 1.3. Alcance OUT (YAGNI explícito)
+
+- **CLI completo** (`prop-sim`, `verdict`, `full-validation`, spec §6): diferido, mismo criterio
+  consistente en G/H/I (funcionalidad de librería primero, sin caso de uso verificable de CLI
+  todavía). `rg -n "argparse|\[project\.scripts\]"` sobre este Change no debe mostrar adiciones.
+- **Candidato C (TSMOM) implementación real**: Issue K. Solo su universo de 11 símbolos (§2.4) es
+  referencia normativa para calcular el DSR de torneo cuando K exista; `n_candidatos_torneo` de
+  este Change es siempre el conteo real de candidatos pasados a `run_verdict`, nunca hardcodeado a 3.
+- **Ejecución real del ensemble** (asignación de capital en vivo, puente de ejecución): T2 solo
+  *valida* la elegibilidad del ensemble como candidato adicional con su propio `prop_sim`
+  (`simulate_challenge_paths` sobre la canasta ponderada por vol-inversa); la ejecución real es
+  post-veredicto (§10.3, fuera de v1).
+- **Puente de ejecución** hacia MT5/cTrader (§10.3): fuera de v1, cadena de issues propia.
+- **Confirmación de campos de ficha The5ers** (PA-1/PA-2 de B): no reabierto salvo que bloquee un
+  campo requerido por `prop_sim` directamente.
+- **Extensión de `montecarlo.py`** (Opción (a) del hallazgo crítico de granularidad, idea.md): se
+  rechaza explícitamente — `prop_sim.py` reimplementa localmente su propio resampleo diario
+  (R15-R22), sin modificar `montecarlo.py` ni importar sus símbolos privados.
+- **Modificación de cualquier archivo bajo `src/genesis/data/`, `src/genesis/strategy/`,
+  `src/genesis/backtest/`**, ni de `wfa.py`, `montecarlo.py`, `_dsr.py`, `window_config.py`,
+  `dsr_pbo.py`, `sensitivity.py`, `purged_cv.py`, `_returns.py`, `_windowing.py` (capa 4 ya cerrada
+  por H/I): `git diff --stat` sobre esos árboles DEBE quedar vacío (R125).
+- **Dependencias de runtime nuevas** (`scipy`/`statsmodels`/`matplotlib`/`quantstats`): no se
+  introducen — percentiles (`numpy.percentile`), correlación (`numpy.corrcoef`), aritmética de la
+  máquina de estados y `_dsr.deflated_sharpe_ratio` (ya sin `scipy`) cubren íntegramente las
+  necesidades de este Change, extendiendo "núcleo propio, periferia pragmática" (spec §3) una
+  cuarta vez consecutiva (G, H, I, J).
+- **Persistencia a disco dentro de `prop_sim.py`**: `PropSimResult`/`PathOutcome` son dataclasses
+  congeladas en memoria (mismo patrón ligero de H/I); solo `verdict.py`
+  (`write_verdict_artifacts`) serializa manifest/tearsheet a disco.
+- **Histograma completo de distribución de intentos** como parte obligatoria de la API pública: se
+  documentan media + `p50`/`p90` (`PropSimResult.expected_attempts*`); un histograma detallado
+  queda como detalle de implementación no normativo.
+- **Paralelismo** (`multiprocessing`/`concurrent.futures`): loop secuencial de trayectorias, mismo
+  criterio de G/H/I; tests de volumen realista marcados `pytest.mark.slow`.
+- **`purged_cv.py` como insumo normativo de gate**: `PurgedCvResult` se adjunta al manifest de
+  `verdict.py` como diagnóstico **informativo**, sin participar en la lógica booleana G/C/P/T
+  (ningún gate del spec §7 lo referencia).
+- **Escenario golden "triple rollover"** (spec §9) en `prop_sim.py`: los deltas diarios que
+  `prop_sim.py` resamplea provienen de `oos_ledgers_by_symbol` ya netos de swap/costos (aplicados
+  por `Simulator`/`costs.py` en G, Issue #6) — el triple swap de miércoles ya está cubierto por la
+  suite de costos de capa 3 (G); `prop_sim.py` no reimplementa esa cobertura.
+
+---
+
+## 2. Convenciones de esta especificación
+
+- Los requisitos usan **DEBE** (MUST) y **NO DEBE**, numerados `R1..Rn` (numeración propia de este
+  Change, no continúa la de H/I), cada uno verificable por al menos un test o una aserción `rg`/`fd`.
+- Nombres de funciones/clases/excepciones/constantes son **normativos**; firmas exactas (orden,
+  kw-only vs. posicional, defaults no fijados aquí) se resuelven en `design.md` respetando el
+  comportamiento descrito aquí.
+- Identificadores en inglés, docstrings y mensajes de error en español.
+- **"Canasta diaria"** (compartida por `prop_sim.py` y `verdict.py`, patrón de `montecarlo.py`,
+  duplicación deliberada ADR-H5/ADR-I1): agrupación de `(symbol, delta)` por `trading_day` sobre
+  todos los símbolos de un candidato, sumando los deltas del mismo día en un único P&L de canasta
+  (`daily_totals: Mapping[date, float]`) — mismo criterio de `_build_basket`/
+  `_extract_exit_returns_by_day` de `montecarlo.py:287-301,268-284`, **reimplementado localmente**
+  en `prop_sim.py` (`_build_daily_basket`, R15-R17) y reutilizado (no reimportado como símbolo
+  privado de otro módulo) por `verdict.py` para T1/T2/ensemble (R71, R79-R83) — ambos módulos de
+  este mismo Change comparten la reimplementación entre sí (mismo criterio ADR-I1 de compartir
+  dentro de un único Change), pero ninguno importa símbolos con prefijo `_` de
+  `montecarlo.py`/`wfa.py`/`dsr_pbo.py`.
+- **Gates P a nivel de cuenta, nunca por símbolo** (spec §6.1): `prop_sim.py` opera siempre sobre la
+  canasta combinada de todos los símbolos del universo de un candidato (o del ensemble), nunca
+  evalúa P1-P6 símbolo por símbolo.
+- **Determinismo total**: todo RNG nuevo es `numpy.random.default_rng(seed)` explícito; `seed` es un
+  argumento requerido sin default en las funciones públicas de `prop_sim.py`.
+
+---
+
+## 3. Resolución de las decisiones abiertas de `idea.md`/`proposal.md`
+
+| # | Decisión pendiente | Resolución de este documento | Requisitos |
+|---|---|---|---|
+| 1 | Ubicación de `PropEconomicsProfile`/ficha de economía del challenge | Vive en `prop_sim.py` (capa 4), no en `RiskProfile`/capa 3 (ningún consumidor de `Simulator` necesita `profit_split`/`payout_cycle`) — confirma la hipótesis de `proposal.md`. Nombre/ruta exacta del fixture JSON empaquetado se fija en `design.md` (no bloquea este documento, mismo criterio que I dejó abierta la firma exacta de sus funciones). | R7-R14 |
+| 2 | Valores default de `challenge_cost`/`profit_split`/`payout_cycle` | `payout_cycle_days=14` es **definitivo** (spec §1.3: "payouts quincenales", no es un placeholder). `challenge_cost_pct_of_balance=3.0` y `profit_split_pct=80.0` son **placeholders conservadores explícitos, "a confirmar"** (mismo patrón textual que `FirmProfile` aplicó a `daily_reset_time`, `data/profile.py:30-37`) — no bloquean el código; el tearsheet DEBE marcar el veredicto como "economía no confirmada" mientras esos dos campos no se actualicen desde el fixture default (R14, R107). | R9, R14, R107 |
+| 3 | Techo de intentos por trayectoria | `PropSimConfig.max_attempts: int = 10` (constante configurable, sin cifra en el spec) — documentado como "techo operativo de simulación", no como regla de negocio de la firma. | R23, R25 |
+| 4 | **Base dual de P3 sobre trayectorias MC — corrige `proposal.md`** | `metrics.worst_daily_floating_excursion` (`backtest/metrics.py:86-93`) es idénticamente `0.0` para cualquier `Ledger` OOS sin `BreachEvent(DAILY)` — condición que P6 (§7.3) garantiza para todo candidato que llega a `prop_sim.py`. No sirve como "factor de ensanchamiento". Resolución: `prop_sim.py` evalúa P3 **únicamente sobre la base de balance al cierre del día anterior** (`daily_loss = max(0, balance_inicio_día - balance_fin_día)` contra `firm_profile.daily_loss_limit_pct`) — la pierna de balance-a-balance de la base dual (§1.3/§7.3), que el resampleo diario **sí reproduce exactamente** (los deltas resampleados ya son cierre-a-cierre). La pierna de equity flotante intradía real (`simulator.py:358-378`, resolución M1) **no es reconstruible** desde P&L diario agregado sin re-simular M1 — se documenta explícitamente como limitación aceptada, sesgo conocido hacia subestimar P3 (el breach real puede disparar antes, intradía, de lo que el proxy de cierre-a-cierre detecta). Esto se declara en el tearsheet (R107) como "P3 es una cota inferior conservadora sobre la base intradía". | R33-R35, R107 |
+| 5 | Tratamiento de trayectorias "en curso" al cierre del horizonte de 12 meses | Censura por la derecha (Kaplan-Meier simplificado): trayectorias fondeadas que llegan al fin del horizonte sin breach total cuentan como supervivencia `≥ horizon_months` para P4; si más del 50% de las trayectorias fondeadas sobreviven el horizonte completo, `median_funded_survival_months = horizon_months` (mediana censurada, documentada explícitamente, R47). Trayectorias nunca fondeadas (challenge agotado o en curso al fin del horizonte de la ruta simulada) no contribuyen a P4; contribuyen `net_payout_12m=0.0` a P5 (R44-R46, R51). | R44-R47, R51 |
+| 6 | Formato exacto de tearsheet y manifest | Tearsheet **Markdown puro** (sin `quantstats`/`matplotlib`, ninguna necesidad real de código verificada, confirma `proposal.md`); manifest **JSON** con metadata extendida tipo `ArtifactMetadata` (patrón `to_json`/`from_json`, `data/metadata.py:50-98`). Ambos se generan desde el mismo `VerdictResult` (única fuente de verdad). `write_verdict_artifacts(result, output_dir)` escribe `manifest.json` + `tearsheet.md` en `output_dir` (provisto explícitamente por el llamador — sin ruta por defecto hardcodeada, coherente con la ausencia de CLI en este Change). | R96-R108 |
+| 7 | Alcance de `PurgedCvResult` en el manifest | Diagnóstico informativo: si `CandidateValidationBundle.purged_cv_results_by_symbol` no es `None`, el manifest incluye un resumen por símbolo (`n_folds`, `total_trades`, `purged_trade_count` total) — nunca participa en la lógica booleana de veredicto. | R98, R106 |
+| 8 | Fórmula exacta de deflación T1 | `n_trials_deflactado = n_trials_signal_total_candidato_ganador + (n_candidatos_torneo - 1)`, donde `n_trials_signal_total_candidato_ganador = sum(wfa_result.n_trials_signal_total for wfa_result in bundle.wfa_results_by_symbol.values())` (spec §6.1: "trials contados mecánicamente **por candidato**" — soporte textual directo para sumar entre símbolos del mismo candidato) y `n_candidatos_torneo = len(candidates)` (nunca hardcodeado, nunca fijo a 3). Interpretación: elegir el mejor de N candidatos añade `N-1` trials de selección adicionales al conteo de señal ya acumulado del ganador (Bailey/López de Prado: la deflación es función del número total de comparaciones consideradas en la selección). El DSR de T1 se calcula sobre la **canasta diaria combinada** del candidato ganador (mismo criterio "a nivel de cuenta" de P, no una concatenación de trades por símbolo fuera de orden temporal). | R71-R78 |
+| 9 | Reutilización de semillas MC vs. `prop_sim` | `prop_sim.py` usa un `seed` **independiente** del de `monte_carlo_portfolio` (las trayectorias reducidas de `McPathsResult` no contienen la serie diaria necesaria, R18-R19); documentado explícitamente en el manifest (`prop_sim_seed` por candidato, distinto de `mc_seed`). | R19, R98 |
+| 10 | Granularidad de `tasks.md` (recomendación, no bloquea `specify`) | Se recomienda partir `tasks.md` en dos bloques secuenciales dentro del mismo Change: (a) ficha + resampleo + máquina de estados de `prop_sim.py`; (b) agregación G+C+P+T1+T2+veredicto+tearsheet+manifest de `verdict.py` — cada uno testeable de forma aislada antes de integrar el pipeline completo. Decisión final de `design.md`/`tasks.md`, no de este documento. | (informativo) |
+
+---
+
+## 4. Requisitos por módulo
+
+### 4.1. `errors.py` — extensión de la jerarquía de excepciones (sin tocar clases existentes)
+
+- **R1** (DEBE). `errors.py` DEBE definir `PropSimConfigError(GenesisValidationError)` para: (a)
+  `n_paths <= 0`; (b) `max_attempts < 1`; (c) `horizon_months < 1`; (d)
+  `path_horizon_trading_days < horizon_months * trading_days_per_month` (piso insuficiente para
+  cubrir el horizonte); (e) `oos_ledgers_by_symbol` sin ningún trade OOS extraíble (canasta diaria
+  vacía); (f) ficha `PropEconomicsProfile` con `phases` vacío, algún `profit_target_pct <= 0`,
+  `min_profitable_days < 0` o `payout_cycle_days <= 0`.
+- **R2** (DEBE). `errors.py` DEBE definir `VerdictConfigError(GenesisValidationError)` para: (a)
+  `candidates` vacío (`len(candidates) == 0`); (b) algún `CandidateValidationBundle` con
+  `wfa_results_by_symbol` vacío o con símbolos que no coinciden entre `wfa_results_by_symbol`,
+  `dsr_pbo_results_by_symbol`, `sensitivity_results_by_symbol`, `mc_symbol_results_by_symbol`; (c)
+  `starting_balance <= 0`; (d) intersección de días de trading de un par de candidatos con menos de
+  2 observaciones para T2 (correlación indefinida, R84).
+- **R3** (DEBE). Todo mensaje de excepción nueva de este Change DEBE incluir contexto explícito
+  (`candidate_id`, `symbol` si aplica, valor involucrado) — fail-fast con contexto (spec §8).
+- **R4** (DEBE). Las dos excepciones nuevas DEBEN heredar de `GenesisValidationError` (raíz
+  reutilizada de H, `errors.py:17-22`, no redefinida).
+- **R5** (NO DEBE). Ninguna excepción de este Change NO DEBE envolver silenciosamente
+  `BacktestConfigError`/`SessionBoundaryError`/`WfaConfigError`/`MonteCarloConfigError`/
+  `PurgedCvConfigError`/`DsrPboConfigError`/`SensitivityConfigError` recibidas como insumo — se
+  propagan sin capturar si el llamador de `run_prop_sim`/`run_verdict` las produce antes de invocar
+  estas funciones (este Change nunca re-ejecuta backtests, por lo que no debería observarlas
+  directamente, pero el criterio se documenta por consistencia con R5/R6 de H/I).
+- **R6** (DEBE). `rg -n "class PropSimConfigError|class VerdictConfigError"
+  src/genesis/validation/errors.py` DEBE retornar exactamente 2 coincidencias, ambas heredando de
+  `GenesisValidationError` (no de `GenesisBacktestError`/`GenesisStrategyError`/`GenesisDataError`).
+
+### 4.2. `prop_sim.py` — ficha de economía del challenge (`PropEconomicsProfile`)
+
+Mismo patrón que `RiskProfile`/ADR-G2 (`backtest/risk_profile.py:29-40,43-69,72-84`): ficha propia
+de capa, cargada desde un recurso JSON empaquetado con `importlib.resources`, con función de hash
+determinista para `RunProvenance`/manifest.
+
+- **R7** (DEBE). `prop_sim.py` DEBE definir `PhaseSpec` (`@dataclass(frozen=True, slots=True)`) con,
+  como mínimo: `profit_target_pct: float`, `min_profitable_days: int`,
+  `min_profit_per_day_pct: float`, `max_calendar_days: int | None` (`None` = sin límite, spec §1.3:
+  "Plazo: Sin límite de tiempo").
+- **R8** (DEBE). `prop_sim.py` DEBE definir `PropEconomicsProfile` (`@dataclass(frozen=True,
+  slots=True)`) con, como mínimo: `name: str`, `phases: tuple[PhaseSpec, ...]`,
+  `challenge_cost_pct_of_balance: float`, `profit_split_pct: float`, `payout_cycle_days: int`,
+  `max_lots: float | None`, `max_positions: int | None`, `consistency_rule_pct: float | None`. NO
+  DEBE duplicar `weekend_holding_allowed`/`max_loss_limit_pct`/`max_loss_limit_kind`
+  (`RiskProfile`, recibido como argumento independiente por `run_prop_sim`, mismo criterio que
+  `montecarlo.py` ya aplica) ni `daily_loss_limit_pct`/`daily_reset_time` (`FirmProfile`, ídem).
+- **R9** (DEBE). El recurso JSON empaquetado por defecto para The5ers DEBE fijar, como valores
+  definitivos derivados del spec §1.3: dos `PhaseSpec` — fase 1 (`profit_target_pct=8.0`,
+  `min_profitable_days=3`, `min_profit_per_day_pct=0.5`, `max_calendar_days=None`), fase 2
+  (`profit_target_pct=5.0`, `min_profitable_days=3`, `min_profit_per_day_pct=0.5`,
+  `max_calendar_days=None`); `payout_cycle_days=14` (**definitivo**, "payouts quincenales", §1.3);
+  `consistency_rule_pct=None` (§1.3 no menciona `consistency_rule` como aplicable a The5ers v1).
+  `challenge_cost_pct_of_balance=3.0` y `profit_split_pct=80.0` son **placeholders explícitos "a
+  confirmar"** (decisión 2, §3) — no tienen cifra en el spec. `max_lots=None`,
+  `max_positions=None` (sin dato en el spec, no bloqueante).
+- **R10** (DEBE). `prop_sim.py` DEBE definir `load_prop_economics_profile(path: Path | None = None)
+  -> PropEconomicsProfile` (mismo patrón que `load_risk_profile`, `risk_profile.py:43-69`):
+  `path=None` carga el recurso empaquetado por defecto (R9); lanza `PropSimConfigError` (R1f) con
+  el campo faltante/inválido en el mensaje ante configuración incompleta o inválida.
+- **R11** (DEBE). `prop_sim.py` DEBE definir `prop_economics_profile_hash(profile:
+  PropEconomicsProfile) -> str` (mismo patrón `sha256` canónico sobre JSON ordenado que
+  `risk_profile_hash`, `risk_profile.py:72-84`, y `firm_profile_hash`, `data/profile.py:99-115`) —
+  determinista, incorporado al manifest (R98).
+- **R12** (DEBE). `PropEconomicsProfile.__post_init__` (o validación equivalente en
+  `load_prop_economics_profile`) DEBE rechazar, vía `PropSimConfigError`: `phases` vacío; algún
+  `PhaseSpec.profit_target_pct <= 0`; `min_profitable_days < 0`; `min_profit_per_day_pct < 0`;
+  `payout_cycle_days <= 0`; `challenge_cost_pct_of_balance < 0`; `profit_split_pct` fuera de
+  `(0.0, 100.0]`.
+- **R13** (NO DEBE). `PropEconomicsProfile` NO DEBE ser consumida por ningún archivo de
+  `src/genesis/backtest/` (`Simulator`/`RiskLevelsProvider`): ningún consumidor de capa 3 necesita
+  `profit_split`/`payout_cycle`/`challenge_cost` (decisión 1, §3). `rg -n
+  "PropEconomicsProfile" src/genesis/backtest/` DEBE retornar 0 coincidencias.
+- **R14** (DEBE). El tearsheet (R107) y el manifest (R98) DEBEN marcar explícitamente si
+  `challenge_cost_pct_of_balance`/`profit_split_pct` provienen del placeholder por defecto (R9) o
+  de un fixture confirmado distinto — campo `economics_confirmed: bool` en `VerdictResult`
+  (`True` solo si el llamador pasa un `PropEconomicsProfile` distinto del cargado por
+  `load_prop_economics_profile()` sin argumentos; determinado por comparación de
+  `prop_economics_profile_hash` contra el hash del fixture empaquetado por defecto, calculado una
+  vez en tiempo de import).
+
+### 4.3. `prop_sim.py` — resampleo diario local (sin tocar `montecarlo.py`)
+
+- **R15** (DEBE). `prop_sim.py` DEBE definir `_build_daily_basket(oos_ledgers_by_symbol:
+  Mapping[str, Ledger]) -> tuple[list[date], dict[date, float]]`, reimplementación local del mismo
+  criterio de agrupación por `trading_day` que `montecarlo._build_basket`/
+  `_extract_exit_returns_by_day` (`montecarlo.py:287-301,268-284`): para cada símbolo, extrae
+  deltas de `FillRecord` de salida etiquetados por `payload.timestamp_utc.date()` (mismo proxy de
+  `trading_day`, ADR-H8) y los suma por día across símbolos, retornando `(basket_days ordenados,
+  daily_totals: dict[date, float])` — a diferencia de `_build_basket`, retorna directamente los
+  totales sumados por día (no una lista de `(symbol, delta)` por día), porque `prop_sim.py` nunca
+  necesita el desglose por símbolo dentro del día (gates P a nivel de cuenta).
+- **R16** (NO DEBE). `prop_sim.py` NO DEBE importar ningún símbolo con prefijo `_` de
+  `montecarlo.py`. `rg -n "from genesis\.validation\.montecarlo import _|from \.montecarlo import
+  _" src/genesis/validation/prop_sim.py` DEBE retornar 0 coincidencias.
+- **R17** (DEBE). Si `_build_daily_basket` produce una lista vacía de `basket_days`, `run_prop_sim`
+  DEBE lanzar `PropSimConfigError` (R1e) antes de intentar ningún resampleo.
+- **R18** (DEBE). `prop_sim.py` DEBE definir un tamaño de bloque de resampleo con la misma fórmula
+  que `montecarlo._default_block_size` (`montecarlo.py:110-112`,
+  `clip(round(n_trading_days ** (1/3)), 5, 60)`) — reimplementada localmente (constantes propias
+  `_MIN_BLOCK_SIZE`/`_MAX_BLOCK_SIZE`, sin importar las de `montecarlo.py`), usada solo cuando
+  `PropSimConfig.block_size is None`.
+- **R19** (DEBE). `run_prop_sim`/`simulate_challenge_paths` DEBEN recibir `seed: int` como argumento
+  requerido, independiente del `seed` usado por `monte_carlo_portfolio` (decisión 9, §3) — ningún
+  valor por defecto. RNG explícito: `numpy.random.default_rng(seed)`.
+- **R20** (DEBE). El resampleo de cada trayectoria DEBE producir una secuencia de exactamente
+  `config.path_horizon_trading_days` días (con reposición, bloques contiguos de tamaño
+  `resolved_block_size` tomados de `basket_days`/`daily_totals`, mismo criterio de bootstrap por
+  bloques que `montecarlo._portfolio_block_bootstrap_paths`, `montecarlo.py:327-340`,
+  reimplementado localmente sin importar esa función).
+- **R21** (DEBE). `PropSimConfig` (`@dataclass(frozen=True, slots=True)`) DEBE incluir, como
+  mínimo: `n_paths: int`, `seed: int`, `max_attempts: int = 10` (decisión 3, §3),
+  `horizon_months: int = 12`, `trading_days_per_month: int = 21`,
+  `path_horizon_trading_days: int = 750`, `block_size: int | None = None`. `__post_init__` DEBE
+  validar `n_paths > 0`, `max_attempts >= 1`, `horizon_months >= 1`, `trading_days_per_month >= 1`,
+  `path_horizon_trading_days >= horizon_months * trading_days_per_month`, `block_size is None or
+  block_size > 0` — en caso contrario, `PropSimConfigError` (R1a-R1d).
+- **R22** (DEBE). `run_prop_sim`/`simulate_challenge_paths` DEBEN ejecutarse en un loop secuencial
+  sobre `n_paths` trayectorias (sin `multiprocessing`/`concurrent.futures`, mismo criterio de
+  G/H/I). `rg -n "multiprocessing|concurrent\.futures" src/genesis/validation/prop_sim.py` DEBE
+  retornar 0 coincidencias.
+
+### 4.4. `prop_sim.py` — máquina de estados del challenge (por trayectoria)
+
+`simulate_challenge_paths(daily_pnl_by_day: Mapping[date, float], starting_balance: float,
+prop_economics_profile: PropEconomicsProfile, firm_profile: FirmProfile, risk_profile: RiskProfile,
+config: PropSimConfig) -> PropSimResult` es el **núcleo puro** reutilizable (no depende de
+`Ledger`/`oos_ledgers_by_symbol`): opera directamente sobre una serie de P&L diario ya combinada,
+para que `verdict.py` pueda invocarlo también sobre la canasta ponderada del ensemble (R79-R83)
+sin reconstruir `Ledger`s sintéticos. `run_prop_sim(oos_ledgers_by_symbol, ...)` es un envoltorio de
+conveniencia: construye la canasta diaria (R15) y delega en `simulate_challenge_paths`.
+
+- **R23** (DEBE). `prop_sim.py` DEBE definir `PropSimOutcomeKind` (`StrEnum`) con exactamente 4
+  miembros: `FUNDED_SURVIVED_HORIZON`, `FUNDED_BREACHED_TOTAL`, `NEVER_FUNDED_ATTEMPTS_EXHAUSTED`,
+  `IN_PROGRESS_UNFUNDED_AT_PATH_END` (mismo criterio de enumeración cerrada que `BreachKind`,
+  `ledger.py:21-31`: ampliar esta enumeración es un cambio de alcance).
+- **R24** (DEBE). Para cada trayectoria resampleada (secuencia de `path_horizon_trading_days` P&L
+  diarios), la máquina de estados DEBE recorrer los días en orden, manteniendo como mínimo:
+  `attempt` (contador de intentos, inicia en 1), `phase_index` (índice en
+  `prop_economics_profile.phases`, inicia en 0), `phase_start_balance` (balance al inicio del
+  intento/fase vigente, inicia en `starting_balance`), `balance` (balance corriente),
+  `phase_profitable_days` (contador de días con retorno diario `>= min_profit_per_day_pct` desde el
+  inicio de la fase vigente), `is_funded: bool`, y, una vez fondeada, `funded_reference_balance`
+  (ancla estática o pico de equity, según `risk_profile.max_loss_limit_kind`) y
+  `days_since_last_payout`.
+- **R25** (DEBE). **Reinicio de intento** (challenge no fondeado): si el día produce un breach
+  DIARIO (`daily_loss = max(0.0, phase_start_of_day_balance - balance) >=
+  phase_start_of_day_balance * firm_profile.daily_loss_limit_pct / 100.0`, decisión 4 §3) o un
+  breach TOTAL (`total_loss = max(0.0, attempt_reference_balance - balance) >=
+  attempt_reference_balance * risk_profile.max_loss_limit_pct / 100.0`, con
+  `attempt_reference_balance` estático = `phase_start_balance` del intento si
+  `risk_profile.max_loss_limit_kind is MaxLossLimitKind.STATIC`, o el pico de `balance` observado
+  desde el inicio del intento si `TRAILING` — mismo criterio de ancla que
+  `simulator.py:380-406`), la máquina DEBE: si `attempt < config.max_attempts`, incrementar
+  `attempt`, resetear `balance = starting_balance`, `phase_index = 0`, `phase_start_balance =
+  starting_balance`, `phase_profitable_days = 0`, y continuar con el siguiente día; si `attempt ==
+  config.max_attempts`, terminar la trayectoria con `outcome =
+  NEVER_FUNDED_ATTEMPTS_EXHAUSTED`.
+- **R26** (DEBE). **Avance de fase**: si no hubo breach ese día, la máquina DEBE evaluar `retorno
+  diario_pct = 100.0 * daily_pnl / phase_start_of_day_balance`; si `retorno_diario_pct >=
+  phases[phase_index].min_profit_per_day_pct`, incrementar `phase_profitable_days`. Si
+  `(balance - phase_start_balance) >= phase_start_balance *
+  phases[phase_index].profit_target_pct / 100.0` **y** `phase_profitable_days >=
+  phases[phase_index].min_profitable_days`, la fase se considera cruzada: si
+  `phase_index + 1 == len(phases)`, la trayectoria pasa a `is_funded = True` (registra
+  `funded_trading_day_index`, `funded_reference_balance = balance`,
+  `days_since_last_payout = 0`); si no, `phase_index += 1`, `phase_start_balance = balance`,
+  `phase_profitable_days = 0` (nueva fase, mismo intento, sin nuevo `challenge_cost`).
+- **R27** (DEBE). **Estado fondeado**: cada día, la máquina DEBE evaluar el mismo breach DIARIO
+  (R25, base balance-a-balance únicamente, contra el balance del día anterior en estado fondeado) y
+  el mismo breach TOTAL (R25, `attempt_reference_balance` = `funded_reference_balance` estático o
+  el pico de `balance` desde el fondeo si `TRAILING`). Cualquiera de los dos DEBE: (a) incrementar
+  el contador de meses fondeados con infracción diaria del mes en curso (R41); (b) terminar la
+  trayectoria con `outcome = FUNDED_BREACHED_TOTAL` (una infracción de firma durante el estado
+  fondeado termina la cuenta fondeada — mismo criterio de invariante de §10.2 aplicado aquí en
+  `prop_sim`, aunque §10.2 describe la incubación real, no la simulación).
+- **R28** (DEBE). **Ciclo de payout**: en estado fondeado sin breach ese día, `days_since_last_payout
+  += 1`; cuando `days_since_last_payout >= prop_economics_profile.payout_cycle_days`, DEBE calcular
+  `payout = max(0.0, balance - funded_reference_balance) *
+  prop_economics_profile.profit_split_pct / 100.0`, acumularlo en `cumulative_net_payout`, y
+  resetear `funded_reference_balance = balance`, `days_since_last_payout = 0` (el payout solo
+  cuenta ganancia nueva desde el último ciclo, práctica estándar de payout incremental).
+- **R29** (DEBE). **Fin de horizonte fondeado**: si la trayectoria permanece fondeada sin breach
+  hasta acumular `horizon_months * trading_days_per_month` días fondeada, DEBE terminar con
+  `outcome = FUNDED_SURVIVED_HORIZON` (censura por la derecha, decisión 5 §3) — no continúa
+  simulando más allá del horizonte aunque la trayectoria resampleada tenga más días disponibles.
+- **R30** (DEBE). **Fin de ruta sin resolución**: si se agotan los `path_horizon_trading_days`
+  disponibles sin que la trayectoria haya sido fondeada ni haya agotado `max_attempts`, DEBE
+  terminar con `outcome = IN_PROGRESS_UNFUNDED_AT_PATH_END` (censura por longitud finita de la
+  ruta simulada, distinta de `NEVER_FUNDED_ATTEMPTS_EXHAUSTED`; ambas cuentan como "no fondeada" a
+  efectos de P1, R42).
+- **R31** (DEBE). `prop_sim.py` DEBE definir `PathOutcome` (`@dataclass(frozen=True, slots=True)`)
+  con, como mínimo: `outcome: PropSimOutcomeKind`, `n_attempts_used: int`,
+  `funded_trading_day_index: int | None`, `breach_trading_day_index: int | None`,
+  `funded_survival_trading_days: int | None` (`None` si nunca fondeada), `net_payout_12m: float`
+  (acumulado hasta `min(horizonte, fin de la trayectoria)`), `n_funded_months_observed: int`,
+  `n_funded_months_with_daily_breach: int`.
+- **R32** (DEBE). Ningún campo de `PathOutcome`/`PropSimResult` DEBE evaluar el umbral P1-P6 contra
+  un booleano de pasa/no-pasa: solo produce los números; la comparación contra el umbral es
+  responsabilidad de `verdict.py` (mismo criterio R33/R44 de I).
+- **R33** (DEBE). El breach DIARIO evaluado por la máquina de estados (R25, R27) DEBE usar
+  **únicamente** la base balance-a-balance (`phase_start_of_day_balance - balance` del día,
+  comparado contra `firm_profile.daily_loss_limit_pct`), decisión 4 §3 — corrección explícita de
+  `proposal.md` (no usa `metrics.worst_daily_floating_excursion`, que es idénticamente `0.0` para
+  cualquier candidato que llega a `prop_sim.py`, ver preámbulo y decisión 4 §3).
+- **R34** (NO DEBE). `prop_sim.py` NO DEBE importar ni invocar
+  `genesis.backtest.metrics.worst_daily_floating_excursion` ni
+  `min_distance_to_daily_limit`. `rg -n "worst_daily_floating_excursion|min_distance_to_daily_limit"
+  src/genesis/validation/prop_sim.py` DEBE retornar 0 coincidencias.
+- **R35** (DEBE). La docstring de la función que evalúa el breach diario (o de `PropSimResult`,
+  campo `p_daily_breach_funded_month`) DEBE documentar explícitamente la limitación de la decisión
+  4 (§3): el proxy de cierre-a-cierre es una cota **inferior conservadora** de la probabilidad real
+  de breach diario (la base de equity flotante intradía real puede disparar antes).
+- **R36** (DEBE). El breach TOTAL (R25, R27) DEBE respetar `risk_profile.max_loss_limit_kind`
+  (`MaxLossLimitKind.STATIC` vs. `TRAILING`, `risk_profile.py:22-26`) con la misma semántica de
+  ancla que `simulator._evaluate_total_breach` (`simulator.py:380-406`): `STATIC` ancla al balance
+  de inicio del intento (o de la ficha fondeada); `TRAILING` ancla al pico de `balance` observado
+  desde el inicio del intento (o desde el fondeo).
+- **R37** (DEBE). Un nuevo intento (R25) DEBE incrementar un acumulador informativo
+  `total_challenge_cost_paid` en `prop_economics_profile.challenge_cost_pct_of_balance / 100.0 *
+  starting_balance` por cada intento iniciado (incluido el primero) — expuesto como campo
+  informativo agregado en `PropSimResult` (no es un gate P normativo, spec §7.3 no lista un umbral
+  de costo).
+- **R38** (DEBE). `tests/validation/test_prop_sim.py` DEBE incluir al menos tres golden tests
+  calculados a mano (spec §9, "escenarios de challenge calculados a mano"): (a) una trayectoria que
+  **roza** el límite diario sin cruzarlo (breach evitado por un margen conocido); (b) una
+  trayectoria que **viola** el límite diario (breach exacto en el umbral, `daily_loss == threshold`
+  cuenta como breach, operador `>=`); (c) una trayectoria que viola el límite total bajo
+  `MaxLossLimitKind.STATIC` y otra bajo `MaxLossLimitKind.TRAILING` con el mismo P&L pero
+  `outcome`/`breach_trading_day_index` distintos entre ambas (verifica R36).
+- **R39** (DEBE). `tests/validation/test_prop_sim.py` DEBE incluir un golden test de avance de fase
+  (R26) con un caso sintético donde el target acumulado se cruza en un día sin que
+  `phase_profitable_days` alcance `min_profitable_days` todavía (la fase NO avanza ese día) y otro
+  donde ambas condiciones se cumplen simultáneamente (la fase SÍ avanza).
+- **R40** (DEBE). `tests/validation/test_prop_sim.py` DEBE incluir un golden test de reinicio de
+  intento con `max_attempts=1` que verifique que la trayectoria termina en
+  `NEVER_FUNDED_ATTEMPTS_EXHAUSTED` en el primer breach (sin segundo intento).
+
+### 4.5. `prop_sim.py` — agregación P1-P6 (`PropSimResult`)
+
+- **R41** (DEBE). `prop_sim.py` DEBE definir `PropSimResult` (`@dataclass(frozen=True,
+  slots=True)`) con, como mínimo: `candidate_id: str`, `config_version: str`, `seed: int`,
+  `n_paths: int`, `p_pass: float` (P1), `expected_attempts: float` (P2, media),
+  `expected_attempts_p50: float`, `expected_attempts_p90: float`,
+  `p_daily_breach_funded_month: float` (P3), `median_funded_survival_months: float` (P4),
+  `payout_p25_12m: float` (P5), `n_paths_never_funded: int`,
+  `n_paths_funded_breached_total: int`, `n_paths_funded_survived_horizon: int`.
+- **R42** (DEBE). `p_pass` (P1) DEBE ser la fracción de trayectorias con `outcome in
+  {FUNDED_SURVIVED_HORIZON, FUNDED_BREACHED_TOTAL}` (cualquier resultado que alcanzó el fondeo,
+  independientemente de lo que pase después) sobre `n_paths` totales.
+- **R43** (DEBE). `expected_attempts`/`expected_attempts_p50`/`expected_attempts_p90` (P2) DEBEN
+  calcularse **condicionados a las trayectorias que alcanzan el fondeo** (`n_attempts_used` de las
+  trayectorias con `outcome in {FUNDED_SURVIVED_HORIZON, FUNDED_BREACHED_TOTAL}`), consistente con
+  la literalidad del gate ("intentos **hasta fondeo**", §7.3). Si ninguna trayectoria se fondea,
+  `expected_attempts = float("inf")` (documentado explícitamente; P1 ya sería ~0, el gate P2
+  fallaría trivialmente).
+- **R44** (DEBE). `p_daily_breach_funded_month` (P3) DEBE calcularse como
+  `sum(n_funded_months_with_daily_breach) / sum(n_funded_months_observed)` sobre todas las
+  trayectorias con al menos un mes fondeado observado (`n_funded_months_observed > 0`); `0.0` si
+  ninguna trayectoria observa un mes fondeado completo (documentado: no hay evidencia suficiente
+  para estimar P3, no se interpreta como "pasa" per se en `verdict.py`, ver R63).
+- **R45** (DEBE). `median_funded_survival_months` (P4) DEBE calcularse sobre `funded_survival_months
+  = funded_survival_trading_days / trading_days_per_month` de las trayectorias con `outcome in
+  {FUNDED_SURVIVED_HORIZON, FUNDED_BREACHED_TOTAL}`, tratando las `FUNDED_SURVIVED_HORIZON` como
+  observaciones censuradas en `horizon_months` (decisión 5, §3).
+- **R46** (DEBE). El cálculo de la mediana censurada (R45) DEBE seguir esta regla explícita: si al
+  menos el 50% de las trayectorias fondeadas tienen `funded_survival_months >= mediana empírica
+  simple` Y esa mediana simple corresponde a una trayectoria censurada
+  (`FUNDED_SURVIVED_HORIZON`), `median_funded_survival_months = horizon_months` (la mediana real es
+  `>= horizon_months`, se reporta el valor censurado como cota inferior, nunca se extrapola más
+  allá del horizonte simulado).
+- **R47** (DEBE). Si ninguna trayectoria alcanza el fondeo, `median_funded_survival_months = 0.0`
+  (documentado explícitamente: sin evidencia de supervivencia fondeada).
+- **R48** (DEBE). `payout_p25_12m` (P5) DEBE calcularse con `numpy.percentile(net_payout_12m_array,
+  25)` sobre **todas** las `n_paths` trayectorias (no solo las fondeadas): las no fondeadas
+  contribuyen `net_payout_12m = 0.0` (correcto por construcción: sin fondeo no hay payout).
+- **R49** (DEBE). El gate **P6** (violaciones de reglas de firma en simulación OOS = 0) NO DEBE
+  evaluarse dentro de `prop_sim.py`/`PropSimResult`: se evalúa en `verdict.py` directamente sobre
+  el `Ledger` OOS real (`BreachEvent`/`RejectionRecord` del `oos_ledger_cosido` de `WfaResult`,
+  R66) — es el único gate P que no usa trayectorias MC (idea.md, tabla de gates).
+- **R50** (DEBE). `run_prop_sim(oos_ledgers_by_symbol: Mapping[str, Ledger], starting_balance:
+  float, firm_profile: FirmProfile, risk_profile: RiskProfile, prop_economics_profile:
+  PropEconomicsProfile, config: PropSimConfig, candidate_id: str) -> PropSimResult` DEBE construir
+  la canasta diaria (R15) y delegar en `simulate_challenge_paths` (nombres exactos normativos;
+  orden/defaults exactos se cierran en `design.md`).
+- **R51** (DEBE). `simulate_challenge_paths`/`run_prop_sim` DEBEN ser deterministas: misma `seed` +
+  mismo `daily_pnl_by_day`/`oos_ledgers_by_symbol` + misma config + misma ficha ⇒ `PropSimResult`
+  bit-idéntico entre dos invocaciones independientes (spec §8).
+- **R52** (DEBE). `tests/validation/test_prop_sim.py` DEBE incluir un test de propiedad
+  (`hypothesis`, marcado `pytest.mark.unit`) de **monotonía de la ficha**: endurecer
+  `PropEconomicsProfile` (subir `challenge_cost_pct_of_balance`, bajar `profit_split_pct`, o subir
+  `phases[i].profit_target_pct`) sobre la misma serie de P&L resampleada (mismo `seed`) NUNCA
+  mejora `p_pass`/`payout_p25_12m`/`median_funded_survival_months` respecto a la ficha original
+  (P1, P4, P5 no mejoran; P2/P3 no mejoran en la dirección de "más fácil").
+- **R53** (DEBE). `tests/validation/test_prop_sim.py` DEBE incluir un test de determinismo byte a
+  byte (R51): dos invocaciones independientes de `run_prop_sim` con los mismos insumos producen
+  `PropSimResult` idéntico campo a campo.
+- **R54** (DEBE). `tests/validation/test_prop_sim.py` DEBE incluir al menos un test de integración
+  (`pytest.mark.integration`) que ejecute `oos_ledgers_by_symbol` (fixture sintético) → `run_prop_sim`
+  en segundos, verificando que todos los campos de `PropSimResult` son finitos y están en rango
+  `[0, 1]` para las fracciones/probabilidades.
+- **R55** (DEBE). `tests/validation/test_prop_sim.py` DEBE incluir al menos un test marcado
+  `pytest.mark.slow` con `n_paths` de volumen realista (p. ej. `>= 2000`), separado de la suite
+  rápida por defecto.
+- **R56** (DEBE). `rg -n "def run_prop_sim|def simulate_challenge_paths|class PropSimResult|class
+  PropEconomicsProfile" src/genesis/validation/prop_sim.py` DEBE retornar ≥1 coincidencia cada uno.
+
+### 4.6. `verdict.py` — insumos y agregación de gates G (por símbolo, dentro de un candidato)
+
+- **R57** (DEBE). `verdict.py` DEBE definir `CandidateValidationBundle` (`@dataclass(frozen=True,
+  slots=True)`) con, como mínimo: `candidate_id: str`, `wfa_results_by_symbol: Mapping[str,
+  WfaResult]`, `dsr_pbo_results_by_symbol: Mapping[str, DsrPboResult]`,
+  `sensitivity_results_by_symbol: Mapping[str, SensitivityResult]`, `mc_symbol_results_by_symbol:
+  Mapping[str, McSymbolResult]`, `mc_portfolio_result: McPortfolioResult`, `prop_sim_result:
+  PropSimResult`, `purged_cv_results_by_symbol: Mapping[str, PurgedCvResult] | None = None`.
+- **R58** (DEBE). `verdict.py` DEBE validar, para cada `CandidateValidationBundle`, que las claves
+  de `wfa_results_by_symbol`, `dsr_pbo_results_by_symbol`, `sensitivity_results_by_symbol` y
+  `mc_symbol_results_by_symbol` coinciden exactamente (mismo conjunto de símbolos) — en caso
+  contrario, `VerdictConfigError` (R2b) con el candidato y los símbolos en conflicto en el mensaje.
+- **R59** (DEBE). `verdict.py` DEBE definir `SymbolGateOutcome` (`@dataclass(frozen=True,
+  slots=True)`) con, como mínimo, un campo de valor y un campo booleano `_pass` por cada gate G1-G9:
+  `trades_oos_total: int`, `g1_pass: bool`; `wfe: float`, `g2_pass: bool`; `profit_factor: float`,
+  `g3_pass: bool`; `dsr: float`, `g4_pass: bool`; `pbo: float`, `g5_pass: bool`;
+  `mc_maxdd_p95_pct_of_limit: float`, `g6_pass: bool`; `mc_breach_probability_12m: float`,
+  `g7_pass: bool`; `sensitivity_has_cliff: bool`, `sensitivity_max_degradation_pct: float`,
+  `g8_pass: bool`; `pf_cost_stress_1_5x: float`, `g9_pass: bool`; `all_pass: bool` (AND de G1-G9).
+- **R60** (DEBE). `verdict.py` DEBE construir un `SymbolGateOutcome` por `(candidate_id, symbol)`
+  comparando los insumos ya producidos por H/I contra los umbrales **definitivos** de spec §7.1,
+  sin recalcular ninguna métrica de H/I: `G1: trades_oos_total = len(extract_trade_returns(
+  wfa_result.oos_ledger_cosido)) >= 300`; `G2: wfa_result.wfe >= 0.5`; `G3: profit_factor(
+  wfa_result.oos_ledger_cosido) >= 1.3` (`genesis.backtest.metrics.profit_factor`,
+  `metrics.py:42-49`); `G4: dsr_pbo_result.dsr >= 0.95`; `G5: dsr_pbo_result.pbo < 0.25`; `G6:
+  mc_symbol_result.block_bootstrap.max_drawdown_p95 <= 0.5 * risk_profile.max_loss_limit_pct /
+  100.0 * starting_balance` (50% del `max_loss_limit`, en unidades absolutas de
+  `max_drawdown_p95`); `G7: mc_symbol_result.block_bootstrap.breach_probability < 0.05`; `G8:
+  not sensitivity_result.has_cliff and max(p.relative_drop for p in
+  sensitivity_result.perturbations) < 0.30`; `G9: min(c.profit_factor for c in
+  sensitivity_result.cost_stress if c.multiplier == 1.5) >= 1.15`.
+- **R61** (NO DEBE). `verdict.py` NO DEBE reimplementar ni recalcular ningún valor ya producido por
+  `wfa.py`/`montecarlo.py`/`dsr_pbo.py`/`sensitivity.py` (H/I): solo compara los campos existentes
+  de `WfaResult`/`DsrPboResult`/`SensitivityResult`/`McSymbolResult` contra los umbrales de R60.
+- **R62** (DEBE). `verdict.py` DEBE evaluar **P6** (violaciones de reglas de firma en simulación OOS
+  = 0) directamente sobre `wfa_result.oos_ledger_cosido` de cada símbolo: `p6_pass = all(
+  count(BreachEvent) == 0 for entry in oos_ledger_cosido.entries)` (ningún `BreachEvent` de ningún
+  `BreachKind` en el ledger OOS cosido de ningún símbolo del candidato) — corrección de nombre
+  respecto a R49: P6 se evalúa por candidato (todos los símbolos deben estar limpios), no es un
+  gate G por símbolo aislado, pero usa el mismo `Ledger` real (nunca MC).
+- **R63** (DEBE). Los umbrales de gates de `verdict.py` (G1-G9, C1-C2, P1-P6, T1-T2) DEBEN ser
+  constantes de módulo nombradas (p. ej. `_G1_MIN_TRADES_OOS = 300`, `_G3_MIN_PROFIT_FACTOR =
+  1.3`, `_P1_MIN_PASS_PROBABILITY = 0.5`), nunca literales embebidos en la lógica de comparación —
+  facilita auditoría y evita relajación silenciosa de un gate (spec: "los gates nunca se
+  relajan").
+- **R64** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test unitario por cada uno de
+  los 9 umbrales G (R60) que verifique, con un `SymbolGateOutcome` sintético justo en el umbral y
+  justo debajo/encima, el resultado esperado de `_pass` (p. ej. `dsr=0.95` → `g4_pass=True`;
+  `dsr=0.9499` → `g4_pass=False`).
+- **R65** (DEBE). `rg -n "0\.95|0\.25|1\.3|0\.5\b|300\b|1\.15" src/genesis/validation/verdict.py`
+  DEBE mostrar los umbrales exactos de spec §7.1-§7.4 asignados a constantes nombradas (R63), no
+  usados como literales sueltos dentro de la lógica.
+- **R66** (DEBE). El gate P6 (R62) DEBE evaluarse con contexto explícito: si algún símbolo del
+  candidato tiene ≥1 `BreachEvent` en su `oos_ledger_cosido`, el `CandidateGateSummary` (R67) DEBE
+  registrar el símbolo y el `BreachKind` en un campo informativo (`p6_violating_symbols:
+  Mapping[str, tuple[BreachKind, ...]]`) para auditoría del veredicto.
+
+### 4.7. `verdict.py` — gates C (coherencia de canasta) y P (economía prop) por candidato
+
+- **R67** (DEBE). `verdict.py` DEBE definir `CandidateGateSummary` (`@dataclass(frozen=True,
+  slots=True)`) con, como mínimo: `candidate_id: str`, `symbol_gate_outcomes: Mapping[str,
+  SymbolGateOutcome]`, `c1_fraction_passing: float`, `c1_pass: bool`, `c2_min_pf_non_passing:
+  float`, `c2_pass: bool`, `p1_pass: bool` .. `p6_pass: bool` (6 campos booleanos explícitos, uno
+  por gate P), `p6_violating_symbols: Mapping[str, tuple[BreachKind, ...]]`,
+  `passes_g_c_p: bool` (AND de C1, C2, P1-P6).
+- **R68** (DEBE). `c1_fraction_passing = count(symbol for symbol, outcome in
+  symbol_gate_outcomes.items() if outcome.all_pass) / len(symbol_gate_outcomes)`; `c1_pass =
+  c1_fraction_passing >= 0.60` (spec §7.2, umbral definitivo).
+- **R69** (DEBE). `c2_min_pf_non_passing = min(outcome.profit_factor for symbol, outcome in
+  symbol_gate_outcomes.items() if not outcome.all_pass)`, o `float("inf")` si todos los símbolos
+  pasan G1-G9 (vacuamente cumplido); `c2_pass = c2_min_pf_non_passing >= 0.8` (spec §7.2, umbral
+  definitivo) — `float("inf") >= 0.8` es `True` por construcción cuando no aplica.
+- **R70** (DEBE). `p1_pass = prop_sim_result.p_pass >= 0.5`; `p2_pass =
+  prop_sim_result.expected_attempts <= 2.0`; `p3_pass =
+  prop_sim_result.p_daily_breach_funded_month < 0.02`; `p4_pass =
+  prop_sim_result.median_funded_survival_months >= 6.0`; `p5_pass =
+  prop_sim_result.payout_p25_12m > 0.0`; `p6_pass` de R62 — los 6 umbrales son los definitivos de
+  spec §7.3.
+
+### 4.8. `verdict.py` — gate T1 (deflación de torneo)
+
+- **R71** (DEBE). `verdict.py` DEBE definir `n_candidatos_torneo = len(candidates)` (parámetro
+  `candidates: Mapping[str, CandidateValidationBundle]` de `run_verdict`) — nunca una constante
+  hardcodeada (decisión 8, §3); si `len(candidates) == 0`, `VerdictConfigError` (R2a).
+- **R72** (DEBE). `verdict.py` DEBE identificar al **candidato ganador** como el que, entre los
+  candidatos con `passes_g_c_p=True` (R67), tiene el mayor `prop_sim_result.payout_p25_12m`;
+  empates resueltos por el mayor `prop_sim_result.median_funded_survival_months`; si ningún
+  candidato pasa G+C+P, no hay ganador y T1 no se evalúa (veredicto NO-GO, R91).
+- **R73** (DEBE). `verdict.py` DEBE construir la canasta diaria combinada del candidato ganador
+  (mismo `_build_daily_basket` de R15, compartido dentro de este Change, R16 aplica igual: no
+  importa símbolos privados de otros módulos) a partir de `oos_ledger_cosido` de cada símbolo del
+  candidato ganador (vía `extract_trade_returns` de `genesis.validation._returns`, reutilizado tal
+  cual como módulo interno del paquete — mismo patrón de reuso que `dsr_pbo.py` ya aplica sobre
+  `_returns`/`_dsr`, `dsr_pbo.py:59-70`).
+- **R74** (DEBE). `n_trials_signal_total_ganador = sum(wfa_result.n_trials_signal_total for
+  wfa_result in candidatos[ganador].wfa_results_by_symbol.values())` (decisión 8, §3, soporte
+  textual: spec §6.1 "trials contados mecánicamente por candidato").
+- **R75** (DEBE). `n_trials_deflactado = n_trials_signal_total_ganador + (n_candidatos_torneo - 1)`
+  (decisión 8, §3). `rg -n "n_candidatos_torneo|n_trials_deflactado" src/genesis/validation/
+  verdict.py` DEBE retornar ≥1 coincidencia cada uno; `n_candidatos_torneo` NO DEBE aparecer como
+  literal `3` hardcodeado en ningún punto de la lógica de deflación.
+- **R76** (DEBE). `verdict.py` DEBE reutilizar `genesis.validation._dsr.deflated_sharpe_ratio`
+  **tal cual** (sin duplicar la fórmula, mismo patrón de reuso interno que
+  `dsr_pbo.deflated_sharpe_ratio_gate`, `dsr_pbo.py:59-70`) invocada como
+  `deflated_sharpe_ratio(daily_returns_canasta_ganador, n_trials=n_trials_deflactado)` para
+  producir `t1_dsr: float`. `rg -n "from genesis\.validation\._dsr import deflated_sharpe_ratio"
+  src/genesis/validation/verdict.py` DEBE retornar ≥1 coincidencia.
+- **R77** (DEBE). `t1_pass = t1_dsr >= 0.95` (spec §7.4, umbral definitivo, idéntico al de G4 pero
+  sobre el DSR deflactado por torneo, nunca el DSR de G4 sin deflactar).
+- **R78** (DEBE). `verdict.py` DEBE registrar en el manifest (R98), como mínimo: `t1_dsr_pre_
+  deflation` (DSR sin ajuste de torneo, para trazabilidad/auditoría), `t1_dsr` (deflactado),
+  `n_trials_signal_total_ganador`, `n_candidatos_torneo`, `n_trials_deflactado` — auditable sin
+  necesidad de re-ejecutar el cálculo.
+
+### 4.9. `verdict.py` — gate T2 (ensemble por correlación y vol-inversa)
+
+- **R79** (DEBE). `verdict.py` DEBE calcular, para cada par de candidatos con `passes_g_c_p=True`
+  (R67), la correlación de Pearson (`numpy.corrcoef`) entre sus canastas diarias combinadas (R73)
+  restringidas a la **intersección** de `trading_day`s comunes entre ambos candidatos. Si la
+  intersección tiene menos de 2 días, `VerdictConfigError` (R2d) con los dos `candidate_id` en el
+  mensaje.
+- **R80** (DEBE). Un par de candidatos es **elegible para ensemble** si su correlación (R79) es `<
+  0.3` (spec §7.4/§2.5, umbral definitivo). Si el torneo tiene exactamente 2 candidatos que pasan
+  G+C+P, la elegibilidad del ensemble depende únicamente de ese par. Si tiene 3 o más, el ensemble
+  se forma con el **subconjunto máximo de candidatos mutuamente elegibles dos a dos** (todas las
+  correlaciones del subconjunto `< 0.3`) — decisión explícita de este documento (el spec no
+  detalla el caso `>2` candidatos).
+- **R81** (DEBE). Si el ensemble es elegible (≥2 candidatos en el subconjunto de R80), `verdict.py`
+  DEBE calcular pesos por **vol-inversa**: `std_i` = desviación estándar de la canasta diaria
+  combinada del candidato `i` (sobre la intersección común de `trading_day`s del subconjunto
+  elegible); `w_i = (1/std_i) / sum_j(1/std_j)`, normalizados a `sum(w_i) == 1.0`.
+  `VerdictConfigError` si algún `std_i == 0.0` (varianza degenerada, ensemble indefinido).
+- **R82** (DEBE). `verdict.py` DEBE construir la canasta diaria del ensemble como
+  `daily_pnl_ensemble[day] = sum(w_i * daily_pnl_i[day] for i in subconjunto elegible)` sobre la
+  intersección de días comunes, y DEBE invocar `prop_sim.simulate_challenge_paths` (núcleo puro,
+  R24) sobre esa canasta con un `seed` **independiente** (documentado en el manifest como
+  `ensemble_prop_sim_seed`, distinto de los `seed` de cada candidato individual) para producir un
+  `PropSimResult` propio del ensemble, evaluado contra los mismos umbrales P1-P5 de R70 (P6 no
+  aplica al ensemble: no existe un `Ledger` real del ensemble, solo trayectorias simuladas).
+- **R83** (DEBE). `verdict.py` DEBE definir `EnsembleResult` (`@dataclass(frozen=True,
+  slots=True)`) con, como mínimo: `member_candidate_ids: tuple[str, ...]`,
+  `pairwise_correlations: Mapping[tuple[str, str], float]`, `weights: Mapping[str, float]`,
+  `prop_sim_result: PropSimResult`, `passes_p_gates: bool` (P1-P5 sobre `prop_sim_result` del
+  ensemble, mismos umbrales R70).
+- **R84** (DEBE). Si ningún par de candidatos que pasan G+C+P tiene correlación `< 0.3`,
+  `EnsembleResult` DEBE ser `None` en `VerdictResult` — el veredicto usa solo el candidato de mejor
+  economía P (R72), consistente con spec §7.4: "en caso contrario, solo el de mejor economía P".
+- **R85** (DEBE). Si solo 0 o 1 candidato pasa G+C+P, T2 NO DEBE evaluarse (no hay par que
+  correlacionar); `EnsembleResult = None`.
+- **R86** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test unitario de T2 con dos
+  candidatos sintéticos de correlación conocida `< 0.3` (ensemble elegible) y otro par con
+  correlación conocida `>= 0.3` (ensemble no elegible), verificando `EnsembleResult`
+  presente/ausente respectivamente.
+- **R87** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test de propiedad
+  (`hypothesis`, marcado `pytest.mark.unit`) de **invariancia al orden**: los pesos de vol-inversa
+  (R81) y la canasta diaria resultante del ensemble (R82) no dependen del orden de iteración del
+  subconjunto elegible (permutar el orden de los candidatos en el `dict` de entrada produce el
+  mismo `EnsembleResult.weights` y el mismo `daily_pnl_ensemble`).
+- **R88** (DEBE). El cálculo de correlación (R79) DEBE ser simétrico:
+  `correlation(A, B) == correlation(B, A)` (propiedad trivial de `numpy.corrcoef`, verificada por
+  un test unitario).
+- **R89** (NO DEBE). `verdict.py` NO DEBE construir ni ejecutar ningún puente de ejecución real del
+  ensemble (asignación de capital en vivo): solo produce `EnsembleResult` con su propio
+  `PropSimResult` simulado (spec §10.3, fuera de alcance).
+- **R90** (DEBE). `rg -n "def _pairwise_correlation|corrcoef" src/genesis/validation/verdict.py`
+  DEBE retornar ≥1 coincidencia; `rg -n "^import scipy|^import statsmodels"
+  src/genesis/validation/verdict.py` DEBE retornar 0 coincidencias.
+
+### 4.10. `verdict.py` — veredicto de torneo (§7.5)
+
+- **R91** (DEBE). `verdict.py` DEBE definir `VerdictKind` (`StrEnum`) con exactamente 4 miembros:
+  `GO`, `GO_ENSEMBLE`, `GO_PARCIAL`, `NO_GO` (mismos 4 valores normativos de spec §7.5, sin
+  variantes adicionales).
+- **R92** (DEBE). La lógica de veredicto DEBE seguir exactamente esta prioridad: (a) si
+  `EnsembleResult is not None and EnsembleResult.passes_p_gates`, `verdict = GO_ENSEMBLE`
+  (incubación del ensemble); (b) si no, y el candidato ganador (R72) pasa G+C+P+T1
+  (`passes_g_c_p and t1_pass`), `verdict = GO` (candidato ganador, universo completo); (c) si no,
+  pero el candidato ganador pasa en un subconjunto de símbolos (`c1_fraction_passing > 0` pero
+  `< 0.60`, o `passes_g_c_p` es `False` solo por C1/C2 mientras P1-P6+T1 mantienen validez sobre
+  el subconjunto de símbolos que sí pasan G1-G9), `verdict = GO_PARCIAL` (incubación restringida a
+  ese subconjunto); (d) en cualquier otro caso, `verdict = NO_GO`.
+- **R93** (DEBE). `verdict.py` DEBE definir `VerdictResult` (`@dataclass(frozen=True, slots=True)`)
+  con, como mínimo: `verdict: VerdictKind`, `winning_candidate_id: str | None`,
+  `candidate_summaries: Mapping[str, CandidateGateSummary]`, `t1_dsr: float | None`,
+  `t1_dsr_pre_deflation: float | None`, `n_candidatos_torneo: int`, `n_trials_deflactado: int |
+  None`, `ensemble: EnsembleResult | None`, `economics_confirmed: bool` (R14),
+  `no_go_iteration_used: bool = False` (R95).
+- **R94** (DEBE). El resultado `VerdictResult.verdict` (y `winning_candidate_id`) DEBE ser
+  **invariante al orden** de los candidatos de entrada: permutar el orden de iteración del `dict`
+  `candidates` de `run_verdict` produce el mismo `VerdictResult` salvo, trivialmente, el orden de
+  iteración interno de `candidate_summaries` (que no es observable si se compara por contenido, no
+  por orden de inserción).
+- **R95** (DEBE). Si `verdict == NO_GO`, `VerdictResult` DEBE exponer un campo
+  `no_go_iteration_used: bool` (default `False`) que el llamador puede fijar en una invocación
+  posterior de `run_verdict` para registrar la **única** iteración de política de riesgo/firma
+  permitida (spec §7.5): cuando `no_go_iteration_used=True`, `n_candidatos_torneo` para T1 en esa
+  invocación posterior DEBE incluir `+1` trial adicional (la iteración cuenta como trial para T1,
+  spec §7.5) — `verdict.py` no impone un límite automático de "una sola vez" (es responsabilidad
+  del proceso humano/organizacional, documentado explícitamente, no bloqueante para este Change).
+- **R95bis** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test de propiedad
+  (`hypothesis`, marcado `pytest.mark.unit`) que verifique R94 con al menos 3 candidatos
+  sintéticos permutados en 3+ órdenes distintos.
+
+### 4.11. `verdict.py` — tearsheet Markdown y manifest JSON reproducible
+
+- **R96** (DEBE). `verdict.py` DEBE definir `render_tearsheet(result: VerdictResult) -> str`, una
+  función **pura** (sin I/O) que produce un documento Markdown con, como mínimo: el `VerdictKind`
+  resultante y el candidato/ensemble ganador; una tabla por candidato con los 9 valores G, C1/C2,
+  P1-P6 y sus `_pass` booleanos; T1 (`t1_dsr_pre_deflation`, `t1_dsr`, `n_trials_deflactado`,
+  `n_candidatos_torneo`); T2 (correlaciones por par, pesos del ensemble si aplica); las dos
+  advertencias explícitas de la decisión 4 y 2 (§3): "P3 es una cota inferior conservadora sobre
+  la base intradía" y, si `economics_confirmed=False`, "economía del challenge con valores
+  placeholder, a confirmar".
+- **R97** (DEBE). `render_tearsheet` y el manifest (R98) DEBEN generarse a partir del **mismo**
+  `VerdictResult` (única fuente de verdad, sin dos caminos de cálculo independientes) — ninguna
+  cifra del tearsheet puede divergir de la del manifest para el mismo `VerdictResult`.
+- **R98** (DEBE). `verdict.py` DEBE definir una función de serialización del manifest (p. ej.
+  `verdict_result_to_manifest_json(result: VerdictResult, config_version: str, dataset_hash_by_
+  symbol: Mapping[str, str], firm_profile_hash: str, risk_profile_hash: str,
+  prop_economics_profile_hash: str, seeds: Mapping[str, int], git_commit: str) -> str`) que
+  produce un JSON con, como mínimo: `config_version`, `dataset_hash_by_symbol` (uno por símbolo,
+  patrón `ArtifactMetadata.dataset_hash` extendido a múltiples símbolos), `firm_profile_hash`,
+  `risk_profile_hash`, `prop_economics_profile_hash`, `candidate_ids: tuple[str, ...]`,
+  `winning_candidate_id`, `verdict`, `seeds` (mapa `candidate_id -> {mc_seed, prop_sim_seed}` +
+  `ensemble_prop_sim_seed` si aplica), `git_commit`, `n_candidatos_torneo`,
+  `n_trials_deflactado`, resultados por candidato (mismos campos que el tearsheet), y el resumen
+  informativo de `purged_cv` si está presente (R106).
+- **R99** (DEBE). El manifest DEBE incluir un método/función inversa (`manifest_json_to_verdict_
+  summary` o equivalente) que reconstruye, sin pérdida, los campos serializados — round-trip
+  `to_json`/`from_json` verificado por test (mismo patrón que `ArtifactMetadata.to_json`/
+  `from_json`, `data/metadata.py:66-98`), aunque `VerdictResult` completo (con las dataclasses de
+  H/I anidadas) no necesita reconstruirse 1:1 — el contrato de round-trip aplica a los campos
+  escalares/serializables del manifest (R98), no a los objetos `WfaResult`/`DsrPboResult`
+  originales (que no se serializan).
+- **R100** (DEBE). `verdict.py` DEBE definir `write_verdict_artifacts(result: VerdictResult,
+  output_dir: Path, config_version: str, dataset_hash_by_symbol: Mapping[str, str],
+  firm_profile_hash: str, risk_profile_hash: str, prop_economics_profile_hash: str, seeds:
+  Mapping[str, int], git_commit: str | None = None) -> tuple[Path, Path]` que escribe
+  `output_dir/manifest.json` y `output_dir/tearsheet.md`, creando `output_dir` si no existe
+  (`Path.mkdir(parents=True, exist_ok=True)`), y retorna las dos rutas escritas. `output_dir` es
+  **siempre provisto por el llamador** — sin ruta por defecto hardcodeada (decisión 6, §3,
+  coherente con la ausencia de CLI en este Change).
+- **R101** (DEBE). Si `git_commit is None`, `write_verdict_artifacts` DEBE resolverlo con
+  `genesis.data.metadata.current_git_commit()` (reutilizado tal cual, `metadata.py:29-47`) — DEBE
+  propagar `GenesisDataError` sin capturar si no se puede determinar el commit (fail-fast,
+  consistente con R5).
+- **R102** (DEBE). `write_verdict_artifacts` es la **única** función de este Change que realiza
+  I/O de escritura a disco (`prop_sim.py` y el resto de `verdict.py` son puros); `rg -n
+  "open\(|\.write_text\(|\.write_bytes\(" src/genesis/validation/prop_sim.py` DEBE retornar 0
+  coincidencias.
+- **R103** (DEBE). `manifest.json` DEBE ser determinista byte a byte: mismos insumos ⇒ mismo JSON
+  (claves ordenadas, `json.dumps(..., sort_keys=True)`, mismo patrón que
+  `firm_profile_hash`/`risk_profile_hash`).
+- **R104** (DEBE). `tearsheet.md` NO DEBE requerir `quantstats`/`matplotlib` para generarse — texto
+  Markdown puro (tablas, listas), verificable con `rg -n "^import quantstats|^import matplotlib"
+  src/genesis/validation/verdict.py` retornando 0 coincidencias.
+- **R105** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test de round-trip del
+  manifest (`to_json`-equivalente → `from_json`-equivalente) verificando que los campos
+  escalares (R98) se reconstruyen sin pérdida.
+- **R106** (DEBE). Si `CandidateValidationBundle.purged_cv_results_by_symbol is not None`, el
+  manifest DEBE incluir, por símbolo: `n_folds`, `total_trades`, y la suma de
+  `purged_trade_count` de todos los `PurgedFold` — como bloque `purged_cv_summary`, marcado
+  explícitamente como "diagnóstico informativo, no participa en el veredicto" (decisión 7, §3).
+- **R107** (DEBE). El tearsheet DEBE incluir, siempre, la advertencia textual exacta de la
+  decisión 4 (§3) sobre P3 ("cota inferior conservadora... la base de equity flotante intradía
+  real puede disparar antes") y, condicionalmente (si `economics_confirmed=False`), la advertencia
+  de la decisión 2 (§3) sobre economía no confirmada.
+- **R108** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test de integración
+  (`pytest.mark.integration`) sobre `tmp_path` que invoque `write_verdict_artifacts` y verifique
+  que ambos archivos existen, son no vacíos, y el manifest es JSON válido.
+
+### 4.12. Testing transversal de `verdict.py`
+
+- **R109** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test de determinismo byte a
+  byte: mismos `CandidateValidationBundle`s + mismos hashes/seeds ⇒ `VerdictResult` idéntico entre
+  dos invocaciones independientes de `run_verdict`.
+- **R110** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test unitario por cada rama
+  de la prioridad de veredicto (R92): un caso sintético que produce `GO`, uno que produce
+  `GO_ENSEMBLE`, uno que produce `GO_PARCIAL`, uno que produce `NO_GO`.
+- **R111** (DEBE). `tests/validation/test_verdict.py` DEBE incluir un test de propiedad
+  (`hypothesis`) de monotonía a nivel de candidato: degradar cualquier insumo de un candidato
+  (bajar `dsr_pbo_result.dsr`, subir `sensitivity_result` con `has_cliff=True`, empeorar
+  `prop_sim_result.p_pass`) nunca mejora su `CandidateGateSummary.passes_g_c_p` ni el veredicto
+  final a su favor.
+- **R112** (DEBE). `tests/validation/test_verdict.py` DEBE incluir al menos un test de integración
+  (`pytest.mark.integration`) del pipeline completo: `monte_carlo_portfolio`/
+  `oos_ledgers_by_symbol` → `run_prop_sim` → `run_verdict` → `write_verdict_artifacts` sobre
+  datasets de muestra (1-2 candidatos sintéticos), en segundos, en CI.
+- **R113** (DEBE). `tests/validation/test_verdict.py` DEBE incluir al menos un test marcado
+  `pytest.mark.slow` que ejercite `run_verdict` con 3+ candidatos sintéticos y `n_paths` de
+  `prop_sim` de volumen realista (ensemble incluido), separado de la suite rápida.
+- **R114** (DEBE). `uv run pytest tests/validation/ -v` DEBE pasar en verde (exit code 0),
+  incluyendo los tests nuevos de `prop_sim.py`/`verdict.py`.
+- **R115** (DEBE). `mise run ci` (lint + `ty` + test) DEBE pasar en verde sobre
+  `src/genesis/validation/prop_sim.py`, `src/genesis/validation/verdict.py`,
+  `src/genesis/validation/errors.py` y `tests/validation/` extendidos.
+- **R116** (DEBE). `rg -n "class CandidateValidationBundle|class VerdictResult|def run_verdict|
+  VerdictKind\.GO_ENSEMBLE|VerdictKind\.GO_PARCIAL|VerdictKind\.NO_GO"
+  src/genesis/validation/verdict.py` DEBE retornar ≥1 coincidencia cada patrón.
+- **R117** (DEBE). `tests/validation/test_public_api.py` (existente, patrón de H/I) DEBE extenderse
+  para verificar que `genesis.validation.__all__` incluye la superficie normativa mínima de este
+  Change (R118) y no re-exporta símbolos con prefijo `_` de `prop_sim.py`/`verdict.py`.
+- **R118** (DEBE). `src/genesis/validation/__init__.py` DEBE extender su `__all__` mínimo y curado
+  con, como mínimo: `PropSimConfigError`, `VerdictConfigError`, `PhaseSpec`,
+  `PropEconomicsProfile`, `load_prop_economics_profile`, `prop_economics_profile_hash`,
+  `PropSimConfig`, `PropSimOutcomeKind`, `PathOutcome`, `PropSimResult`,
+  `simulate_challenge_paths`, `run_prop_sim`, `CandidateValidationBundle`, `SymbolGateOutcome`,
+  `CandidateGateSummary`, `VerdictKind`, `EnsembleResult`, `VerdictResult`, `run_verdict`,
+  `render_tearsheet`, `write_verdict_artifacts` — NUNCA `_build_daily_basket`/funciones auxiliares
+  internas de comparación de umbrales si `design.md` las mantiene privadas.
+
+---
+
+## 5. Invariantes transversales
+
+- **R119** (DEBE). Ningún archivo de `src/genesis/data/`, `src/genesis/strategy/`,
+  `src/genesis/backtest/`, `src/genesis/validation/wfa.py`, `src/genesis/validation/montecarlo.py`,
+  `src/genesis/validation/_dsr.py`, `src/genesis/validation/window_config.py`,
+  `src/genesis/validation/dsr_pbo.py`, `src/genesis/validation/sensitivity.py`,
+  `src/genesis/validation/purged_cv.py`, `src/genesis/validation/_returns.py`,
+  `src/genesis/validation/_windowing.py` DEBE modificarse en este Change (R125).
+- **R120** (DEBE). Solo trades OOS DEBEN alimentar `run_prop_sim`/`simulate_challenge_paths` y toda
+  la lógica de `verdict.py` (spec §6.1, "regla sin excepción") — `oos_ledgers_by_symbol`,
+  `oos_ledger_cosido`, nunca ledgers IS.
+- **R121** (NO DEBE). Este Change NO DEBE añadir `scipy`, `statsmodels`, `matplotlib` ni
+  `quantstats` a `pyproject.toml` (`[project.dependencies]` ni `dependency-groups.dev`). `rg -n
+  "scipy|statsmodels|matplotlib|quantstats" pyproject.toml` DEBE mostrar el mismo estado que antes
+  del Change (sin adiciones).
+- **R122** (DEBE). Toda excepción de dominio nueva de este Change DEBE heredar de
+  `GenesisValidationError` y llevar mensaje con contexto explícito (R3-R4).
+- **R123** (DEBE). Ningún artefacto de `prop_sim.py` (`PropSimResult`, `PathOutcome`) DEBE
+  serializarse a disco — estructuras en memoria únicamente (R123 aplica a `prop_sim.py`; solo
+  `verdict.write_verdict_artifacts` serializa, R100-R102).
+- **R124** (DEBE). El loop de trayectorias de `prop_sim.py` (R22) y cualquier loop de candidatos/
+  pares de `verdict.py` (T2, R79) DEBEN ejecutarse de forma secuencial (sin `multiprocessing`/
+  `concurrent.futures`). `rg -n "multiprocessing|concurrent\.futures"
+  src/genesis/validation/prop_sim.py src/genesis/validation/verdict.py` DEBE retornar 0
+  coincidencias.
+- **R125** (DEBE). `git diff --stat -- src/genesis/data src/genesis/strategy src/genesis/backtest
+  src/genesis/validation/wfa.py src/genesis/validation/montecarlo.py
+  src/genesis/validation/_dsr.py src/genesis/validation/window_config.py
+  src/genesis/validation/dsr_pbo.py src/genesis/validation/sensitivity.py
+  src/genesis/validation/purged_cv.py src/genesis/validation/_returns.py
+  src/genesis/validation/_windowing.py` DEBE quedar vacío al cierre de este Change.
+
+---
+
+## 6. Manejo de errores (resumen normativo, spec §8)
+
+| Excepción | Módulo | Disparador | Efecto |
+|---|---|---|---|
+| `PropSimConfigError` | `genesis.validation.errors` | `n_paths<=0`; `max_attempts<1`; `horizon_months<1`; `path_horizon_trading_days` insuficiente (R21); canasta diaria vacía (R17); ficha `PropEconomicsProfile` inválida (R12) | Aborta `run_prop_sim`/`simulate_challenge_paths`/`load_prop_economics_profile` antes de simular ninguna trayectoria |
+| `VerdictConfigError` | `genesis.validation.errors` | `candidates` vacío (R71); símbolos inconsistentes entre insumos de un candidato (R58); `starting_balance<=0`; intersección de días insuficiente para T2 (R79); varianza degenerada en vol-inversa (R81) | Aborta `run_verdict` antes de evaluar ningún gate |
+| (heredado, sin cambios) `WfaConfigError`, `MonteCarloConfigError`, `PurgedCvConfigError`, `DsrPboConfigError`, `SensitivityConfigError` | `genesis.validation.errors` | Sin cambios respecto a H/I | N/A para este Change (`prop_sim.py`/`verdict.py` no invocan `run_wfa`/`monte_carlo_*`/`run_purged_cv`/`run_dsr_pbo`/`run_sensitivity`, solo consumen sus resultados ya producidos) |
+| (heredado, propagado sin envolver) `GenesisDataError` | `genesis.data.errors` | `current_git_commit()` no puede determinar el commit vigente (R101) | Aborta `write_verdict_artifacts` |
+
+---
+
+## 7. Criterios de aceptación (evals ejecutables)
+
+```
+DADO   el archivo src/genesis/validation/errors.py
+CUANDO rg -n "class PropSimConfigError" src/genesis/validation/errors.py
+       y rg -n "class VerdictConfigError" src/genesis/validation/errors.py
+ENTONCES ambas retornan >=1 coincidencia; ambas heredan de GenesisValidationError (R1-R6)
+```
+
+```
+DADO   metrics.worst_daily_floating_excursion (src/genesis/backtest/metrics.py:86-93)
+CUANDO se invoca sobre un Ledger OOS sin ningún BreachEvent(DAILY)
+ENTONCES retorna 0.0; rg -n "worst_daily_floating_excursion" src/genesis/validation/prop_sim.py
+         retorna 0 coincidencias (R33-R35, corrección de proposal.md)
+```
+
+```
+DADO   una ficha PropEconomicsProfile sintética y una canasta diaria sintética con un breach
+       diario calculado a mano (rozar el límite sin cruzarlo)
+CUANDO se invoca simulate_challenge_paths(..., seed=42, ...)
+ENTONCES ninguna trayectoria reinicia intento ese día; el mismo caso con un delta que sí cruza
+         el umbral (daily_loss >= threshold) SÍ reinicia el intento (R25, R38a-b)
+```
+
+```
+DADO   un caso sintético de breach total con MaxLossLimitKind.STATIC
+       y el mismo P&L con MaxLossLimitKind.TRAILING
+CUANDO se invoca simulate_challenge_paths con cada RiskProfile
+ENTONCES el día de breach (o su ausencia) difiere entre ambos según el ancla usada (R36, R38c)
+```
+
+```
+DADO   un WfaResult sintético con n_trials_signal_total conocido por símbolo y n_candidatos_torneo
+       conocido (len(candidates))
+CUANDO se invoca run_verdict(candidates, ...)
+ENTONCES n_trials_deflactado == sum(n_trials_signal_total por símbolo del ganador) +
+         (n_candidatos_torneo - 1), y t1_dsr se calcula invocando
+         genesis.validation._dsr.deflated_sharpe_ratio con ese n_trials (R74-R78)
+```
+
+```
+DADO   dos candidatos sintéticos con correlación OOS conocida < 0.3
+       y otro par con correlación conocida >= 0.3
+CUANDO se invoca run_verdict con cada configuración
+ENTONCES el primer caso produce EnsembleResult no nulo con pesos de vol-inversa normalizados a 1.0;
+         el segundo produce EnsembleResult=None (R79-R86)
+```
+
+```
+DADO   3+ candidatos sintéticos presentados en distintos órdenes de iteración del mapa de entrada
+CUANDO se invoca run_verdict con cada permutación
+ENTONCES VerdictResult.verdict y winning_candidate_id son idénticos entre todas las permutaciones
+         (R94, R95bis)
+```
+
+```
+DADO   un VerdictResult sintético con verdict=NO_GO
+CUANDO se invoca render_tearsheet(result) y la función de manifest (R98) sobre el mismo result
+ENTONCES ambos documentos reportan exactamente las mismas cifras de gates G/C/P/T (R97)
+```
+
+```
+DADO   un directorio temporal (tmp_path) vacío
+CUANDO se invoca write_verdict_artifacts(result, tmp_path, ...)
+ENTONCES tmp_path/manifest.json y tmp_path/tearsheet.md existen, son no vacíos, y manifest.json es
+         JSON válido y determinista byte a byte entre dos invocaciones con los mismos insumos
+         (R100, R103, R108)
+```
+
+```
+DADO   el diff del commit que cierra este Change
+CUANDO git diff --stat -- src/genesis/data src/genesis/strategy src/genesis/backtest
+       src/genesis/validation/wfa.py src/genesis/validation/montecarlo.py
+       src/genesis/validation/_dsr.py src/genesis/validation/window_config.py
+       src/genesis/validation/dsr_pbo.py src/genesis/validation/sensitivity.py
+       src/genesis/validation/purged_cv.py src/genesis/validation/_returns.py
+       src/genesis/validation/_windowing.py
+ENTONCES no retorna ninguna línea (R125)
+```
+
+```
+DADO   el archivo pyproject.toml tras completar este Change
+CUANDO rg -n "scipy|statsmodels|matplotlib|quantstats" pyproject.toml
+ENTONCES no muestra ninguna de esas dependencias añadida respecto al estado previo al Change (R121)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO uv run pytest tests/validation/ -v
+ENTONCES pasa en verde, incluyendo:
+         - >=3 golden tests de prop_sim.py calculados a mano (R38-R40)
+         - >=1 test de propiedad de monotonía de la ficha de economía (R52)
+         - >=1 test de propiedad de invariancia al orden del veredicto (R94, R95bis)
+         - >=1 test de propiedad de invariancia al orden del ensemble (R87)
+         - >=1 test de determinismo byte a byte de PropSimResult (R53) y de VerdictResult (R109)
+         - >=1 test de round-trip del manifest (R105)
+         - >=1 test de integración del pipeline completo en segundos (R112)
+         - >=1 test marcado pytest.mark.slow de prop_sim (R55) y de verdict con ensemble (R113)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO uv run pytest tests/validation/ -v y mise run ci
+ENTONCES ambos pasan en verde (exit code 0, R114-R115)
+```
+
+---
+
+## 8. Riesgos
+
+| # | Riesgo | Impacto | Mitigación |
+|---|---|---|---|
+| Rg-1 | Corrección de `proposal.md` sobre `worst_daily_floating_excursion` (decisión 4, §3): P3 se evalúa solo sobre la base balance-a-balance, nunca la intradía real — el proxy subestima sistemáticamente la probabilidad real de breach diario. | Un candidato podría pasar P3 en `prop_sim` y aun así violar el límite diario real con mayor frecuencia de la estimada (la base intradía dispara primero en el simulador real, `simulator.py:358-378`). | Documentado explícitamente en tearsheet/manifest (R35, R107) como "cota inferior conservadora"; la incubación en vivo (§10.1-§10.2) actúa como red de seguridad adicional — cualquier breach real durante incubación cancela el forward test incondicionalmente (spec §10.2), mitigando el riesgo residual de este proxy optimista. |
+| Rg-2 | Ficha de economía con `challenge_cost_pct_of_balance`/`profit_split_pct` sin cifra confirmada del spec (placeholders, decisión 2 §3). | El veredicto de negocio (interpretación de P2/P5) podría ser optimista o pesimista según cuán alejados estén los placeholders de los valores reales de The5ers. | `economics_confirmed: bool` explícito en `VerdictResult`/tearsheet (R14, R107); no bloquea el código, solo condiciona la interpretación de negocio — mismo criterio que B aplicó a `daily_reset_time`/`daily_loss_limit`. |
+| Rg-3 | `n_candidatos_torneo` dinámico (decisión 8, §3): un veredicto emitido con 1-2 candidatos (A archivado o no, B implementado) se compara más adelante con uno que incluya al Candidato C (K, con 3 candidatos). | Confusión si se comparan veredictos de distintas épocas sin revisar `n_candidatos_torneo`. | El manifest registra explícitamente `n_candidatos_torneo`/`n_trials_deflactado` de cada invocación (R78, R98) — cada veredicto es auditable con su propio conteo, sin necesidad de re-ejecutar retroactivamente. |
+| Rg-4 | Máquina de estados del challenge (R24-R30) es la lógica más compleja de este Change; un error de un signo/comparación (`>=` vs. `>`, ancla estática vs. trailing) puede alterar sutilmente P1-P5 sin que ningún test unitario aislado lo detecte. | Gates P mal calibrados podrían aprobar o rechazar candidatos incorrectamente. | R38-R40 exigen golden tests calculados a mano para los bordes exactos (rozar/violar, estático/trailing); R52 (monotonía) actúa como test de propiedad adicional independiente de los valores exactos. |
+| Rg-5 | Reconstrucción del ensemble (R79-R83) reimplementa la canasta diaria y el resampleo dentro de `verdict.py`, duplicando parcialmente la lógica de `prop_sim.py` (mismo criterio ADR-H5/ADR-I1, pero ahora dentro del mismo Change). | Riesgo de divergencia sutil entre la canasta diaria de `prop_sim.py` y la de `verdict.py` si no se comparte cuidadosamente la función `_build_daily_basket`. | Ambos módulos de este Change comparten la misma reimplementación (documentado en §2, "Canasta diaria"); un test de paridad (`tests/validation/test_verdict.py`) verifica que la canasta diaria de un candidato individual calculada por `verdict.py` coincide exactamente con la de `prop_sim._build_daily_basket` sobre los mismos ledgers. |
+| Rg-6 | Alcance grande para un solo Change (idea.md, riesgo explícito): `prop_sim.py` (máquina de estados completa) + `verdict.py` (G+C+P+T1+T2+veredicto+tearsheet+manifest+ensemble) es el Change más grande del camino crítico. | Riesgo de que `design.md`/`tasks.md` subestimen el esfuerzo de implementación y testing. | Decisión 10 (§3) recomienda partir `tasks.md` en dos bloques secuenciales testeables de forma aislada; el volumen de requisitos de este documento (R1-R125) ya refleja esa descomposición modular. |
+
+---
+
+## 9. Preguntas abiertas (no bloquean este Change)
+
+- Nombre/ruta exacta del fixture JSON empaquetado de `PropEconomicsProfile` (decisión 1, §3): se
+  resuelve en `design.md` siguiendo el patrón de empaquetado exacto de `risk_profile.json`.
+- Firma exacta (orden de parámetros, kw-only vs. posicional, defaults) de `run_prop_sim`,
+  `simulate_challenge_paths`, `run_verdict`, `write_verdict_artifacts` — se resuelve en
+  `design.md` respetando el comportamiento normativo de esta especificación.
+  - **Nota de progreso**: al momento de redactar este `spec.md`, el change dir ya contiene un
+    `design.md`/`tasks.md` con placeholders sin llenar (`<!-- Task description -->`, `<!--
+    Technical Approach -->`); este documento no los inspecciona ni los valida — es
+    responsabilidad de la fase `design` llenarlos respetando los requisitos aquí fijados.
+- Regla exacta de "subconjunto máximo de candidatos mutuamente elegibles" para el ensemble cuando
+  hay 3+ candidatos que pasan G+C+P (R80) — hoy es teórica (solo B está implementado; A puede
+  archivarse en D, C está diferido a K); se revisita con evidencia real cuando exista más de un
+  candidato simultáneamente viable.
+- Si `challenge_cost_pct_of_balance`/`profit_split_pct` deben confirmarse contra los términos
+  vigentes de The5ers antes de interpretar un veredicto `GO` como decisión de negocio definitiva —
+  delegado al mismo proceso humano que confirma `daily_reset_time`/símbolos MT5 (Issue B, PA-1/
+  PA-2), fuera del alcance de este Change.
+- Si `sensitivity.py`/`dsr_pbo.py` deberían exponer sus umbrales de gate (G4/G5/G8/G9) como
+  constantes compartidas importables (en vez de que `verdict.py` las redefina localmente, R63) —
+  se difiere a `design.md`: I documentó explícitamente que "la comparación contra el umbral es
+  responsabilidad de `verdict.py`" (R33 de I, `dsr_pbo.py`), sin mandato de compartir la constante
+  numérica en sí.
+
+---
+
+## 10. Referencias
+
+- Issue: https://github.com/bbenja11/genesis/issues/14.
+- `.pulse/changes/14-j-feat-validation-prop-sim-verdict-con-gates-t-tearsheet-manifes/idea.md` —
+  inventario completo, hallazgo crítico de granularidad MC vs. `prop_sim`, tabla de insumos por
+  gate P1-P6/T1-T2, 10 preguntas abiertas.
+- `.pulse/changes/14-j-feat-validation-prop-sim-verdict-con-gates-t-tearsheet-manifes/proposal.md`
+  — hipótesis de solución, alcance IN/OUT propuesto, 7 preguntas abiertas para `specify` (resueltas
+  en §3 de este documento, con una corrección explícita de la decisión 4 sobre
+  `worst_daily_floating_excursion`).
+- Spec vigente: `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md` — §1.1 (ficha de la firma),
+  §1.2 (economía del embudo), §1.3 (ficha definitiva The5ers: fases 8%/5%, `min_profitable_days=3`,
+  `daily_loss_limit=5%` base dual, `max_loss_limit=10%`, "payouts quincenales"), §2.4/§2.x
+  (universo de 11 símbolos del Candidato C, referencia de DSR de torneo), §2.5 (higiene del
+  torneo: aislamiento, T1, T2), §3 (núcleo propio, periferia pragmática), §6 (tabla capa 4,
+  `prop_sim.py`/`verdict.py`), §6.1 (flujo, reglas sin excepción), §6.2 (conteo mecánico de trials
+  por candidato — soporte textual de la decisión 8, §3), §7.1-§7.4 (umbrales G/C/P/T definitivos),
+  §7.5 (veredicto GO/GO-ENSEMBLE/GO-PARCIAL/NO-GO, iteración única de NO-GO), §7.6 (sanity-checks
+  de alcanzabilidad), §8 (manejo de errores, determinismo total), §9 (testing: golden tests de
+  challenge calculados a mano, propiedad de monotonía), §10.1-§10.2 (incubación, criterio de
+  salida por violación de firma — red de seguridad de Rg-1), §11 (tabla de issues, I bloquea J),
+  §11.2 (dependencias de runtime del proyecto).
+- `.pulse/specs/validation/spec.md` — spec de dominio acumulada de H+I (líneas 1-1347), en
+  particular las notas explícitas "exclusivo de `verdict.py` (Issue J)" repetidas en H e I y la
+  tabla de decisiones de I (DSR con `n_trials_signal_total`, reuso de `_dsr.py`, persistencia en
+  memoria).
+- `.pulse/heuristics/validation.md` — heurísticas de cierre de #10 (H) y #12 (I).
+- `src/genesis/validation/__init__.py` (líneas 1-77) — `__all__` curado actual (R65 de H, R60 de
+  I), superficie a extender (R118).
+- `src/genesis/validation/montecarlo.py` — `McPathsResult` (líneas 32-46), `McSymbolResult`
+  (49-56), `McPortfolioResult` (59-68), `monte_carlo_portfolio` (343-393), `_build_basket`
+  (287-301), `_extract_exit_returns_by_day` (268-284), `_default_block_size` (110-112),
+  `_portfolio_block_bootstrap_paths` (327-340) — patrón de canasta diaria reimplementado
+  localmente por `prop_sim.py` (R15-R20), nunca importado.
+- `src/genesis/validation/wfa.py` — `WfaResult` (77-90: `oos_ledger_cosido`, `n_windows`,
+  `n_trials_signal_total`, `n_trials_execution_total`), `WindowResult` (53-74).
+- `src/genesis/validation/dsr_pbo.py` — `deflated_sharpe_ratio_gate` (59-70, patrón de reuso
+  interno de `_dsr.py`/`_returns.py` replicado por T1 de `verdict.py`, R76), `DsrPboResult`
+  (350-365).
+- `src/genesis/validation/_dsr.py` — `deflated_sharpe_ratio(returns, n_trials)` (97-130,
+  reutilizada tal cual para T1, sin duplicar la fórmula).
+- `src/genesis/validation/_returns.py` — `TradeReturn` (21-33), `extract_trade_returns` (36-68,
+  reutilizado por `verdict.py` para construir la canasta diaria del candidato ganador, R73).
+- `src/genesis/validation/errors.py` (líneas 1-71) — `GenesisValidationError` y jerarquía existente
+  de H/I, extendida con `PropSimConfigError`/`VerdictConfigError` (R1-R6).
+- `src/genesis/backtest/metrics.py` — `profit_factor` (42-49), `worst_daily_floating_excursion`
+  (86-93, **evidencia de la corrección de la decisión 4, §3**: retorna `0.0` sin
+  `BreachEvent(DAILY)`), `min_distance_to_daily_limit` (96-110, mismo patrón, no usado por
+  `prop_sim.py`, R34).
+- `src/genesis/backtest/ledger.py` — `BreachKind` (21-31), `BreachEvent` (34-47), `RejectionRecord`
+  (50-57), `FillRecord` (60-71), `RunProvenance` (74-82), `Ledger` (97-106).
+- `src/genesis/backtest/simulator.py` — `_evaluate_daily_breach` (358-378, base dual real:
+  `daily_loss = max(loss_vs_close, loss_vs_peak)`, referencia normativa de la decisión 4 §3, R33,
+  R35), `_evaluate_total_breach` (380-406, ancla estática vs. trailing, referencia normativa de
+  R36).
+- `src/genesis/backtest/risk_profile.py` — `MaxLossLimitKind` (22-26), `RiskProfile` (29-40),
+  `load_risk_profile` (43-69), `risk_profile_hash` (72-84) — patrón ADR-G2 replicado por
+  `PropEconomicsProfile` (R7-R11).
+- `src/genesis/data/profile.py` — `FirmProfile` (30-47: `daily_loss_limit_pct`,
+  `daily_reset_time`), `firm_profile_hash` (99-115) — patrón de "default conservador, a confirmar"
+  replicado por la decisión 2 (§3).
+- `src/genesis/data/metadata.py` — `ArtifactMetadata` (50-98, `to_json`/`from_json`), `sha256_of`
+  (21-26), `current_git_commit` (29-47) — patrón institucional extendido por el manifest de
+  `verdict.py` (R98-R102).
+- `pyproject.toml` — dependencias runtime actuales (`metatrader5`, `numpy`, `pandas`, `pyarrow`,
+  sin `scipy`/`statsmodels`/`matplotlib`/`quantstats`), marcadores `unit`/`integration`/`e2e`/
+  `statistical`/`slow` ya registrados (líneas 76-82), ninguno nuevo requerido por este Change.
+- `tests/validation/` — `conftest.py`, `fixtures/`, patrón `test_integration_pipeline_i.py`,
+  `test_slow_volume_i.py`, `test_public_api.py` a replicar/extender para
+  `test_prop_economics.py`, `test_prop_sim.py`, `test_verdict.py`.
+- `.pulse/changes/archive/12-i-feat-validation-purged-k-fold-dsr-pbo-sensibilidad/spec.md` —
+  formato y estilo replicado (R1..Rn, tabla de resolución de decisiones, criterios
+  DADO/CUANDO/ENTONCES, tabla de riesgos, corrección explícita de una decisión de `proposal.md`
+  con evidencia de código, mismo patrón aplicado aquí a la decisión 4).
+- Referencias externas citadas por el spec y esta especificación: Bailey, D. H. & López de Prado,
+  M. (2014). "The Deflated Sharpe Ratio..." (base de T1, R76); Moskowitz, Ooi & Pedersen (2012)
+  (TSMOM, Candidato C, fuera de alcance de este Change).
+- Reglas de proceso: `.agents/rules/architecture-conventions.md`,
+  `.agents/rules/eval-tdd-conventions.md`, `.agents/rules/tooling-conventions.md`.
+- `CLAUDE.md` (raíz) — arquitectura de 4 capas, flujo SDD, cadena de dependencias
+  A→B→C→{D/E,G}→H→I→J→K.
