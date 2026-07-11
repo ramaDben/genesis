@@ -5,6 +5,71 @@
     "max_lot": 50.0
   },
   "candidates": {
+    "A": {
+      "smc": {
+        "fractal_n": 3,
+        "eq_tolerance_atr": 0.15,
+        "sweep_tolerance_atr": 0.05,
+        "sweep_window_k": 5,
+        "sweep_validity_m": 30,
+        "free_path_radius_sigma": 1.0,
+        "ct_zscore_min": 2.0,
+        "atr_period": 14
+      },
+      "diagnostics": {
+        "horizons_minutes": [5, 15, 30, 60],
+        "bootstrap_resamples": 2000,
+        "bootstrap_block_size": null,
+        "bootstrap_seed": 12345,
+        "stop_distance_atr_buffer_multiple": 1.0,
+        "symbol_figures_placeholder": {
+          "XAUUSD": {
+            "symbol": "XAUUSD",
+            "tick_value": 1.0,
+            "volume_step": 0.01,
+            "stops_level": 100,
+            "freeze_level": 0,
+            "digits": 2,
+            "swap_long": -10.5,
+            "swap_short": -5.2,
+            "swap_rollover_day": 3
+          },
+          "EURUSD": {
+            "symbol": "EURUSD",
+            "tick_value": 1.0,
+            "volume_step": 0.01,
+            "stops_level": 0,
+            "freeze_level": 0,
+            "digits": 5,
+            "swap_long": -2.5,
+            "swap_short": 0.5,
+            "swap_rollover_day": 3
+          },
+          "GBPUSD": {
+            "symbol": "GBPUSD",
+            "tick_value": 1.0,
+            "volume_step": 0.01,
+            "stops_level": 0,
+            "freeze_level": 0,
+            "digits": 5,
+            "swap_long": -3.0,
+            "swap_short": 0.3,
+            "swap_rollover_day": 3
+          },
+          "USDJPY": {
+            "symbol": "USDJPY",
+            "tick_value": 0.91,
+            "volume_step": 0.01,
+            "stops_level": 0,
+            "freeze_level": 0,
+            "digits": 3,
+            "swap_long": 1.5,
+            "swap_short": -4.0,
+            "swap_rollover_day": 3
+          }
+        }
+      }
+    },
     "B": {
       "n_minutes": 15,
       "atr_stop_frac": 1.0,
