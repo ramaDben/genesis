@@ -39,6 +39,28 @@ _EXPECTED_ALL = {
     "run_dsr_pbo",
     "run_purged_cv",
     "run_sensitivity",
+    # Issue J (R118): prop_sim.py + verdict.py (gates G/C/P/T1/T2, veredicto, tearsheet/manifest).
+    "CandidateGateSummary",
+    "CandidateValidationBundle",
+    "EnsembleResult",
+    "PathOutcome",
+    "PhaseSpec",
+    "PropEconomicsProfile",
+    "PropSimConfig",
+    "PropSimConfigError",
+    "PropSimOutcomeKind",
+    "PropSimResult",
+    "SymbolGateOutcome",
+    "VerdictConfigError",
+    "VerdictKind",
+    "VerdictResult",
+    "load_prop_economics_profile",
+    "prop_economics_profile_hash",
+    "render_tearsheet",
+    "run_prop_sim",
+    "run_verdict",
+    "simulate_challenge_paths",
+    "write_verdict_artifacts",
 }
 
 
@@ -108,3 +130,39 @@ def test_detalles_internos_de_issue_i_no_se_reexportan() -> None:
     assert "deflated_sharpe_ratio_gate" not in validation_pkg.__all__
     assert "combinatorial_symmetric_cross_validation" not in validation_pkg.__all__
     assert not hasattr(validation_pkg, "deflated_sharpe_ratio_gate")
+
+
+def test_importa_la_superficie_publica_de_issue_j_sin_error() -> None:
+    """R117/R118: superficie normativa de prop_sim.py/verdict.py importa sin error."""
+    from genesis.validation import (  # noqa: F401
+        CandidateGateSummary,
+        CandidateValidationBundle,
+        EnsembleResult,
+        PathOutcome,
+        PhaseSpec,
+        PropEconomicsProfile,
+        PropSimConfig,
+        PropSimConfigError,
+        PropSimOutcomeKind,
+        PropSimResult,
+        SymbolGateOutcome,
+        VerdictConfigError,
+        VerdictKind,
+        VerdictResult,
+        load_prop_economics_profile,
+        prop_economics_profile_hash,
+        render_tearsheet,
+        run_prop_sim,
+        run_verdict,
+        simulate_challenge_paths,
+        write_verdict_artifacts,
+    )
+
+
+def test_detalles_internos_de_issue_j_no_se_reexportan() -> None:
+    """§1.10: `_build_daily_basket` ni las funciones de composición del manifest se reexportan."""
+    assert "_build_daily_basket" not in validation_pkg.__all__
+    assert "verdict_result_to_manifest_json" not in validation_pkg.__all__
+    assert "manifest_json_to_verdict_summary" not in validation_pkg.__all__
+    assert not hasattr(validation_pkg, "_build_daily_basket")
+    assert not hasattr(validation_pkg, "verdict_result_to_manifest_json")
