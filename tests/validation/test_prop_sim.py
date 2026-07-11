@@ -194,7 +194,9 @@ def test_roza_limite_diario_no_reinicia(
     )
     assert outcome.n_attempts_used == 1  # sin reinicio
     assert outcome.outcome is PropSimOutcomeKind.IN_PROGRESS_UNFUNDED_AT_PATH_END
-    assert cost_paid == pytest.approx(0.0)
+    # R37: el primer intento también se cuenta -> 1x challenge_cost, nunca 0.0.
+    expected_cost = _STARTING_BALANCE * _default_profile().challenge_cost_pct_of_balance / 100.0
+    assert cost_paid == pytest.approx(expected_cost)
 
 
 def test_viola_limite_diario_reinicia(
@@ -212,7 +214,9 @@ def test_viola_limite_diario_reinicia(
     )
     assert outcome.n_attempts_used == 2  # reinició una vez
     assert outcome.outcome is PropSimOutcomeKind.IN_PROGRESS_UNFUNDED_AT_PATH_END
-    assert cost_paid > 0.0
+    # R37: 2 intentos iniciados (el primero + el reinicio) -> 2x challenge_cost.
+    expected_cost = 2 * _STARTING_BALANCE * _default_profile().challenge_cost_pct_of_balance / 100.0
+    assert cost_paid == pytest.approx(expected_cost)
 
 
 def test_static_vs_trailing_outcome_distinto(
@@ -306,6 +310,45 @@ def test_max_attempts_1_termina_en_primer_breach(
     assert outcome.outcome is PropSimOutcomeKind.NEVER_FUNDED_ATTEMPTS_EXHAUSTED
     assert outcome.n_attempts_used == 1
     assert outcome.breach_trading_day_index == 0
+
+
+def test_total_challenge_cost_paid_incluye_el_primer_intento(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    """R37: `total_challenge_cost_paid` se incrementa por cada intento iniciado, incluido el 1º.
+
+    Una trayectoria sin ningún breach (1 solo intento, nunca reinicia) debe reportar
+    exactamente 1x `challenge_cost`; con N intentos (N-1 reinicios por breach), N x
+    `challenge_cost`.
+    """
+    profile = _default_profile()
+    challenge_cost = _STARTING_BALANCE * profile.challenge_cost_pct_of_balance / 100.0
+
+    # 1 solo intento: ninguna pérdida dispara breach en ningún día.
+    daily_pnl_sin_breach = [10.0, 10.0, 10.0]
+    outcome_1, cost_paid_1 = _simulate_single_path(
+        daily_pnl_sin_breach,
+        _STARTING_BALANCE,
+        profile,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _default_config(max_attempts=10),
+    )
+    assert outcome_1.n_attempts_used == 1
+    assert cost_paid_1 == pytest.approx(1 * challenge_cost)
+
+    # 3 intentos: 2 breaches consecutivos (reinician) + 1 intento final sin breach.
+    daily_pnl_tres_intentos = [-5_000.0, -5_000.0, 10.0]
+    outcome_3, cost_paid_3 = _simulate_single_path(
+        daily_pnl_tres_intentos,
+        _STARTING_BALANCE,
+        profile,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        _default_config(max_attempts=10),
+    )
+    assert outcome_3.n_attempts_used == 3
+    assert cost_paid_3 == pytest.approx(3 * challenge_cost)
 
 
 def test_prop_sim_outcome_kind_tiene_exactamente_4_miembros() -> None:

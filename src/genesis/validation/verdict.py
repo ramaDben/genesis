@@ -256,9 +256,9 @@ def _evaluate_p1_to_p5(prop_sim_result: PropSimResult) -> tuple[bool, bool, bool
     """
     p1_pass = prop_sim_result.p_pass >= _P1_MIN_PASS
     p2_pass = prop_sim_result.expected_attempts <= _P2_MAX_ATTEMPTS
-    p3_pass = prop_sim_result.p_daily_breach_funded_month <= _P3_MAX_DAILY_BREACH
+    p3_pass = prop_sim_result.p_daily_breach_funded_month < _P3_MAX_DAILY_BREACH
     p4_pass = prop_sim_result.median_funded_survival_months >= _P4_MIN_SURVIVAL_MONTHS
-    p5_pass = prop_sim_result.payout_p25_12m >= _P5_MIN_PAYOUT
+    p5_pass = prop_sim_result.payout_p25_12m > _P5_MIN_PAYOUT
     return p1_pass, p2_pass, p3_pass, p4_pass, p5_pass
 
 
@@ -672,6 +672,18 @@ def _find_go_parcial_candidate(
     P1-P6 en verde y T1 (calculado sobre ese candidato como si fuera el ganador)
     también en verde. Orden canónico total (igual criterio que
     `_select_winning_candidate`, R94): primer candidato elegible en ese orden.
+
+    Nota de alcance (R92c admite dos redacciones alternativas en el spec):
+    `0 < c1_fraction_passing < 0.60` **o** `passes_g_c_p is False solo por
+    C1/C2 mientras P1-P6+T1 mantienen validez`. Esta implementación cubre la
+    primera alternativa (literal, verificable por umbral) para **cualquier**
+    candidato del torneo, no solo para "el candidato ganador" de R72 (que, por
+    definición, requiere `passes_g_c_p=True` y por tanto nunca calificaría para
+    esta rama). La segunda alternativa (C1 **o** C2 como única causa de fallo)
+    queda deliberadamente fuera: es una condición más laxa y menos verificable
+    mecánicamente (exige aislar la causa exacta del fallo de `passes_g_c_p`)
+    que ampliaría la superficie de `GO_PARCIAL` frente a la lectura estricta ya
+    implementada — elección conservadora para no relajar el gate por defecto.
     """
 
     def _sort_key(candidate_id: str) -> tuple[float, float, str]:

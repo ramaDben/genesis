@@ -417,7 +417,9 @@ def _simulate_single_path(
     n_funded_months_observed = 0
     n_funded_months_with_daily_breach = 0
     current_month_had_daily_breach = False
-    total_challenge_cost_paid = 0.0
+    # R37: el primer intento también cuenta ("por cada intento iniciado, incluido el
+    # primero"); los reinicios posteriores acumulan `challenge_cost` adicional más abajo.
+    total_challenge_cost_paid = challenge_cost
 
     for day_index, pnl in enumerate(daily_pnl):
         phase_start_of_day_balance = balance

@@ -33,6 +33,7 @@ from genesis.validation.verdict import (
     _build_symbol_gate_outcome,
     _compute_t1,
     _compute_t2,
+    _evaluate_p1_to_p5,
     _pairwise_correlation,
     build_candidate_gate_summary,
     manifest_json_to_verdict_summary,
@@ -546,6 +547,30 @@ def test_passes_g_c_p_false_si_falla_p1() -> None:
     summary = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
     assert summary.p1_pass is False
     assert summary.passes_g_c_p is False
+
+
+def test_p3_umbral_daily_breach_estrictamente_menor_0_02() -> None:
+    """R70: `p3_pass = p_daily_breach_funded_month < 0.02` (estricto, `==0.02` DEBE fallar)."""
+    result_pass = _prop_sim_result(p_daily_breach_funded_month=0.0199)
+    result_fail_at_boundary = _prop_sim_result(p_daily_breach_funded_month=0.02)
+
+    _p1, _p2, p3_pass_ok, _p4, _p5 = _evaluate_p1_to_p5(result_pass)
+    _p1, _p2, p3_pass_boundary, _p4, _p5 = _evaluate_p1_to_p5(result_fail_at_boundary)
+
+    assert p3_pass_ok is True
+    assert p3_pass_boundary is False
+
+
+def test_p5_umbral_payout_estrictamente_mayor_a_cero() -> None:
+    """R70: `p5_pass = payout_p25_12m > 0.0` (estricto, `==0.0` DEBE fallar)."""
+    result_pass = _prop_sim_result(payout_p25_12m=0.01)
+    result_fail_at_boundary = _prop_sim_result(payout_p25_12m=0.0)
+
+    _p1, _p2, _p3, _p4, p5_pass_ok = _evaluate_p1_to_p5(result_pass)
+    _p1, _p2, _p3, _p4, p5_pass_boundary = _evaluate_p1_to_p5(result_fail_at_boundary)
+
+    assert p5_pass_ok is True
+    assert p5_pass_boundary is False
 
 
 # --- B2: T1 (deflación de torneo, R71-R78) ---
