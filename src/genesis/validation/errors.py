@@ -81,6 +81,17 @@ class PropSimConfigError(GenesisValidationError):
     """
 
 
+class SignalDiagnosticConfigError(GenesisValidationError):
+    """Configuración o insumos inválidos del diagnóstico de señal desnuda, `signal_diagnostic.py`
+    (Issue D, R122).
+
+    Disparadores normativos: `(a)` símbolo de oro/majors sin ficha `SymbolFigure`
+    confirmada y sin la bandera `--allow-placeholder-figures` (R107); `(b)`
+    `horizons_minutes`/parámetros de bootstrap inválidos. El `BacktestConfigError` de
+    `ticks.py` (capa 3) se propaga **sin envolver** (mismo criterio R5 que las hermanas).
+    """
+
+
 class VerdictConfigError(GenesisValidationError):
     """Configuración o insumos inválidos del veredicto de torneo, `verdict.py` (Issue J, R2).
 

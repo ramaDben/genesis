@@ -25,6 +25,7 @@ from genesis.validation.errors import (
     PropSimConfigError,
     PurgedCvConfigError,
     SensitivityConfigError,
+    SignalDiagnosticConfigError,
     VerdictConfigError,
     WfaConfigError,
 )
@@ -55,6 +56,13 @@ from genesis.validation.sensitivity import (
     SensitivityResult,
     run_sensitivity,
 )
+from genesis.validation.signal_diagnostic import (
+    ArchiveOrContinue,
+    SignalDiagnosticReport,
+    render_signal_diagnostic_markdown,
+    run_signal_diagnostic,
+    write_signal_diagnostic_artifacts,
+)
 from genesis.validation.verdict import (
     CandidateGateSummary,
     CandidateValidationBundle,
@@ -70,6 +78,7 @@ from genesis.validation.wfa import WfaResult, WindowResult, run_wfa
 from genesis.validation.window_config import GridConfig, WfaWindowConfig, window_identity_hash
 
 __all__ = [
+    "ArchiveOrContinue",
     "CandidateGateSummary",
     "CandidateValidationBundle",
     "CostStressOutcome",
@@ -98,6 +107,8 @@ __all__ = [
     "SensitivityConfig",
     "SensitivityConfigError",
     "SensitivityResult",
+    "SignalDiagnosticConfigError",
+    "SignalDiagnosticReport",
     "SignalTrialMatrix",
     "SymbolGateOutcome",
     "VerdictConfigError",
@@ -112,14 +123,17 @@ __all__ = [
     "monte_carlo_portfolio",
     "monte_carlo_symbol",
     "prop_economics_profile_hash",
+    "render_signal_diagnostic_markdown",
     "render_tearsheet",
     "run_dsr_pbo",
     "run_prop_sim",
     "run_purged_cv",
     "run_sensitivity",
+    "run_signal_diagnostic",
     "run_verdict",
     "run_wfa",
     "simulate_challenge_paths",
     "window_identity_hash",
+    "write_signal_diagnostic_artifacts",
     "write_verdict_artifacts",
 ]
