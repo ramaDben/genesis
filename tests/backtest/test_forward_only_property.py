@@ -89,6 +89,7 @@ _future_closes_strategy = st.lists(
 )
 
 
+@pytest.mark.timeout(180)
 @given(
     prefix_closes=_closes_strategy,
     suffix_closes_a=_future_closes_strategy,
