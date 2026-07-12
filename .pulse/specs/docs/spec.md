@@ -495,3 +495,326 @@ Issue A (este spec) — doc-only, sin dependencias ascendentes
 - Doctrina EDD/TDD: `.agents/rules/eval-tdd-conventions.md` — Excepción doc-only (Q5): criterios `rg`/`fd`
 - Tooling: `.agents/rules/tooling-conventions.md`
 - CLAUDE.md del repo: arquitectura 4 capas, invariantes forward-only, reproducibilidad
+
+<!-- change:18-docs-spec-firma-de-datos-alternativa-ftmo-ficha-candidata-cuenta -->
+# Specification: firma de datos alternativa FTMO — ficha candidata, cuenta de datos y veredictos por firma (§1.3/§4.1)
+
+> Change doc-only (Issue #18). Ningún archivo bajo `src/genesis/` cambia. Formaliza como delta
+> documental sobre el SSoT vigente `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md`
+> (577 líneas) las decisiones ya fijadas en `proposal.md`: versión completa v1.3 (archivo nuevo
+> que reemplaza a v1.2, patrón v1.1→v1.2), ficha FTMO + tabla de símbolos con placeholders
+> explícitos "a confirmar por la corrida operativa", ampliación de §7.5 (no nueva §7.7) para el
+> condicionamiento por firma, y gap heredado de `SymbolFigure`/universo del Candidato A
+> declarado no-objetivo.
+
+## Objetivo
+
+Actualizar el SSoT del proyecto de `v1.2` a `v1.3` (archivo nuevo
+`docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`, que reemplaza íntegramente a v1.2 como
+spec vigente) para que reconozca normativamente:
+
+1. Más de una **ficha de firma candidata** (The5ers + FTMO), no solo una "ficha definitiva".
+2. Una **tabla de símbolos MT5 esperados en FTMO** para el universo combinado A+B (8 símbolos).
+3. Una **cuenta de datos genérica** ("de la firma activa"), no atada por nombre propio a The5ers.
+4. El **condicionamiento explícito de todo artefacto/veredicto a la firma de datos** que lo
+   produjo (`firm_profile_hash`, no-transferibilidad, forma canónica `GO (candidato X, firma Y)`).
+
+Esto cierra el vacío normativo señalado por la inaccesibilidad de la cuenta demo/trial de The5ers
+(2026-07-11) y la corrida operativa paralela sobre FTMO Free Trial (Issue D #16, ya cerrado en
+código), sin bloquear ni depender de esa sesión paralela.
+
+## Alcance IN / OUT
+
+### IN (este change)
+
+- Crear `docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` como archivo nuevo, íntegro,
+  que reemplaza a v1.2 como SSoT vigente (v1.2 permanece en el repo como registro histórico, no
+  se borra — mismo patrón que v1.1 tras la migración a v1.2).
+- Nueva entrada de changelog `v1.2 → v1.3` al inicio del documento.
+- Reestructurar §1.3 de "Firma objetivo v1: The5ers — ficha definitiva" a una sección de
+  **fichas de firma candidatas** con dos fichas hermanas: The5ers (contenido preservado, sin
+  cambios sustantivos) + FTMO (nueva, con placeholders explícitos).
+- Nueva tabla de símbolos MT5 esperados en FTMO para el universo combinado A+B (8 símbolos),
+  mismo formato de columnas que la tabla existente de The5ers.
+- Generalizar §4.1 ("Cuenta de datos") de "una cuenta demo/trial de The5ers" a "una cuenta
+  demo/trial de la firma de datos activa (The5ers o FTMO)", preservando verbatim el resto del
+  párrafo (incl. `AccountScopeError`).
+- Ampliar §7.5 (Veredicto) con un párrafo normativo de condicionamiento por firma
+  (`firm_profile_hash`, no-transferibilidad, forma canónica obligatoria).
+- Documentar explícitamente los no-objetivos de este change (ver abajo) dentro del propio v1.3.
+
+### OUT (no-objetivos explícitos / YAGNI)
+
+- **No** se crea `src/genesis/data/profiles/ftmo.json` ni ningún archivo JSON de ficha de firma
+  versionada nueva — la ficha FTMO vive solo como especificación textual (tabla + prosa) en el
+  SSoT. Su creación como artefacto de código queda para un change posterior.
+- **No** se modifica `src/genesis/data/profiles/the5ers.json` ni
+  `inspector_config.json` — permanecen bit-a-bit idénticos.
+- **No** se modifica ningún archivo bajo `src/genesis/` (ni tests bajo `tests/` que ejerciten ese
+  código) — es un change puramente documental.
+- **No** se crea la excepción `FirmMismatchError` en código; queda solo como nota de trabajo
+  futuro en el párrafo nuevo de §7.5, sin normarla en detalle ni asignarle un issue.
+- **No** se resuelve el gap heredado del Change #16 (Issue D): `SymbolFigure` real de oro/majors
+  (XAUUSD/EURUSD/GBPUSD/USDJPY, universo del Candidato A) sigue sin confirmar en ninguna ficha de
+  firma versionada, para ninguna firma. v1.3 documenta este gap como no-objetivo explícito, no lo
+  cierra.
+- **No** se verifican en esta fase los términos reales vigentes de FTMO (daily loss %, max loss
+  %, tipo estático/trailing, `server_tz`, fases challenge/free trial) ni los nombres de símbolo
+  MT5 reales — se documentan como placeholders "default conservador — a confirmar por la corrida
+  operativa/contra términos vigentes de FTMO", mismo patrón que The5ers usó en v1.1→v1.2.
+- **No** se toca §11 (Gobernanza SDD) más allá de lo estrictamente necesario para mantener
+  coherencia; este issue no forma parte de la cadena A–K.
+
+## Requisitos funcionales
+
+### R1 — Archivo v1.3 nuevo que reemplaza a v1.2 como SSoT vigente
+
+Crear `docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` con encabezado que declare
+`Estado: definitivo (SSoT vigente). Reemplaza íntegramente al v1.2.` (mismo patrón textual que el
+encabezado actual de v1.2 respecto a v1.1, `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:3`).
+`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md` permanece sin borrar en el repo.
+
+**Criterios de aceptación:**
+- DADO el archivo `docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  CUANDO `rg -n "Reemplaza íntegramente al v1\.2" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia.
+- DADO el repo tras aplicar el change
+  CUANDO `fd "SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md" docs`
+  ENTONCES el archivo v1.2 sigue existiendo (no se borra).
+- DADO `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md`
+  CUANDO `git diff --name-only -- docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md`
+  ENTONCES no retorna resultados (el archivo v1.2 no se edita).
+
+### R2 — Changelog `v1.2 → v1.3`
+
+Nueva entrada de changelog al inicio del documento v1.3, mismo formato de lista numerada que
+`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:7-17` (changelog v1.1→v1.2), que documente
+la causa (inaccesibilidad de la cuenta demo/trial de The5ers, pivote operativo a FTMO) y enumere
+los puntos cerrados (fichas candidatas, tabla de símbolos FTMO, generalización de §4.1,
+condicionamiento por firma en §7.5).
+
+**Criterios de aceptación:**
+- DADO `docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  CUANDO `rg -n "Changelog v1\.2 → v1\.3" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia.
+- DADO esa misma sección de changelog
+  CUANDO `rg -n "The5ers" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` acotado a las
+  primeras 30 líneas del archivo
+  ENTONCES menciona la inaccesibilidad de la cuenta demo/trial como motivo del cambio de versión.
+
+### R3 — §1.3 reestructurada como "fichas de firma candidatas"
+
+Convertir el encabezado único `### 1.3. Firma objetivo v1: The5ers — ficha definitiva`
+(`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:64`) en una sección `1.3` con dos
+sub-fichas hermanas: The5ers (tabla de valores y tabla de símbolos preservadas sin cambio de
+contenido respecto a v1.2) y FTMO (nueva, mismo patrón de campos de §1.1:
+`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:39-51` — `phases`, `daily_loss_limit`,
+`max_loss_limit`, `daily_reset_time`, `equity_basis`, `consistency_rule`, `news_restrictions`,
+`weekend_holding`, `profit_split`/`payout_cycle`, `challenge_cost`, `max_lots`/`max_positions`).
+
+**Criterios de aceptación:**
+- DADO `docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  CUANDO `rg -n "Fichas de firma candidatas" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia.
+- DADO ese mismo archivo
+  CUANDO `rg -n "The5ers" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` y
+  `rg -n "FTMO" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES ambas retornan ≥ 1 coincidencia dentro de §1.3.
+- DADO la tabla de valores de The5ers en v1.3
+  CUANDO se compara línea a línea contra `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:66-79`
+  ENTONCES el contenido de valores (daily_loss_limit 5%, daily_reset_time
+  `00:00 America/New_York`, max_loss_limit 10%, etc.) es idéntico.
+
+### R4 — Contenido normativo mínimo de la ficha FTMO
+
+La ficha FTMO nueva en §1.3 debe incluir, como mínimo, los mismos campos que la tabla de The5ers
+(`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:66-79`): plataforma, `daily_loss_limit`
+(% y base de cálculo), `daily_reset_time` + zona horaria explícita (`server_tz`), `max_loss_limit`
+(% y tipo estático/trailing), fases challenge/free trial, `news_restrictions`, `weekend_holding`.
+Cada valor no verificado contra fuente externa debe marcarse explícitamente como
+`"default conservador — a confirmar contra términos vigentes de FTMO / contra la corrida
+operativa"` (mismo patrón textual que
+`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:70-71` usa para The5ers).
+
+**Criterios de aceptación:**
+- DADO la ficha FTMO en v1.3
+  CUANDO `rg -n "default conservador" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia dentro de la sub-ficha FTMO.
+- DADO la ficha FTMO en v1.3
+  CUANDO `rg -n "daily_reset_time" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` y
+  `rg -n "server_tz|zona horaria" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES ambas retornan ≥ 1 coincidencia dentro de la sub-ficha FTMO.
+- DADO la ficha FTMO en v1.3
+  CUANDO se listan sus campos documentados
+  ENTONCES cubre como mínimo: `daily_loss_limit`, `max_loss_limit`, `daily_reset_time`+zona
+  horaria, fases challenge/free trial, `news_restrictions`, `weekend_holding` (ningún campo del
+  patrón §1.1 queda omitido sin justificación explícita).
+
+### R5 — Tabla de símbolos MT5 esperados en FTMO (universo combinado A+B, 8 símbolos)
+
+Nueva tabla de símbolos MT5 esperados en FTMO, mismo formato de columnas que la tabla existente
+(`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:85-90`: *Nombre convencional* / *Símbolo
+MT5 esperado* / *Alias posibles* / *Subyacente*), cubriendo los 8 símbolos del universo combinado
+A+B: US500, NAS100, US30, GER40 (universo B, `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:196-201`)
++ XAUUSD, EURUSD, GBPUSD, USDJPY (símbolos adicionales del universo A,
+`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:209-218`). Los nombres de símbolo FTMO se
+documentan como "esperados, a confirmar por la corrida operativa", nunca como definitivos.
+
+**Criterios de aceptación:**
+- DADO la tabla de símbolos FTMO en v1.3
+  CUANDO se cuentan sus filas de datos
+  ENTONCES contiene exactamente 8 filas: US500, NAS100, US30, GER40, XAUUSD, EURUSD, GBPUSD,
+  USDJPY.
+- DADO esa tabla
+  CUANDO `rg -n "Nombre convencional.*Símbolo MT5 esperado.*Alias posibles.*Subyacente" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  (o el patrón de cabecera equivalente ya usado en v1.2) ENTONCES retorna ≥ 1 coincidencia para la
+  tabla FTMO (mismo formato de columnas que la tabla existente de The5ers).
+- DADO esa tabla
+  CUANDO `rg -n "a confirmar" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` acotado al
+  párrafo posterior a la tabla FTMO
+  ENTONCES retorna ≥ 1 coincidencia (nota de "a confirmar por la corrida operativa").
+
+### R6 — §4.1 generaliza "cuenta de datos" a la firma activa
+
+Reescribir el primer punto de la política de extracción
+(`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:296`: *"una cuenta demo/trial de The5ers
+sobre el mismo servidor MT5..."*) a una forma genérica del tipo *"una cuenta demo/trial de la
+firma de datos activa (The5ers o FTMO) sobre el mismo servidor MT5..."*, preservando verbatim el
+resto del párrafo, incluyendo la referencia al guard `AccountScopeError`
+(`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:298`) sin modificarla.
+
+**Criterios de aceptación:**
+- DADO §4.1 en v1.3
+  CUANDO `rg -n "firma de datos activa" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia.
+- DADO §4.1 en v1.3
+  CUANDO `rg -n "The5ers o FTMO|The5ers.*FTMO" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia dentro de §4.1.
+- DADO §4.1 en v1.3
+  CUANDO `rg -n "AccountScopeError" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia con el mismo texto que
+  `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:298` (verificación textual sin cambios
+  en el guard descrito).
+
+### R7 — Condicionamiento por firma en §7.5 (ampliación, no nueva sección)
+
+Ampliar §7.5 (Veredicto, `docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:449-454`) con un
+párrafo normativo nuevo que establezca: (a) todo artefacto/veredicto registra `firm_profile_hash`
+como parte de su metadata de reproducibilidad (coherente con
+`src/genesis/data/profile.py:100-116` `firm_profile_hash()` y con
+`src/genesis/validation/verdict.py:983,1004,1044,1062` donde `firm_profile_hash` ya es parámetro
+obligatorio); (b) un veredicto no es transferible entre firmas sin re-corrida completa (un GO
+obtenido con datos FTMO no es válido para The5ers ni viceversa); (c) `GO (candidato X, firma Y)`
+es la forma canónica obligatoria del veredicto cuando existe más de una firma candidata — nunca
+`GO (candidato X)` a secas. Incluir una nota explícita de que una eventual excepción
+`FirmMismatchError` queda como trabajo futuro, sin normarla en detalle ni crearla en código.
+
+**Criterios de aceptación:**
+- DADO §7.5 en v1.3
+  CUANDO `rg -n "firm_profile_hash" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia dentro de §7.5.
+- DADO §7.5 en v1.3
+  CUANDO `rg -n "no (es )?transferible|no-transferib" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia dentro de §7.5.
+- DADO §7.5 en v1.3
+  CUANDO `rg -n "GO \(candidato X, firma Y\)|forma canónica" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia que declara esa forma obligatoria (no solo descriptiva, como
+  ya ocurre en v1.2).
+- DADO §7.5 en v1.3
+  CUANDO `rg -n "FirmMismatchError" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia explícitamente marcada como nota de trabajo futuro (no como
+  requisito de implementación).
+- DADO el repo completo tras aplicar el change
+  CUANDO `rg -n "class FirmMismatchError" src/genesis`
+  ENTONCES no retorna resultados (la excepción no se crea en código).
+- DADO v1.3
+  CUANDO se verifica que la ampliación vive en §7.5
+  ENTONCES `rg -n "^### 7\.7" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` no retorna
+  resultados (no se crea una nueva subsección 7.7).
+
+### R8 — No-objetivos documentados explícitamente en v1.3
+
+v1.3 documenta, en una nota o sub-apartado explícito (dentro de §1.3, §2.x o §11, según mejor
+encaje editorial), los no-objetivos de este change: (a) el gap heredado de `SymbolFigure`
+real/universo del Candidato A (`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:220`,
+"a confirmar en Issue B" pendiente) no se resuelve aquí para ninguna firma; (b) no se crea
+`profiles/ftmo.json`; (c) `profiles/the5ers.json` e `inspector_config.json` permanecen
+intactos; (d) no hay cambios en `src/genesis/`.
+
+**Criterios de aceptación:**
+- DADO v1.3
+  CUANDO `rg -n "no se (resuelve|extiende)|fuera de alcance|no-objetivo" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES retorna ≥ 1 coincidencia que mencione explícitamente el gap de `SymbolFigure`/universo
+  del Candidato A como no resuelto por este change.
+- DADO el repo tras aplicar el change
+  CUANDO `git diff --stat -- src/genesis/data/profiles/the5ers.json src/genesis/strategy/inspector_config.json`
+  ENTONCES no retorna resultados (ambos archivos intactos).
+- DADO el repo tras aplicar el change
+  CUANDO `fd "ftmo.json" src/genesis`
+  ENTONCES no retorna resultados (no se crea ficha JSON de FTMO).
+
+### R9 — Preservación íntegra del resto del documento
+
+Todas las secciones de v1.2 no mencionadas en R1–R8 (§1.1, §1.2, §2.1–§2.5 salvo la nota de
+no-objetivo de R8, §3, §5, §6, §7.1–§7.4, §7.6, §8, §9, §10, §11) se preservan en v1.3 con
+contenido normativo idéntico, salvo ajustes de numeración/referencias cruzadas estrictamente
+necesarios por la reestructuración de §1.3.
+
+**Criterios de aceptación:**
+- DADO v1.2 y v1.3
+  CUANDO se compara la tabla de gates G/C/P/T (`docs/SPEC_GENESIS_v1.2_PropTrading_TorneoCandidatos.md:406-468`)
+  contra la tabla equivalente en v1.3
+  ENTONCES los valores numéricos de los umbrales (G1 ≥ 300, G3 ≥ 1.3, G4 ≥ 0.95, P1 ≥ 50%, T1 ≥
+  0.95, etc.) son idénticos, sin relajaciones.
+  ENTONCES `rg -n "≥ 300|≥ 0\.95|≥ 1\.3" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  retorna las mismas coincidencias numéricas que en v1.2 para esas filas.
+- DADO §11 (Gobernanza SDD) en v1.3
+  CUANDO `rg -n "Issue A|Issue B|Issue K" docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`
+  ENTONCES la tabla de issues A–K permanece presente y sin alterar su cadena de dependencias.
+
+## Invariantes (verificación mecánica global)
+
+- **Gates nunca se relajan**: ningún umbral numérico de §7.1–§7.4 cambia entre v1.2 y v1.3 (R9).
+- **`profiles/the5ers.json` e `inspector_config.json` intactos**:
+  `git diff --name-only -- src/genesis/data/profiles/the5ers.json src/genesis/strategy/inspector_config.json`
+  no retorna resultados tras aplicar el change (R8).
+- **Sin artefactos ejecutables nuevos**: no se crean scripts, CLIs ni excepciones de código.
+- **Sin cambios en `src/genesis/`**: `git diff --name-only | rg '^src/genesis/'` → 0 resultados
+  (excepción doc-only de `.agents/rules/eval-tdd-conventions.md`, adaptada de `src/pulse/` a
+  `src/genesis/` para este repo).
+- **Suite de pytest existente permanece verde**: `uv run pytest` sin fallos nuevos tras aplicar
+  el change (no debería haber cambios de comportamiento, pues no se toca código).
+
+## Riesgos
+
+- **Deriva de la corrida operativa paralela**: si la sesión paralela que ejecuta el diagnóstico
+  sobre FTMO Free Trial concluye con valores reales (server_tz, nombres de símbolo confirmados,
+  términos daily/max loss) antes de que este change llegue a `apply`, los placeholders de R4/R5
+  quedarían desactualizados el mismo día en que se escriben. Mitigación: si ocurre, se abre un
+  change de seguimiento `docs(spec): backfill ficha FTMO confirmada` en vez de bloquear este
+  change (decisión ya fijada en `proposal.md`, sección "Decisiones propuestas... punto 2").
+- **Ambigüedad de "verificación externa" para FTMO**: a diferencia de The5ers (Issue A tuvo
+  acceso a fuente externa antes de cerrar v1.1→v1.2), este change doc-only no verifica términos
+  FTMO contra una fuente externa vigente — depende de que el checklist "default conservador — a
+  confirmar" sea aceptado como suficiente por el humano en el gate `DESIGN → APPLY`.
+- **Fricción editorial de reestructurar §1.3**: convertir una sección de "ficha única" en
+  "fichas candidatas" sin romper referencias cruzadas de §2.x/§7.3/§7.5 que hoy asumen
+  implícitamente "la firma" (singular) requiere cuidado en `design` para no introducir
+  inconsistencias de numeración.
+
+## Preguntas abiertas (para design / humano)
+
+1. **Ubicación editorial exacta de la nota de no-objetivo (R8)**: ¿vive como nota al pie de §1.3
+   (junto a la tabla de símbolos FTMO), como ampliación de la nota ya existente en §2.x línea 220,
+   o como entrada explícita en el nuevo changelog de v1.3? No bloquea specify; se decide en
+   design con el mejor encaje editorial del documento completo.
+2. **Confirmación humana de la decisión de versión completa v1.3** (vs. addendum): ya
+   recomendada en `proposal.md` como punto a escalar; sigue pendiente de ratificación humana
+   explícita antes de `design`.
+3. **Sincronía con la sesión paralela FTMO**: si concluye antes de `apply` con datos reales,
+   ¿specify/design deben incorporarlos ahora o se documenta como change de seguimiento? Ver
+   Riesgos arriba — la decisión propuesta es "change de seguimiento", pero requiere
+   confirmación humana explícita.
+4. ~~Ruta real de `inspector_config.json`~~ — **resuelta en esta fase**: confirmada en
+   `src/genesis/strategy/inspector_config.json` (ya reflejada en los criterios de aceptación de
+   R8 e Invariantes arriba). Sin ambigüedad restante.
