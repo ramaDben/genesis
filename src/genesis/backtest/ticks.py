@@ -11,11 +11,14 @@ borde de la ventana de cobertura `(T-60s, T]` (RI-G5, ADR-G8, Rg-3 §5.2).
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from genesis.backtest.errors import BacktestConfigError
 from genesis.data.mt5_export import ChunkWindow, Granularity, RawParquetStore
+from genesis.data.profile import FirmProfile
 from genesis.data.store import AnnotatedBar
 
 _REQUIRED_COLUMNS = ("bid", "ask", "last")
@@ -36,6 +39,42 @@ def _day_window(trading_day: date) -> ChunkWindow:
     """Construye el `ChunkWindow` del día completo `[00:00, 24:00)` UTC de `trading_day`."""
     start = datetime.combine(trading_day, time.min, tzinfo=UTC)
     return ChunkWindow(start=start, end=start + timedelta(days=1))
+
+
+def _to_utc(raw_timestamp: Any, server_tz: ZoneInfo) -> datetime:
+    """Reinterpreta `raw_timestamp` como hora local del servidor y la convierte a UTC.
+
+    Copia local **INTENCIONAL** de `genesis.data.store._to_utc` (capa 1 cerrada, R57,
+    ADR-21-1): NO se importa el símbolo privado de `store.py` a través de la frontera
+    de capas. **DEBE** mantenerse semánticamente sincronizada con `store._to_utc`
+    (Rg-9): descarta cualquier `tzinfo` que ya traiga el valor crudo, reinterpreta el
+    wall-clock como `server_tz` vía `zoneinfo` (NUNCA un offset fijo, R28/R40) y
+    convierte a UTC real. `raw_timestamp` puede ser un `pd.Timestamp` (frame leído de
+    Parquet) o un `datetime.datetime` ya nativo; de ahí `Any`.
+    """
+    moment: datetime = (
+        raw_timestamp.to_pydatetime() if hasattr(raw_timestamp, "to_pydatetime") else raw_timestamp
+    )
+    naive = moment.replace(tzinfo=None)
+    server_local = naive.replace(tzinfo=server_tz)
+    return server_local.astimezone(UTC)
+
+
+def _candidate_server_dates(window: ChunkWindow, server_tz: ZoneInfo) -> list[date]:
+    """Fechas calendario de `server_tz` que intersectan `window` (UTC), ascendentes (R63).
+
+    Rango inclusive `[window.start→server_tz].date() .. [(window.end - 1µs)→server_tz]
+    .date()`. Los chunks físicos se particionan por día calendario del servidor
+    (`mt5_export._chunk_filename`); con `server_tz != UTC` un día UTC objetivo puede
+    repartirse entre 1-2 (raramente 3, borde DST de ~25h) chunks de servidor
+    adyacentes. Acotado por la duración real de `window`; NO hardcodea un conteo fijo
+    ni impone un límite artificial (Rg-10). Con `server_tz="UTC"` retorna exactamente
+    `[trading_day]` (R71: sin spillover, regresión no-op).
+    """
+    start_date = window.start.astimezone(server_tz).date()
+    end_date = (window.end - timedelta(microseconds=1)).astimezone(server_tz).date()
+    span_days = (end_date - start_date).days
+    return [start_date + timedelta(days=offset) for offset in range(span_days + 1)]
 
 
 def _validate_tick_schema(frame: pd.DataFrame, *, symbol: str, trading_day: date) -> None:
@@ -59,35 +98,52 @@ def iter_ticks(
     store: RawParquetStore,
     symbol: str,
     trading_day: date,
+    profile: FirmProfile,
 ) -> Iterator[TickRow]:
-    """Lector forward-only de ticks del día (R15).
+    """Lector forward-only de ticks del día, reinterpretando `server_tz` (R15, R62-R67).
 
-    Retorna secuencia vacía (nunca lanza) si no hay chunk persistido para
-    `(symbol, trading_day)` (R16). Si el chunk existe pero su esquema es inválido
-    (columnas `bid`/`ask`/`last` ausentes o mal tipadas), lanza `BacktestConfigError`
-    (R17). Si es válido, emite `TickRow` ordenados por `timestamp_utc` ascendente.
+    Los chunks físicos de ticks están particionados por día calendario del **servidor**
+    (`mt5_export._chunk_filename`), no por día UTC; con `profile.server_tz != UTC` el
+    día `trading_day` objetivo (UTC) puede intersectar 1-N chunks de servidor
+    adyacentes (`_candidate_server_dates`, R63). Por cada candidato cuyo chunk exista
+    (`store.has_chunk`), lo lee (`store.read_chunk`), valida su esquema y reinterpreta
+    cada timestamp crudo como `server_tz` vía `_to_utc` (R62). Acumula, filtra a la
+    ventana UTC objetivo `[00:00, 24:00)` de `trading_day` (R65) y emite `TickRow`
+    ordenados por `timestamp_utc` ascendente.
+
+    Si *ningún* candidato tiene chunk persistido, retorna secuencia vacía sin excepción
+    (R66, extiende R16). Si un candidato existe pero su esquema es inválido (columnas
+    `bid`/`ask`/`last` ausentes o mal tipadas), lanza `BacktestConfigError` (R67,
+    extiende R17). Solo usa `has_chunk`/`read_chunk`, ya públicos de `RawParquetStore`
+    (R70). Con `profile.server_tz="UTC"` el comportamiento observable es idéntico al
+    pre-fix (R71).
     """
     window = _day_window(trading_day)
-    if not store.has_chunk(symbol, Granularity.TICK, window):
-        return
+    server_tz = ZoneInfo(profile.server_tz)
 
-    frame = store.read_chunk(symbol, Granularity.TICK, window)
-    _validate_tick_schema(frame, symbol=symbol, trading_day=trading_day)
+    rows: list[TickRow] = []
+    for server_date in _candidate_server_dates(window, server_tz):
+        chunk_window = _day_window(server_date)
+        if not store.has_chunk(symbol, Granularity.TICK, chunk_window):
+            continue
 
-    ordered = frame.sort_values("timestamp")
-    for _, row in ordered.iterrows():
-        raw_timestamp = row["timestamp"]
-        timestamp_utc = (
-            raw_timestamp.to_pydatetime()
-            if hasattr(raw_timestamp, "to_pydatetime")
-            else raw_timestamp
-        )
-        yield TickRow(
-            timestamp_utc=timestamp_utc,
-            bid=float(row["bid"]),
-            ask=float(row["ask"]),
-            last=float(row["last"]),
-        )
+        frame = store.read_chunk(symbol, Granularity.TICK, chunk_window)
+        _validate_tick_schema(frame, symbol=symbol, trading_day=trading_day)
+
+        for _, row in frame.iterrows():
+            timestamp_utc = _to_utc(row["timestamp"], server_tz)
+            if window.start <= timestamp_utc < window.end:
+                rows.append(
+                    TickRow(
+                        timestamp_utc=timestamp_utc,
+                        bid=float(row["bid"]),
+                        ask=float(row["ask"]),
+                        last=float(row["last"]),
+                    )
+                )
+
+    rows.sort(key=lambda tick: tick.timestamp_utc)
+    yield from rows
 
 
 def _tick_in_bar_window(tick_timestamp: datetime, bar_timestamp: datetime) -> bool:
@@ -105,15 +161,26 @@ def has_sufficient_tick_coverage(
     symbol: str,
     bar: AnnotatedBar,
     day_ticks: Sequence[TickRow],
+    profile: FirmProfile,
 ) -> bool:
-    """Criterio de dos niveles de cobertura suficiente de ticks para `bar` (R18, ADR-G8).
+    """Criterio de dos niveles de cobertura suficiente de ticks para `bar` (R18, R68, R69).
 
-    `True` si y solo si `(a)` existe chunk de ticks persistido para el día de `bar` y
-    `(b)` hay al menos un tick en la ventana semiabierta-izquierda/cerrada-derecha
-    `(bar.timestamp_utc - 60s, bar.timestamp_utc]` (tolerancia cero, Rg-3 §5.2).
+    `True` si y solo si `(a)` existe **al menos uno** de los chunks de servidor
+    candidatos (`_candidate_server_dates`, mismo helper que `iter_ticks`, R68) que
+    intersectan el día de `bar` — condición **OR**, nunca AND (R69): con offset != 0
+    puede haber solo un chunk persistido de los 1-N candidatos (p. ej. el del día
+    siguiente aún no exportado) y, si ya cubre las velas reales de la sesión, exigir
+    AND reportaría falsamente "sin cobertura" — y `(b)` hay al menos un tick en la
+    ventana semiabierta-izquierda/cerrada-derecha `(bar.timestamp_utc - 60s,
+    bar.timestamp_utc]` (tolerancia cero, Rg-3 §5.2, sin cambios).
     """
     window = _day_window(bar.trading_day)
-    if not store.has_chunk(symbol, Granularity.TICK, window):
+    server_tz = ZoneInfo(profile.server_tz)
+    chunk_exists = any(
+        store.has_chunk(symbol, Granularity.TICK, _day_window(server_date))
+        for server_date in _candidate_server_dates(window, server_tz)
+    )
+    if not chunk_exists:
         return False
 
     return any(_tick_in_bar_window(tick.timestamp_utc, bar.timestamp_utc) for tick in day_ticks)

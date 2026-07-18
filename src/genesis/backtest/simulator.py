@@ -291,7 +291,7 @@ class Simulator:
             return []
         if trading_day not in self._day_ticks_cache:
             self._day_ticks_cache[trading_day] = list(
-                iter_ticks(self.tick_store, self.symbol, trading_day)
+                iter_ticks(self.tick_store, self.symbol, trading_day, self.firm_profile)
             )
         return self._day_ticks_cache[trading_day]
 
@@ -305,7 +305,9 @@ class Simulator:
 
         day_ticks = self._day_ticks_for(bar.trading_day)
         coverage = (
-            has_sufficient_tick_coverage(self.tick_store, self.symbol, bar, day_ticks)
+            has_sufficient_tick_coverage(
+                self.tick_store, self.symbol, bar, day_ticks, self.firm_profile
+            )
             if self.tick_store is not None
             else False
         )
