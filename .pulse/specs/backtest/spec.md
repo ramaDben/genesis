@@ -639,3 +639,477 @@ ENTONCES lint + ty + test pasan en verde (exit code 0, R61)
 - `pyproject.toml` — dependencias de runtime actuales (`metatrader5`, `numpy`, `pandas`,
   `pyarrow`; sin `scipy`/`statsmodels`/`matplotlib`/`quantstats` — confirma R58) y marcadores de
   pytest registrados (`--strict-markers`: `unit`, `integration`, `e2e`, `statistical`, `slow`).
+
+<!-- change:21-fix-backtest-iter-ticks-emite-timestamps-del-reloj-del-servidor -->
+# Specification: fix(backtest) — `iter_ticks` reinterpreta el reloj del servidor (`server_tz`) en lectura (Issue #21)
+
+SSoT: `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` (en adelante «el spec») — §2.2.1
+(diagnóstico de señal desnuda), §9 (testing), §11 (gobernanza SDD). Este documento formaliza
+`idea.md` y `proposal.md` de este Change en requisitos verificables y **continúa** la numeración de
+`.pulse/specs/backtest/spec.md` (R1-R61, promovido del Change #6/G) a partir de **R62**, sin
+renumerar ni contradecir ningún requisito ya promovido. Los gates G/C/P/T del spec **nunca se
+relajan**; este Change no toca ninguno de ellos.
+
+Convención de rutas: todas las rutas de este documento son las reales del repo
+(`src/genesis/...`).
+
+---
+
+## 1. Objetivo y alcance
+
+### 1.1. Objetivo
+
+Corregir `iter_ticks` (`src/genesis/backtest/ticks.py:58-90`) para que reinterprete el timestamp
+crudo del Parquet de ticks como hora local del servidor MT5 (`profile.server_tz`) y lo convierta a
+UTC real — el mismo criterio `zoneinfo` sin-offset-fijo que ya usa `_to_utc`
+(`src/genesis/data/store.py:41-56`) para barras M1 — aplicado en **lectura**, nunca en escritura
+(R28 de `.pulse/specs/data/spec.md`: el Parquet crudo guarda el reloj del servidor, invariante que
+este Change preserva). El fix resuelve dos componentes indisociables: `(1)` la conversión de zona
+horaria en sí, y `(2)` el borde de día — los chunks de ticks están físicamente particionados por el
+día calendario del **servidor**, así que un día UTC objetivo puede requerir leer 1-2 (raramente 3,
+en un borde de DST) chunks de servidor adyacentes vía la API ya pública `has_chunk`/`read_chunk`.
+
+Este Change desbloquea la reanudación de la corrida D (piloto FTMO, `server_tz=Europe/Athens`,
+offset +3) y restaura la validez de cualquier veredicto §2.2.1 (archivar/continuar el Candidato A)
+derivado de una ficha de firma con `server_tz ≠ UTC`.
+
+### 1.2. Alcance IN
+
+- `src/genesis/backtest/ticks.py`: `iter_ticks`, `has_sufficient_tick_coverage` ganan el parámetro
+  `profile: FirmProfile`; nuevas funciones privadas `_to_utc` (copia local) y
+  `_candidate_server_dates` (helper compartido de resolución de fechas de servidor candidatas).
+- `src/genesis/backtest/simulator.py`: `IntradaySimulator/Simulator._day_ticks_for`/`_process_bar`
+  propagan `self.firm_profile` a `iter_ticks`/`has_sufficient_tick_coverage`.
+- `src/genesis/validation/signal_diagnostic.py`: `estimate_roundtrip_cost` gana el parámetro
+  `profile: FirmProfile`; `run_signal_diagnostic` cierra el hueco de plomería reenviando el
+  `profile` que ya recibe.
+- `tests/backtest/test_ticks.py`, `tests/backtest/fakes.py::build_tick_chunk`,
+  `tests/backtest/test_forward_only_property.py`, `tests/validation/test_signal_diagnostic.py`:
+  actualización a la nueva firma + tests nuevos (repro TDD, property `server_tz ≠ UTC`, golden
+  multi-chunk, forward-only con `tick_store` poblado).
+- Re-ejecución empírica (no pytest) de `genesis-validate diagnose` sobre el piloto US500 de la
+  corrida D como evidencia de aceptación del cierre de este Change.
+
+### 1.3. Alcance OUT (YAGNI explícito)
+
+- **No** modifica el formato del Parquet crudo ni ningún archivo de `src/genesis/data/` o
+  `src/genesis/strategy/` (extiende R57: `git diff --stat -- src/genesis/data src/genesis/strategy`
+  DEBE quedar vacío).
+- **No** reexporta ni reescribe ningún chunk ya persistido en `data/raw/`; opera enteramente en
+  lectura (R28 de `data/spec.md` preservado).
+- **No** relaja ni cambia ningún umbral o criterio de gate (§2.2.1 ARCHIVE/CONTINUE, R118 de
+  `strategy/spec.md`; ni los gates G/C/P/T de §7 del spec): el fix restaura el emparejamiento
+  evento↔tick correcto, no toca la lógica de veredicto.
+- **No** redefine el eje temporal de `trading_day`/`_day_window` más allá de resolver el borde de
+  chunk de servidor: `_day_window` sigue construyendo `[00:00, 24:00) UTC` literal de la fecha de
+  `trading_day`, sin re-anclarla a `daily_reset_time`/`daily_reset_tz`. La discrepancia preexistente
+  entre `_day_window` (UTC literal) y `_trading_day()` de `store.py` (anclada a `daily_reset_tz`)
+  queda documentada como riesgo separado (Rg-8, §8), no evidenciada como rota por este Change.
+- **No** añade ninguna API pública nueva a `RawParquetStore`/`mt5_export.py` (ni `iter_chunks` ni
+  variantes) — consume exclusivamente `has_chunk`/`read_chunk` ya públicos (extiende R15/R57).
+- **No** añade ninguna dependencia de runtime nueva.
+- **No** modifica el esquema de `SignalDiagnosticReport`/`ArtifactMetadata` (R119 de
+  `strategy/spec.md`) — solo corrige el **valor** calculado de `roundtrip_cost`/
+  `excluded_events_no_tick_coverage`, no su forma.
+- **No** decide el bump de `CONFIG_VERSION = "genesis-validation-d/1"` de `signal_diagnostic.py`:
+  queda a discreción de `design.md` (decisión residual #3 del proposal, §9 de este documento).
+
+---
+
+## 2. Convenciones de esta especificación
+
+- Los requisitos usan **DEBE** (MUST) y **NO DEBE**, numerados continuando la secuencia de
+  `.pulse/specs/backtest/spec.md` desde **R62**, cada uno verificable por al menos un test o una
+  aserción `rg`/`fd`.
+- Nombres de funciones son **normativos** (deben existir exactamente con ese nombre, verificable
+  por `rg`); firmas exactas (orden de parámetros posicionales/keyword-only) se resuelven en
+  `design.md` respetando el comportamiento aquí descrito.
+- Identificadores en inglés, docstrings y mensajes de error en español (convención del repo).
+- Aunque `signal_diagnostic.py` vive físicamente en `src/genesis/validation/`, pertenece
+  normativamente al dominio `strategy` (Issue D, R116-R122 de `.pulse/specs/strategy/spec.md`); los
+  requisitos de este documento sobre ese archivo (§4.3) son un ajuste de plomería acotado
+  (propagación de `profile`) que no reabre ni contradice R116-R122.
+
+---
+
+## 3. Resolución de las decisiones residuales de `proposal.md`
+
+`proposal.md` (§"Decisiones residuales que design.md/specify deben formalizar") dejó 4 puntos
+pendientes de esta fase. Esta sección fija la resolución normativa de cada uno.
+
+| # | Decisión residual | Resolución de este documento | Requisitos |
+|---|---|---|---|
+| 1 | Nombre y firma exactos de la copia local de `_to_utc` y del helper compartido `_candidate_server_dates` | `_to_utc(raw_timestamp: Any, server_tz: ZoneInfo) -> datetime` (mismo nombre que `store.py::_to_utc`, módulo distinto, sin colisión de namespace) y `_candidate_server_dates(window: ChunkWindow, server_tz: ZoneInfo) -> list[date]`, ambas privadas de `ticks.py`. | R62, R63 |
+| 2 | Semántica de existencia parcial de chunks en el borde (OR vs. AND) | **OR**: `has_sufficient_tick_coverage` considera cumplida la condición (a) si **al menos uno** de los chunks candidatos de `_candidate_server_dates` existe — nunca exige que todos existan. | R69 |
+| 3 | Si `CONFIG_VERSION` de `signal_diagnostic.py` (`"genesis-validation-d/1"`) debe incrementarse | **Diferido a `design.md`**: ningún requisito de este documento lo exige; no bloquea el cierre de este Change (ver §9, preguntas abiertas). | — |
+| 4 | Criterio `DADO/CUANDO/ENTONCES` exacto del property test de R52 con `tick_store` poblado | Formalizado en R82 (§4.4) y en el eval correspondiente de §7. | R82 |
+
+---
+
+## 4. Requisitos por módulo
+
+### 4.1. `src/genesis/backtest/ticks.py` — conversión de zona horaria + borde de día
+
+**Requisitos**:
+
+- **R62** (DEBE). `ticks.py` DEBE definir una función privada `_to_utc(raw_timestamp: Any,
+  server_tz: ZoneInfo) -> datetime`, semánticamente idéntica a `genesis.data.store._to_utc`
+  (`store.py:41-56`): descarta cualquier `tzinfo` que ya traiga `raw_timestamp`, reinterpreta sus
+  componentes de reloj de pared como `server_tz` vía `zoneinfo.ZoneInfo` (**nunca** un offset fijo
+  — `timedelta` constante o similar — R28/R40 de `.pulse/specs/data/spec.md`), y convierte a UTC
+  real. El docstring de esta copia DEBE declarar explícitamente que es intencional y debe
+  mantenerse semánticamente sincronizada con `store.py::_to_utc` si alguna cambia. `ticks.py` NO
+  DEBE importar el símbolo privado `_to_utc` de `genesis.data.store` (`rg -n "from genesis\.data\.
+  store import.*_to_utc|from genesis\.data import store" src/genesis/backtest/ticks.py` DEBE
+  retornar 0 coincidencias).
+- **R63** (DEBE). `ticks.py` DEBE definir una función privada compartida
+  `_candidate_server_dates(window: ChunkWindow, server_tz: ZoneInfo) -> list[date]` que retorne, en
+  orden ascendente y sin duplicados, cada fecha calendario de `server_tz` que intersecta `window`:
+  el rango inclusive derivado de `window.start.astimezone(server_tz).date()` hasta
+  `(window.end - timedelta(microseconds=1)).astimezone(server_tz).date()`, iterado día a día. NO
+  DEBE hardcodear un número fijo de fechas candidatas (p. ej. "siempre 2") ni imponer un límite
+  artificial con error explícito — el rango está naturalmente acotado por la duración de `window`
+  (típicamente 1-2 fechas; hasta 3 en un borde de transición DST del huso del servidor que alargue
+  el día local a ~25h).
+- **R64** (DEBE). `iter_ticks` DEBE ganar un parámetro obligatorio `profile: FirmProfile` (cambio de
+  firma deliberado que rompe compatibilidad, mismo patrón que `iter_bars(frame, symbol, profile)`
+  de `store.py:68-72`). Para `(symbol, trading_day)`, DEBE: `(a)` construir
+  `window = _day_window(trading_day)` (sin cambiar su semántica de R35/R38 actual); `(b)` obtener
+  `_candidate_server_dates(window, ZoneInfo(profile.server_tz))` (R63); `(c)` por cada fecha
+  candidata cuyo chunk exista (`store.has_chunk(...)`), leerlo (`store.read_chunk(...)`), validar su
+  esquema (`_validate_tick_schema`, sin cambios) y convertir cada timestamp crudo vía `_to_utc`
+  (R62), acumulando los `TickRow` resultantes de todos los chunks candidatos leídos.
+- **R65** (DEBE). Tras acumular los `TickRow` de todos los chunks candidatos (R64), `iter_ticks`
+  DEBE filtrar el conjunto combinado a la ventana UTC objetivo original (`window` de R64(a), semántica
+  `[00:00, 24:00)` sin cambios), ordenar el resultado por `timestamp_utc` ascendente (invariante ya
+  existente) y emitir los `TickRow` filtrados.
+- **R66** (DEBE). Si **ninguno** de los chunks candidatos de R63 existe para `(symbol, trading_day)`,
+  `iter_ticks` DEBE seguir retornando una secuencia vacía sin lanzar ninguna excepción — extiende
+  R16 al caso multi-chunk (la ausencia de ticks sigue siendo el caso normal, PA-2 de Issue B).
+- **R67** (DEBE). Si al menos un chunk candidato de R63 existe pero su esquema es inválido (columnas
+  `bid`/`ask`/`last` ausentes o mal tipadas), `iter_ticks` DEBE seguir lanzando
+  `BacktestConfigError` con contexto — extiende R17 sin cambios de comportamiento observable.
+- **R68** (DEBE). `has_sufficient_tick_coverage` DEBE ganar un parámetro obligatorio `profile:
+  FirmProfile` y DEBE reutilizar **literalmente** la misma función `_candidate_server_dates` (R63)
+  que `iter_ticks` para resolver los chunks candidatos de `bar.trading_day` — NUNCA reimplementar
+  independientemente la misma lógica de resolución de fechas (garantiza que ambas funciones
+  comparten el mismo criterio de borde, invariante ya documentado en el docstring del módulo,
+  `ticks.py:7-8`).
+- **R69** (DEBE). La condición `(a)` de `has_sufficient_tick_coverage` (existencia de chunk
+  persistido) DEBE evaluarse como "existe **al menos uno** de los chunks candidatos de
+  `_candidate_server_dates`" (OR) — NUNCA "todos los candidatos existen" (AND). Formaliza la
+  decisión residual #2 (§3): con offset ≠ 0 y solo un chunk de servidor de los 1-3 candidatos
+  persistido (p. ej. el chunk del día siguiente aún no exportado), la vela sigue considerándose con
+  cobertura si el chunk existente ya la cubre — extiende R18 sin relajar la condición `(b)`
+  (al menos un tick en `(T-60s, T]`), que no cambia.
+- **R70** (NO DEBE). Ningún método nuevo se añade a `RawParquetStore`/`mt5_export.py` en este
+  Change: `iter_ticks`/`has_sufficient_tick_coverage` consumen exclusivamente `has_chunk`/
+  `read_chunk` ya públicos, incluso al resolver múltiples chunks candidatos (extiende R15/R57;
+  `rg -n "RawParquetStore" src/genesis/backtest/ticks.py` sigue mostrando solo esos dos métodos).
+- **R71** (DEBE). Con `profile.server_tz == "UTC"`, el comportamiento observable de `iter_ticks`/
+  `has_sufficient_tick_coverage` (valores emitidos de `TickRow.timestamp_utc`, resultado booleano
+  de cobertura) DEBE ser **idéntico** al comportamiento actual (pre-fix): offset 0 implica
+  exactamente un chunk candidato por `_candidate_server_dates` (sin spillover de borde de día),
+  de modo que los tests existentes de `tests/backtest/test_ticks.py` (adaptados a la nueva firma)
+  siguen produciendo los mismos valores esperados — invarianza de regresión.
+- **R72** (NO DEBE). `ticks_in_bar_window` NO cambia de firma ni de comportamiento: sigue operando
+  exclusivamente sobre `TickRow` ya convertidos a UTC real por `iter_ticks` (R64/R65), sin recibir
+  `profile`.
+
+### 4.2. `src/genesis/backtest/simulator.py` — propagación de `FirmProfile`
+
+**Requisitos**:
+
+- **R73** (DEBE). `Simulator._day_ticks_for` (`simulator.py:288-296`) DEBE pasar `self.firm_profile`
+  (ya disponible en `__init__`, sin cambios de constructor) a `iter_ticks` (R64).
+- **R74** (DEBE). `Simulator._process_bar` (`simulator.py:298-322`) DEBE pasar `self.firm_profile` a
+  `has_sufficient_tick_coverage` (R68).
+- **R75** (NO DEBE). Ningún otro comportamiento del motor de fills (R32-R36 de
+  `.pulse/specs/backtest/spec.md`) cambia: la regla SL-primero, el gap de apertura y la resolución
+  de fills por tick real operan igual que hoy, solo con `TickRow.timestamp_utc` ya corregido.
+
+### 4.3. `src/genesis/validation/signal_diagnostic.py` — cierre del hueco de plomería
+
+**Requisitos**:
+
+- **R76** (DEBE). `estimate_roundtrip_cost` (`signal_diagnostic.py:96-129`) DEBE ganar un parámetro
+  obligatorio `profile: FirmProfile` y reenviarlo a `iter_ticks`/`has_sufficient_tick_coverage`
+  (R64/R68).
+- **R77** (DEBE). `run_signal_diagnostic` (`signal_diagnostic.py:147-171`) DEBE reenviar el
+  parámetro `profile` que ya recibe (línea 152) a `estimate_roundtrip_cost(store, symbol, events,
+  profile)` en la línea 170 — cierra el hueco de plomería identificado en `idea.md` (hoy omite
+  `profile` en esa llamada).
+- **R78** (NO DEBE). La lógica de exclusión de eventos sin cobertura suficiente (R117 de
+  `.pulse/specs/strategy/spec.md`: nunca degradar a un spread promedio sustituto) NO cambia; solo
+  cambia el **valor** de `roundtrip_cost`/`excluded_events_no_tick_coverage` calculado, no la forma
+  de `SignalDiagnosticReport` (R119 de `strategy/spec.md`, sin cambios de esquema).
+
+### 4.4. Testing (`tests/backtest/`, `tests/validation/`)
+
+**Requisitos**:
+
+- **R79** (DEBE). `tests/backtest/test_ticks.py` DEBE incluir un test de reproducción escrito
+  **antes** del fix (TDD): un chunk de ticks construido con el patrón `_server_local_frame` de
+  `tests/data/test_store.py:20-32` (timestamps *naive* representando hora local del servidor,
+  adaptado a `build_tick_chunk`/`tests/backtest/fakes.py:87-116`) y un `FirmProfile` con
+  `server_tz="Europe/Athens"` (offset +3, replicando el piloto de la corrida D), verificando que
+  `iter_ticks` emite `TickRow.timestamp_utc` desplazado correctamente (falla contra el código
+  anterior al fix, pasa después).
+- **R80** (DEBE). `tests/backtest/` DEBE incluir un test de propiedad `hypothesis`
+  (`max_examples>=1000`, marcado `pytest.mark.unit`) con un `FirmProfile` de `server_tz ≠ UTC`
+  arbitrario que verifique: para un tick generado en un instante real `T` arbitrario, aparece
+  exactamente en la ventana `(T-60s, T]` del evento correspondiente. DEBE generar casos que crucen
+  el borde de día del servidor (offset empujando la medianoche de servidor a través de la
+  medianoche UTC) y ambos cambios de DST del huso del servidor (spring-forward y fall-back),
+  análogo en estructura a `tests/backtest/test_forward_only_property.py`.
+- **R81** (DEBE). `tests/backtest/` DEBE incluir al menos un test golden/integración que escriba dos
+  chunks de servidor adyacentes (fechas `D` y `D+1`) con un offset conocido (`server_tz ≠ UTC`) y
+  verifique que `iter_ticks` fusiona y ordena correctamente los ticks de ambos ficheros dentro de la
+  ventana UTC objetivo, y que `has_sufficient_tick_coverage` usa el mismo mecanismo de resolución de
+  fechas (R68) sin divergir del resultado de `iter_ticks`.
+- **R82** (DEBE). `tests/backtest/test_forward_only_property.py` DEBE incluir, además del caso
+  existente con `tick_store=None`, un caso equivalente con `tick_store` poblado con chunks
+  sintéticos de `server_tz ≠ UTC` (patrón `hypothesis`, `max_examples>=1000`), verificando el
+  criterio exacto:
+  ```
+  DADO   un Simulator con tick_store poblado (chunks de server_tz != UTC) y un prefijo arbitrario
+         de AnnotatedBar procesado hasta el instante t
+  CUANDO se capturan ledger.entries y account.balance inmediatamente después del prefijo, y LUEGO
+         se alimentan dos colas futuras (suffix_a, suffix_b) arbitrarias y distintas de barras/ticks
+         con timestamp_utc > t
+  ENTONCES ledger.entries y account.balance capturados tras el prefijo son idénticos entre ambas
+           ejecuciones, independientemente de qué cola futura se alimente después (R52 extendido a
+           tick_store poblado)
+  ```
+- **R83** (DEBE). Los tests existentes de `tests/backtest/test_ticks.py`,
+  `tests/backtest/fakes.py::build_tick_chunk` y cualquier test de `simulator.py`/
+  `signal_diagnostic.py` que invoque las firmas cambiadas (R64/R68/R76) DEBEN actualizarse para
+  pasar explícitamente un `FirmProfile` (con `server_tz="UTC"` donde el test ya asume timestamps
+  ya-en-UTC), verificando que el comportamiento observable (R71) es idéntico al actual.
+- **R84** (DEBE). Como evidencia de aceptación de cierre de este Change (no parte de la suite
+  pytest versionada), DEBE re-ejecutarse `genesis-validate diagnose --candidate A --firm ftmo
+  --symbol US500 ...` sobre el piloto de la corrida D (mismos Parquets de `data/raw/`, ficha
+  `out/run_d/ftmo.json` con `server_tz=Europe/Athens`) y documentarse que
+  `excluded_events_no_tick_coverage` es marginal (solo bordes reales de sesión, no 317/319 como en
+  el reporte pre-fix) y que `roundtrip_cost` se recalcula sobre la ventana correcta.
+- **R85** (DEBE). `uv run mise run ci` (ruff+bandit+vulture+deptry+ty+test) DEBE pasar en verde
+  sobre `src/genesis/backtest/`, `src/genesis/validation/signal_diagnostic.py` y sus tests.
+
+---
+
+## 5. Invariantes transversales
+
+- **R86** (DEBE). Ningún archivo de `src/genesis/data/` ni de `src/genesis/strategy/` DEBE
+  modificarse en este Change (extiende R57: `git diff --stat -- src/genesis/data
+  src/genesis/strategy` vacío).
+- **R87** (NO DEBE). Este Change NO DEBE reexportar ni reescribir ningún chunk ya persistido en
+  `data/raw/` — el fix opera enteramente en lectura (R28 de `data/spec.md` preservado).
+- **R88** (NO DEBE). Este Change NO DEBE relajar ni modificar ningún umbral o criterio de gate
+  (§2.2.1 ARCHIVE/CONTINUE, R118 de `strategy/spec.md`; gates G/C/P/T de §7 del spec).
+- **R89** (NO DEBE). Este Change NO DEBE añadir ninguna dependencia de runtime nueva a
+  `pyproject.toml` (`[project.dependencies]`).
+- **R90** (NO DEBE). Este Change NO DEBE modificar el esquema (campos) de `SignalDiagnosticReport`
+  ni de `ArtifactMetadata` — solo el valor calculado de `roundtrip_cost`/
+  `excluded_events_no_tick_coverage` (R119 de `strategy/spec.md`, sin cambios de forma).
+- **R91** (DEBE). `uv run mise run ci` DEBE pasar en verde sobre todo el repositorio tras este
+  Change (extiende R61).
+
+---
+
+## 6. Manejo de errores (resumen normativo — sin cambios respecto a `.pulse/specs/backtest/spec.md` §6)
+
+Este Change no introduce ninguna excepción de dominio nueva. La tabla de excepciones de
+`.pulse/specs/backtest/spec.md` §6 sigue vigente sin modificaciones: `BacktestConfigError` continúa
+disparándose exactamente en los mismos tres casos (R3), extendido ahora a cubrir "chunk
+presente-pero-inválido" también en el caso multi-chunk (R67).
+
+| Excepción | Módulo | Disparador (tras este Change) | Efecto |
+|---|---|---|---|
+| `BacktestConfigError` | `genesis.backtest.errors` | Al menos un chunk candidato de `_candidate_server_dates` existe pero su esquema es inválido (R67) | Aborta el run (sin cambios respecto a R17) |
+| (sin excepción) | `genesis.backtest.ticks` | Ningún chunk candidato existe (R66) | `iter_ticks` retorna secuencia vacía; `has_sufficient_tick_coverage` retorna `False` (R69) |
+
+---
+
+## 7. Criterios de aceptación (evals ejecutables)
+
+```
+DADO   el archivo src/genesis/backtest/ticks.py
+CUANDO rg -n "def _to_utc" src/genesis/backtest/ticks.py
+       y rg -n "def _candidate_server_dates" src/genesis/backtest/ticks.py
+       y rg -n "from genesis\.data\.store import.*_to_utc" src/genesis/backtest/ticks.py
+ENTONCES las dos primeras retornan >=1 coincidencia cada una; la tercera retorna 0 coincidencias
+         (R62, R63: copia local, nunca import del símbolo privado de store.py)
+```
+
+```
+DADO   el archivo src/genesis/backtest/ticks.py
+CUANDO rg -n "def iter_ticks" src/genesis/backtest/ticks.py
+       y rg -n "def has_sufficient_tick_coverage" src/genesis/backtest/ticks.py
+ENTONCES ambas firmas incluyen un parámetro profile: FirmProfile (R64, R68)
+```
+
+```
+DADO   un RawParquetStore con un chunk de ticks del día de servidor D escrito con timestamps
+       naive (hora local del servidor, server_tz="Europe/Athens", offset +3) que representa el
+       cierre real de sesión ~20:49 UTC
+CUANDO se invoca iter_ticks(store, symbol, trading_day, profile) con ese profile
+ENTONCES los TickRow.timestamp_utc emitidos reflejan el instante UTC real (~20:49 UTC), no el
+         valor crudo etiquetado UTC sin reinterpretar (R64, repro del bug de idea.md)
+```
+
+```
+DADO   un día UTC objetivo cuya medianoche de servidor (server_tz != UTC) cae fuera de ese día
+       calendario UTC, con chunks de servidor persistidos para las fechas D y D+1
+CUANDO se invoca iter_ticks(store, symbol, trading_day, profile)
+ENTONCES el resultado combina y ordena ascendentemente los ticks de ambos chunks, filtrados a la
+         ventana UTC [00:00, 24:00) de trading_day (R64, R65, golden multi-chunk R81)
+```
+
+```
+DADO   un RawParquetStore sin NINGÚN chunk candidato persistido para (symbol, trading_day, profile)
+CUANDO se invoca iter_ticks(store, symbol, trading_day, profile)
+ENTONCES retorna una secuencia vacía sin lanzar ninguna excepción (R66, extiende R16)
+```
+
+```
+DADO   dos chunks candidatos de servidor para un trading_day, de los cuales solo UNO está
+       persistido (el otro aún no se exportó) y ese chunk existente ya cubre todas las velas
+       reales de sesión de ese trading_day
+CUANDO se invoca has_sufficient_tick_coverage(store, symbol, bar, day_ticks, profile) para una
+       vela cubierta por el chunk existente
+ENTONCES retorna True (condición OR de R69, no AND: no se exige que TODOS los candidatos existan)
+```
+
+```
+DADO   un FirmProfile con server_tz="UTC"
+CUANDO se invoca iter_ticks/has_sufficient_tick_coverage con ese profile sobre los mismos chunks
+       de test ya existentes en tests/backtest/test_ticks.py (adaptados a la nueva firma)
+ENTONCES los valores emitidos son idénticos a los que producía el código anterior al fix (R71,
+         invarianza de regresión)
+```
+
+```
+DADO   el repositorio tras este Change
+CUANDO rg -n "RawParquetStore" src/genesis/backtest/ticks.py
+ENTONCES muestra únicamente invocaciones a has_chunk/read_chunk, ningún método nuevo (R70, extiende
+         R15/R57)
+```
+
+```
+DADO   el archivo src/genesis/backtest/simulator.py
+CUANDO rg -n "iter_ticks\(self\.tick_store, self\.symbol" src/genesis/backtest/simulator.py
+       y rg -n "has_sufficient_tick_coverage\(self\.tick_store, self\.symbol" src/genesis/backtest/simulator.py
+ENTONCES ambas líneas incluyen self.firm_profile como argumento adicional (R73, R74)
+```
+
+```
+DADO   el archivo src/genesis/validation/signal_diagnostic.py
+CUANDO rg -n "def estimate_roundtrip_cost" src/genesis/validation/signal_diagnostic.py
+       y rg -n "estimate_roundtrip_cost\(store, symbol, events, profile\)" src/genesis/validation/signal_diagnostic.py
+ENTONCES la primera incluye profile: FirmProfile en la firma; la segunda retorna >=1 coincidencia
+         dentro de run_signal_diagnostic (R76, R77: hueco de plomería cerrado)
+```
+
+```
+DADO   una secuencia arbitraria de AnnotatedBar/TickRow (tick_store poblado, server_tz != UTC)
+       procesada por un Simulator hasta el instante t
+CUANDO se mutan (agregan/alteran) barras o ticks con timestamp_utc > t en la secuencia de entrada
+ENTONCES el ledger/balance capturado en t no cambia (R82, extiende R52 a tick_store poblado)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO git diff --stat -- src/genesis/data src/genesis/strategy
+ENTONCES no retorna ninguna línea (R86, extiende R57)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO uv run pytest tests/backtest/test_ticks.py tests/backtest/test_forward_only_property.py
+       tests/validation/test_signal_diagnostic.py -v
+ENTONCES pasa en verde, incluyendo el test de reproducción TDD (R79), el property test con
+         server_tz != UTC cubriendo borde de día + ambos DST (R80), el golden multi-chunk (R81), y
+         el caso forward-only con tick_store poblado (R82)
+```
+
+```
+DADO   el piloto empírico de la corrida D (US500, server_tz=Europe/Athens, offset +3)
+CUANDO se re-ejecuta genesis-validate diagnose sobre los mismos Parquets de data/raw/ con el
+       código corregido
+ENTONCES excluded_events_no_tick_coverage es marginal (no 317/319 como en el reporte pre-fix) y
+         roundtrip_cost se recalcula sobre la ventana correcta (R84, evidencia de aceptación)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO uv run mise run ci
+ENTONCES lint + ty + test pasan en verde (exit code 0, R85, R91)
+```
+
+---
+
+## 8. Riesgos
+
+| # | Riesgo | Impacto | Mitigación |
+|---|---|---|---|
+| Rg-8 | `_day_window` sigue construyendo `[00:00, 24:00) UTC` literal de `trading_day`, mientras que `_trading_day()` de `store.py` ancla el día de negocio a `daily_reset_time`/`daily_reset_tz` (no necesariamente UTC ni `server_tz`); esta discrepancia preexistente no se corrige en este Change (§1.3). | Si un símbolo futuro tuviera una sesión que cruza la medianoche UTC, el `trading_day` de `_day_window` podría no coincidir con el día de negocio real de `_trading_day()`. | Documentado explícitamente como fuera de alcance (§1.3); las sesiones de los símbolos soportados hoy (US500/NAS100/US30/GER40) no cruzan medianoche UTC, así que no hay evidencia empírica de que esté roto. Un Change futuro que añada un símbolo con sesión cruzando medianoche debe re-evaluar este riesgo explícitamente. |
+| Rg-9 | La copia local de `_to_utc` en `ticks.py` (R62) y `store.py::_to_utc` deben permanecer semánticamente idénticas (zoneinfo, nunca offset fijo); un cambio futuro en una sin el equivalente en la otra introduciría divergencia silenciosa. | Bug de reinterpretación de zona horaria reintroducido en una sola capa, sin que ningún test cruzado lo detecte automáticamente. | R62 exige que el docstring de la copia documente explícitamente la obligación de sincronía; `design.md`/`review` deben verificar manualmente ambas funciones en cualquier PR que toque zona horaria en cualquiera de los dos módulos. |
+| Rg-10 | El límite de "hasta 3 fechas candidatas" (R63) asume que ningún huso horario documentado en `profiles/*.json` tiene una transición DST que alargue el día local más allá de ~25h; esto no está garantizado por ningún test exhaustivo de todas las zonas IANA. | Un huso horario exótico no cubierto por los profiles actuales (`America/New_York`, `Europe/Athens`) podría, en teoría, generar más de 3 fechas candidatas. | Fuera de alcance verificarlo para husos no usados hoy por ninguna ficha de firma soportada (`profiles/the5ers.json`, `profiles/ftmo.json`); R63 no impone un límite artificial precisamente para no fallar silenciosamente si esto ocurriera, procesando cualquier número de fechas que el cálculo real produzca. |
+| Rg-11 | Los artefactos derivados ya escritos con el bug activo (`out/signal_diagnostic/US500_pilot/report.json`, y cualquier otro reporte de diagnóstico previo a este fix) quedan inválidos hasta que se regeneren; no hay un mecanismo automático de invalidación. | Un consumidor podría leer un reporte pre-fix sin saber que es inválido. | Acción operativa explícita en R84: re-ejecutar `genesis-validate diagnose` como evidencia de aceptación del cierre de este Change; el mensaje de cierre del Change debe señalar qué artefactos previos quedan obsoletos. |
+
+---
+
+## 9. Preguntas abiertas (no bloquean este Change)
+
+- Si `CONFIG_VERSION = "genesis-validation-d/1"` de `signal_diagnostic.py` debe incrementarse dado
+  que los **valores** calculados cambian (aunque el esquema no) — decisión residual #3 del
+  proposal (§3 de este documento); ningún requisito actual lo exige, queda a discreción de
+  `design.md` por trazabilidad entre runs pre/post-fix.
+- Forma exacta (nombre de parámetro, posicional vs. keyword-only) de `profile` en las firmas
+  cambiadas de R64/R68/R76 — este documento fija el comportamiento observable, no la forma
+  sintáctica exacta de la firma; `design.md` la resuelve respetando el patrón ya usado por
+  `iter_bars(frame, symbol, profile)`.
+- Si el riesgo Rg-8 (discrepancia `_day_window` vs. `_trading_day()`) debe convertirse en un Change
+  futuro explícito o simplemente permanecer documentado indefinidamente — no es responsabilidad de
+  este Change decidirlo.
+
+---
+
+## 10. Referencias
+
+- Issue GitHub #21 — bbenja11/genesis (https://github.com/bbenja11/genesis/issues/21).
+- `idea.md`/`proposal.md` de este Change (fases explore/propose) — problema, contexto, 7 preguntas
+  abiertas y sus respuestas, diseño propuesto por módulo, alcance de testing, decisiones residuales.
+- `.pulse/specs/backtest/spec.md` (Change #6/G, promovido): R15-R19 (contrato original de
+  `iter_ticks`/cobertura de ticks, extendido por este documento), R57 (capas cerradas), §6 (tabla
+  de manejo de errores, sin cambios).
+- `src/genesis/backtest/ticks.py:1-132` — módulo completo a modificar (`_day_window`, `iter_ticks`,
+  `_tick_in_bar_window`, `has_sufficient_tick_coverage`, `ticks_in_bar_window`).
+- `src/genesis/data/store.py:41-56` (`_to_utc`, patrón de referencia, privado), `68-115`
+  (`iter_bars`, patrón de firma `profile: FirmProfile`).
+- `src/genesis/data/mt5_export.py:64-77` (`Granularity`, `ChunkWindow`), `253-256`
+  (`_chunk_filename`), `267-354` (`RawParquetStore`: `has_chunk:299`, `read_chunk:303`, sin
+  `iter_chunks`).
+- `src/genesis/data/profile.py:32-49` (`FirmProfile`, campo `server_tz: str`).
+- `src/genesis/backtest/simulator.py:213-322` (`Simulator.__init__`, `_day_ticks_for:288-296`,
+  `_process_bar:298-322`).
+- `src/genesis/validation/signal_diagnostic.py:96-129` (`estimate_roundtrip_cost`), `147-171`
+  (`run_signal_diagnostic`).
+- `.pulse/specs/strategy/spec.md:1672-1699` (R116-R122: contrato de `signal_diagnostic.py` con
+  `ticks.py`, no reabierto por este Change).
+- `.pulse/specs/data/spec.md:298-345` (R28-R41: `store.py`, `zoneinfo`, criterio sin-offset-fijo).
+- `tests/backtest/test_ticks.py` (completo, hoy solo UTC); `tests/backtest/fakes.py:87-116`
+  (`build_tick_chunk`); `tests/data/test_store.py:20-32` (`_server_local_frame`, patrón reutilizable
+  para el repro); `tests/backtest/test_forward_only_property.py:1-109` (`tick_store=None` hoy);
+  `tests/validation/test_signal_diagnostic.py` (tests de `estimate_roundtrip_cost`/
+  `run_signal_diagnostic`).
+- `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` §2.2.1 (diagnóstico de señal desnuda),
+  §9 (testing), §11 (gobernanza SDD).
+- `out/run_d/ftmo.json`, `out/signal_diagnostic/US500_pilot/report.json` — evidencia empírica del
+  piloto (server_tz=Europe/Athens, offset +3, 317/319 eventos mal emparejados) y objetivo de la
+  re-corrida de aceptación (R84).
+- `data/raw/US500.cash/tick/2026/2026-06-26.parquet` — chunk citado como evidencia directa del
+  timestamp máximo desplazado.
+- `.agents/rules/architecture-conventions.md`, `.agents/rules/eval-tdd-conventions.md`,
+  `.agents/rules/tooling-conventions.md` — convenciones de proceso.
+- `CLAUDE.md` (raíz) — arquitectura de 4 capas, flujo SDD, convenciones de commits/testing.
