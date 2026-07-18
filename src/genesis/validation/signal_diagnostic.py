@@ -38,7 +38,7 @@ from genesis.strategy.candidate_a.diagnostics import (
 )
 from genesis.validation.errors import SignalDiagnosticConfigError
 
-CONFIG_VERSION: str = "genesis-validation-d/1"
+CONFIG_VERSION: str = "genesis-validation-d/2"
 """Versión del esquema de configuración/metadata de este módulo (spec §3, R39 heredado)."""
 
 _PLACEHOLDER_SYMBOLS: frozenset[str] = frozenset({"XAUUSD", "EURUSD", "GBPUSD", "USDJPY"})
@@ -94,16 +94,21 @@ def _tick_lookup_bar(event: ConditionalReturnEvent) -> AnnotatedBar:
 
 
 def estimate_roundtrip_cost(
-    store: RawParquetStore, symbol: str, events: Sequence[ConditionalReturnEvent]
+    store: RawParquetStore,
+    symbol: str,
+    events: Sequence[ConditionalReturnEvent],
+    profile: FirmProfile,
 ) -> tuple[float, int]:
-    """Coste round-trip real (spread relativo) estimado sobre `events` (R116/R117).
+    """Coste round-trip real (spread relativo) estimado sobre `events` (R76, R116/R117).
 
     Por cada evento, calcula el spread promedio `(ask - bid)` de los ticks reales en
     `(T-60s, T]` (mismo criterio de borde que el motor de fills, `ticks.py:93-100`),
     expresado como retorno relativo (`spread / entry_price`) para ser comparable con
-    `HorizonEdge.bootstrap_low`. Si `has_sufficient_tick_coverage` es `False`, el evento
-    se **excluye** del promedio (nunca degradado a un spread promedio sustituto, R117).
-    Retorna `(coste_promedio_eventos_con_cobertura, n_excluidos)`; `0.0` si ningún
+    `HorizonEdge.bootstrap_low`. `profile` se reenvía a `iter_ticks`/
+    `has_sufficient_tick_coverage` para reinterpretar el timestamp de cada tick como
+    `profile.server_tz` (R76). Si `has_sufficient_tick_coverage` es `False`, el evento
+    se **excluye** del promedio (nunca degradado a un spread promedio sustituto, R117,
+    R78). Retorna `(coste_promedio_eventos_con_cobertura, n_excluidos)`; `0.0` si ningún
     evento tiene cobertura suficiente (visible vía `n_excluidos == len(events)`, R117).
     """
     ticks_by_day: dict = {}
@@ -113,10 +118,12 @@ def estimate_roundtrip_cost(
     for event in events:
         lookup_bar = _tick_lookup_bar(event)
         if event.trading_day not in ticks_by_day:
-            ticks_by_day[event.trading_day] = list(iter_ticks(store, symbol, event.trading_day))
+            ticks_by_day[event.trading_day] = list(
+                iter_ticks(store, symbol, event.trading_day, profile)
+            )
         day_ticks = ticks_by_day[event.trading_day]
 
-        if not has_sufficient_tick_coverage(store, symbol, lookup_bar, day_ticks):
+        if not has_sufficient_tick_coverage(store, symbol, lookup_bar, day_ticks, profile):
             excluded += 1
             continue
 
@@ -167,7 +174,7 @@ def run_signal_diagnostic(
     bars = list(iter_bars(frame, symbol, profile))
     events = detect_ct_events(bars, config, symbol, session_label)
     raw_edge = summarize_raw_edge(bars, events, config)
-    roundtrip_cost, excluded = estimate_roundtrip_cost(store, symbol, events)
+    roundtrip_cost, excluded = estimate_roundtrip_cost(store, symbol, events, profile)
     verdict = decide_verdict(raw_edge, roundtrip_cost)
 
     if bars:

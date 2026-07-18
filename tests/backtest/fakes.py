@@ -7,7 +7,7 @@ sin I/O de red. `FakeRiskCandidate` implementa `StrategyCandidate` **y**
 """
 
 from collections.abc import Callable, Sequence
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 
@@ -105,6 +105,43 @@ def build_tick_chunk(
         }
     )
     window = _day_window(trading_day)
+    metadata = ArtifactMetadata(
+        config_version=CONFIG_VERSION,
+        dataset_hash=store.chunk_hash(frame),
+        firm_profile_hash="test-firm-profile-hash",
+        time_range=(window.start, window.end),
+        git_commit="test-git-commit",
+    )
+    store.write_chunk(frame, symbol, Granularity.TICK, window, metadata)
+
+
+def build_server_local_tick_chunk(
+    store: RawParquetStore,
+    symbol: str,
+    server_date: date,
+    rows: Sequence[tuple[datetime, float, float, float]],
+) -> None:
+    """Escribe un chunk de ticks con timestamps NAIVE de reloj de servidor (ADR-21-7).
+
+    Réplica del Parquet crudo mal etiquetado que produce `mt5_export.py`:
+    `RawParquetStore.write_chunk -> _normalize_frame` ejecuta
+    `pd.to_datetime(col, utc=True)`, que sobre timestamps *naive* **localiza a UTC
+    preservando el wall-clock** (p.ej. `23:49` naive queda `23:49+00:00`) — exactamente
+    el comportamiento del SDK MT5 (reloj de servidor rotulado UTC), sin necesidad de
+    tocar `mt5_export.py`. El fichero se nombra por `server_date` (día calendario del
+    **servidor**), no por el día UTC, igual que en producción. `rows` es una secuencia
+    de `(wall_clock_naive, bid, ask, last)`. Complementa `build_tick_chunk` (semántica
+    UTC-real, ruta de regresión `server_tz="UTC"`), que se conserva intacto.
+    """
+    frame = pd.DataFrame(
+        {
+            "timestamp": [wall_clock for wall_clock, *_ in rows],
+            "bid": [bid for _, bid, _, _ in rows],
+            "ask": [ask for _, _, ask, _ in rows],
+            "last": [last for _, _, _, last in rows],
+        }
+    )
+    window = _day_window(server_date)
     metadata = ArtifactMetadata(
         config_version=CONFIG_VERSION,
         dataset_hash=store.chunk_hash(frame),

@@ -1,5 +1,6 @@
 """`signal_diagnostic.py`: coste round-trip de ticks + informe compuesto (T5.2/T5.3)."""
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import pytest
 from genesis.backtest.ticks import _day_window
 from genesis.data.metadata import ArtifactMetadata
 from genesis.data.mt5_export import Granularity, RawParquetStore
-from genesis.data.profile import load_firm_profile
+from genesis.data.profile import FirmProfile, load_firm_profile
 from genesis.strategy.candidate_a.config import CandidateAConfig, DiagnosticsConfig, SmcEngineConfig
 from genesis.strategy.candidate_a.diagnostics import ConditionalReturnEvent
 from genesis.strategy.contract import Direction
@@ -20,6 +21,11 @@ pytestmark = pytest.mark.unit
 
 _SYMBOL = "US500"
 _TRADING_DAY = date(2024, 1, 2)
+
+
+def _utc_profile() -> FirmProfile:
+    """Ficha de firma con `server_tz="UTC"` (R71/R83): regresión, mismos valores pre-fix."""
+    return replace(load_firm_profile(), server_tz="UTC")
 
 
 def _write_tick_chunk(
@@ -53,7 +59,7 @@ def test_estimate_roundtrip_cost_evento_sin_ticks_es_excluido(tmp_path: Path) ->
     store = RawParquetStore(tmp_path)
     event = _event(datetime(2024, 1, 2, 14, 31, tzinfo=UTC))
 
-    cost, excluded = estimate_roundtrip_cost(store, _SYMBOL, [event])
+    cost, excluded = estimate_roundtrip_cost(store, _SYMBOL, [event], _utc_profile())
 
     assert excluded == 1
     assert cost == 0.0
@@ -72,7 +78,7 @@ def test_estimate_roundtrip_cost_con_cobertura_calcula_spread_relativo(tmp_path:
     _write_tick_chunk(store, _SYMBOL, _TRADING_DAY, frame)
     event = _event(datetime(2024, 1, 2, 14, 31, tzinfo=UTC), entry_price=100.0)
 
-    cost, excluded = estimate_roundtrip_cost(store, _SYMBOL, [event])
+    cost, excluded = estimate_roundtrip_cost(store, _SYMBOL, [event], _utc_profile())
 
     assert excluded == 0
     assert cost == pytest.approx(0.2 / 100.0)
