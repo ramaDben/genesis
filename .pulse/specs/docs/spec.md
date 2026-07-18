@@ -818,3 +818,311 @@ necesarios por la reestructuración de §1.3.
 4. ~~Ruta real de `inspector_config.json`~~ — **resuelta en esta fase**: confirmada en
    `src/genesis/strategy/inspector_config.json` (ya reflejada en los criterios de aceptación de
    R8 e Invariantes arriba). Sin ambigüedad restante.
+
+<!-- change:20-docs-spec-backfill-de-la-ficha-ftmo-valores-confirmados-por-el-s -->
+# Specification: Backfill de la ficha FTMO (§1.3.2) con valores confirmados por el sondeo de la corrida D
+
+**Issue**: #20 · **Change**: `20-docs-spec-backfill-de-la-ficha-ftmo-valores-confirmados-por-el-s`
+**Tipo**: doc-only (sin código en `src/genesis/`)
+
+## Objetivo
+
+Cerrar en el SSoT los placeholders "default conservador — a confirmar" que la ficha FTMO
+(§1.3.2 de `docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`, issue #18 / PR #19,
+commit `97f173c`) dejó deliberadamente abiertos, sustituyéndolos por los valores que el
+sondeo operativo de la corrida D (2026-07-12) y el dashboard FTMO del usuario confirmaron
+empíricamente, sin tocar ningún gate ni crear código nuevo.
+
+## Alcance
+
+### IN
+
+1. Archivo nuevo `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` (copia íntegra de
+   v1.3 + edición quirúrgica de las zonas listadas en Requisitos).
+2. Bloque "Changelog v1.3 → v1.4" al inicio del archivo nuevo, narrando el backfill y su fuente.
+3. Sustitución de 4 celdas de la ficha §1.3.2 (`server_tz`, `daily_reset_time`,
+   `daily_loss_limit`, `max_loss_limit`) y de la nota/estado de la tabla de símbolos.
+4. Nota nueva "Historia disponible en el Free Trial (FTMO)" en §1.3.2, con referencia cruzada
+   breve desde §4.1.
+5. Verificación de si algún archivo versionado fuera de `docs/` apunta al nombre de archivo del
+   SSoT y, si aplica, decisión documentada de actualizarlo o no (ver R11).
+
+### OUT (YAGNI / no-alcance, heredado del issue y el proposal)
+
+- No se reconcilian ni generan veredictos de trading (bug de zona horaria de `iter_ticks`,
+  issue hermano #21, paralelo y no bloqueante).
+- No se crea `profiles/ftmo.json` versionado ni ningún loader/esquema de código nuevo.
+- `profiles/the5ers.json` y `src/genesis/strategy/inspector_config.json` no se tocan.
+- Los gates G/C/P/T (§7.1-7.4) y el criterio mecánico de archivo (§2.2.1) no se relajan ni
+  se modifican — quedan idénticos por construcción (fuera de las zonas editadas).
+- No se resuelve el gap de `SymbolFigure` real de oro/majors del universo del Candidato A
+  (persiste como no-objetivo heredado de v1.3, §2.x).
+- No se resuelve la regla de cambio DST de `server_tz` — queda documentada como pendiente,
+  no como cerrada.
+- Los placeholders sin evidencia empírica (`min_profitable_days`, `news_restrictions`,
+  `weekend_holding`, `consistency_rule`, `profit_split`/`payout_cycle`, `challenge_cost`,
+  `max_lots`/`max_positions`, EAs, "Programa de referencia") permanecen "a confirmar".
+- No se edita ni se borra `docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` (queda
+  intacto como snapshot histórico, igual que v1.1 y v1.2).
+- No se mueven, versionan ni comprometen a git los artefactos de `out/run_d/`; su cita en
+  v1.4 es como fuente informativa de sesión, no como fuente normativa (ver R1 y R9).
+- No se cita `firm_profile_hash` (`465ae475…`) en el spec: no hay `profiles/ftmo.json`
+  versionado al que anclarlo todavía (ver Riesgos/Preguntas abiertas).
+
+## Requisitos funcionales
+
+### R1 — Vehículo: archivo nuevo v1.4, no addendum, no edición in-place
+
+Se crea `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` como copia completa de
+`docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` con edición quirúrgica únicamente en
+las zonas de R2-R9. `docs/SPEC_GENESIS_v1.3_...md` **no se edita ni se borra**. Encabezado de
+v1.4: título "Spec Génesis v1.4", fecha 2026-07-12, "Estado: definitivo (SSoT vigente).
+Reemplaza íntegramente al v1.3.".
+
+**Decisión fijada**: sigue el precedente v1.1→v1.2 y v1.2→v1.3 (archivo nuevo + changelog),
+descartando addendum-en-v1.3 y edición in-place (rompería trazabilidad histórica: v1.3
+documentó honestamente qué no se sabía el 2026-07-11).
+
+### R2 — `server_tz` confirmado con matiz DST pendiente
+
+Fila `server_tz` de §1.3.2 pasa de `Europe/Prague (CET/CEST)` / "a confirmar" a
+`Europe/Athens` (GMT+2/+3, estilo EET/EEST), offset **+3** confirmado el 2026-07-12
+(sondeo corrida D, issue #20). Debe documentar explícitamente que es un best-fit de una
+sola observación de verano y que la regla de cambio DST (fechas UE vs. EE. UU.) queda
+**pendiente**, resoluble con probes M1 de la semana 2025-10-26 → 2025-11-02.
+
+**Decisión fijada**: se redacta como "confirmado (offset base) con matiz DST pendiente" —
+no como "parcialmente confirmado" ni se traslada a la lista de placeholders sin evidencia,
+porque el offset base sí tiene evidencia directa.
+
+### R3 — `daily_reset_time` desanclado de `server_tz`
+
+Fila `daily_reset_time` de §1.3.2 se corrige: el reset del daily loss de FTMO sigue siendo
+medianoche **`Europe/Prague`** (CE(S)T, términos vigentes de FTMO) — zona **distinta** de
+`server_tz` (`Europe/Athens`, R2). La redacción actual de v1.3 (línea 140) trata ambas zonas
+como si fueran una sola ("en el `server_tz` de FTMO, típicamente Europe/Prague") y debe
+eliminarse esa equivalencia. Se recalcula la equivalencia UTC sobre `Europe/Prague`
+(23:00 UTC en CET/invierno, 22:00 UTC en CEST/verano) — sin cambio respecto al valor
+numérico de v1.3, pero con atribución de zona corregida.
+
+### R4 — `daily_loss_limit` confirmado (5%)
+
+Fila `daily_loss_limit` de §1.3.2: se retira "a confirmar contra términos vigentes de
+FTMO / la corrida operativa"; se confirma **5%** (Free Trial 50.000 USD → 2.500 USD),
+citando el dashboard FTMO del usuario, 2026-07-12, como fuente. El valor numérico no
+cambia respecto a v1.3.
+
+### R5 — `max_loss_limit` confirmado (10% estático)
+
+Fila `max_loss_limit` de §1.3.2: se retira "a confirmar contra términos vigentes de FTMO";
+se confirma **10%, tipo estático, ancla balance inicial** (Free Trial 50.000 USD →
+5.000 USD), citando el dashboard FTMO del usuario, 2026-07-12. El valor numérico no cambia
+respecto a v1.3.
+
+### R6 — Tabla de símbolos: estado "confirmados"
+
+La nota de apertura de la tabla de símbolos (§1.3.2, "esperados, a confirmar por la corrida
+operativa") y su nota de cierre pasan a "confirmados (patrón PA-1, sondeo corrida D, issue
+#20, 2026-07-12)". **Ningún nombre de símbolo ni alias cambia**: los 8 (`US500.cash`,
+`US100.cash`, `US30.cash`, `GER40.cash`, `XAUUSD`, `EURUSD`, `GBPUSD`, `USDJPY`) coincidieron
+exactamente con los reales resueltos por el terminal. La confirmación del `SymbolFigure`
+real de oro/majors sigue **fuera de alcance** (§2.x) — cláusula que se conserva.
+
+### R7 — Nota nueva de historia disponible del Free Trial
+
+Se añade una subsección nueva dentro de §1.3.2 (después de la tabla de símbolos):
+"Historia disponible en el Free Trial (FTMO)", con el contenido: ticks con profundidad
+≥12 meses para los 8 símbolos, con hueco puntual confirmado (`NAS100`, sin ticks el
+2025-07-07); M1 disponible desde ~2025-10-22 para los 4 índices + `XAUUSD`, y desde
+~2025-11 a ~2025-12 para los 3 majors FX (`EURUSD`, `GBPUSD`, `USDJPY`). Fuente: sondeo
+`probe_depth.py`, issue #20, 2026-07-12. Se añade una referencia cruzada breve (una
+oración) desde §4.1 (bullet "Realidad de profundidad de ticks") apuntando a esta nota.
+
+**Decisión fijada**: la nota vive en §1.3.2 (característica de *esa* firma de datos
+específica), no en §4.1 (política general), con referencia cruzada desde §4.1 — se
+prefiere esta ubicación porque el issue ancla el checklist explícitamente en §1.3.2 y
+porque §4.1 ya tiene un bullet general análogo que sirve de punto de enlace sin duplicar
+contenido.
+
+### R8 — Changelog v1.3 → v1.4
+
+Nuevo bloque "### Changelog v1.3 → v1.4" al inicio de v1.4 (antes del bloque "Changelog
+v1.2 → v1.3" heredado, que permanece intacto), listando los 4 campos sustituidos (R2-R5),
+el cambio de estado de la tabla de símbolos (R6), la nota nueva (R7), y declarando
+explícitamente qué placeholders permanecen intactos (lista de R6 del proposal / checklist
+del issue): `min_profitable_days`, `news_restrictions`, `weekend_holding`,
+`consistency_rule`, `profit_split`/`payout_cycle`, `challenge_cost`, `max_lots`/
+`max_positions`, EAs, "Programa de referencia". Cita como fuente "sondeo de la corrida D,
+issue #20, 2026-07-12" y "dashboard FTMO del usuario, 2026-07-12" (para los límites de
+pérdida), **nunca** rutas literales de `out/run_d/*.json`.
+
+**Decisión fijada** (estrategia de cita de fuente): se cita issue + fecha como fuente
+auditable normativa — precedente de §1.3.1 (The5ers cita "Issue B", no un archivo). Las
+rutas `out/run_d/probe_mt5.py` / `probe_depth.py` pueden mencionarse únicamente como
+referencia informativa entre paréntesis (nombres de script, no rutas de salida), marcadas
+explícitamente como artefactos ad-hoc no versionados — nunca como fuente normativa
+primaria, porque `out/` está untracked, sin hash de dataset ni commit (invariante de
+reproducibilidad institucional, CLAUDE.md raíz).
+
+### R9 — Placeholders sin evidencia: intactos, listados textualmente
+
+El changelog de v1.4 (R8) y la ficha §1.3.2 conservan sin cambio de contenido los
+siguientes campos, todos con su marca "a confirmar" original de v1.3: `min_profitable_days`,
+Plazo, `news_restrictions`, `weekend_holding`, `consistency_rule`, `profit_split`/
+`payout_cycle`, `challenge_cost`, `max_lots`/`max_positions`, EAs, "Programa de
+referencia", `equity_basis`. Este requisito es negativo por diseño: el eval de R9 verifica
+la **ausencia** de cambios en estas filas.
+
+### R10 — Gates, criterio mecánico y artefactos de código: intactos
+
+§7.1-7.4 (gates G/C/P/T), §2.2.1 (criterio mecánico de archivo) y §7.5 (condicionamiento
+por firma, incl. `firm_profile_hash` y forma canónica `GO (candidato X, firma Y)`) quedan
+byte-a-byte idénticos entre v1.3 y v1.4. No se crea `profiles/ftmo.json`;
+`profiles/the5ers.json` y `src/genesis/strategy/inspector_config.json` no se tocan
+(verificable: `git status --porcelain` sobre ambos permanece vacío tras el change).
+
+### R11 — Punteros a "SSoT" en archivos versionados fuera de `docs/`: sin cambios (decisión explícita)
+
+`CLAUDE.md`, `AGENTS.md` y `README.md` en la raíz del repo referencian el SSoT por nombre
+de archivo **`docs/SPEC_GENESIS_v1.1_PropTrading_TorneoCandidatos.md`** (verificado:
+`CLAUDE.md:5`, `AGENTS.md:7`, `README.md:5`). El precedente v1.2→v1.3 (PR #19) **no
+actualizó** estos punteros pese a introducir v1.3 — siguen apuntando a v1.1 hoy. Este
+change es consistente con ese precedente y **no actualiza** estos tres archivos: se trata
+como decisión de alcance explícita (no un olvido), documentada aquí para que quede
+trazable. Si en el futuro se decide fijar los punteros a la versión vigente en vez de a
+v1.1, eso es un change de mantenimiento documental aparte, no parte de este backfill.
+
+## Redacción exacta esperada (spec-delta) — celdas y filas de §1.3.2 en v1.4
+
+| Campo | v1.3 (actual) | v1.4 (nuevo, redacción esperada) |
+|---|---|---|
+| `server_tz` | `Europe/Prague (CET/CEST). *Default conservador — a confirmar contra `account_info`/`symbol_info` del terminal FTMO en la corrida operativa (patrón PA-1).*` | `**Europe/Athens** (GMT+2/+3, estilo EET/EEST) — offset **+3** confirmado el 2026-07-12 (sondeo corrida D, issue #20): último tick de forex del viernes etiquetado 23:54 con cierre real 21:00 UTC; índices US a 23:49 con cierre real 20:49 UTC. Best-fit IANA usado por la corrida. **Pendiente**: la regla de cambio DST (fechas UE vs. EE. UU.) no es decidible con una sola observación de verano; se resuelve con probes M1 de la semana 2025-10-26 → 2025-11-02 (ver nota de historia disponible más abajo).` |
+| `daily_reset_time` | `**`00:00`** en el `server_tz` de FTMO (típicamente Europe/Prague, CET/CEST). Equivalencia UTC: 23:00 UTC (CET, invierno) / 22:00 UTC (CEST, verano). *Default conservador — `server_tz` y hora exacta a confirmar...*` | `**`00:00` `Europe/Prague`** (CE(S)T, términos vigentes de FTMO) — zona **distinta** del reloj del servidor de datos (`server_tz` = `Europe/Athens`, fila anterior); no colapsar ambas zonas en una sola. Equivalencia UTC: 23:00 UTC (CET, invierno) / 22:00 UTC (CEST, verano). Confirmado (sondeo corrida D + dashboard FTMO, issue #20, 2026-07-12).` |
+| `daily_loss_limit` | `...*Default conservador — a confirmar contra términos vigentes de FTMO / la corrida operativa.*` | `...**Confirmado** (Free Trial 50.000 USD → límite 2.500 USD; dashboard FTMO del usuario, 2026-07-12).` (resto de la celda sin cambios) |
+| `max_loss_limit` | `**10%**, tipo **estático** (ancla: balance inicial). *Default conservador — tipo estático/trailing y ancla a confirmar...*` | `**10%**, tipo **estático** (ancla: balance inicial). **Confirmado** (Free Trial 50.000 USD → límite 5.000 USD; dashboard FTMO del usuario, 2026-07-12).` |
+| Nota apertura tabla símbolos | `...**esperados, a confirmar por la corrida operativa** (patrón PA-1), nunca definitivos.` | `...**confirmados (patrón PA-1, sondeo corrida D, issue #20, 2026-07-12)**; coinciden exactamente con los nombres esperados en v1.3.` |
+| Nota cierre tabla símbolos | `Nota: los nombres esperados y sus alias derivan del sondeo `out/run_d/probe_mt5.py`... Estos nombres se confirman contra el terminal FTMO en la corrida operativa y se corrigen aquí en un backfill posterior si difieren...` | `Nota: los nombres y alias fueron **confirmados** por el sondeo de la corrida D (`probe_mt5.py`, issue #20, 2026-07-12) contra el terminal FTMO real; coincidieron exactamente con los esperados en v1.3 (incl. sufijo `.cash` en los 4 índices). La confirmación del `SymbolFigure` real de oro/majors sigue **fuera de alcance** — ver §2.x.` |
+| Subsección nueva (tras la tabla de símbolos) | *(no existe en v1.3)* | `##### Historia disponible en el Free Trial (FTMO)`\n\n`Confirmado por sondeo de la corrida D (`probe_depth.py`, issue #20, 2026-07-12): los **ticks** están disponibles con profundidad ≥12 meses para los 8 símbolos, con un hueco puntual observado (`NAS100`, sin ticks el 2025-07-07). El **M1** solo está disponible desde ~2025-10-22 para los 4 índices + `XAUUSD`, y desde ~2025-11 a ~2025-12 para los 3 majors FX (`EURUSD`, `GBPUSD`, `USDJPY`). Ventana material para cualquier corrida sobre esta firma — ver también §4.1.` |
+| §4.1, bullet "Realidad de profundidad de ticks" | (párrafo existente, líneas 399, sin referencia a FTMO) | Se añade al final del bullet existente: `Para FTMO, ver el detalle de ventana M1/ticks confirmado por sondeo en §1.3.2 ("Historia disponible en el Free Trial").` |
+
+## Criterios de aceptación (evals ejecutables)
+
+```
+DADO el directorio docs/ del repo
+CUANDO se ejecuta `fd 'SPEC_GENESIS_v1.4' docs/`
+ENTONCES retorna exactamente 1 archivo: docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `git diff --no-index docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md` (o `git status --porcelain docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md`)
+ENTONCES no hay diferencias/cambios de tracking sobre el archivo v1.3 (permanece byte a byte idéntico al commit `97f173c`)
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg -i 'a confirmar|default conservador' docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md -n`
+ENTONCES ninguna coincidencia aparece en las filas `server_tz`, `daily_reset_time`, `daily_loss_limit`, `max_loss_limit`, ni en la nota de apertura/cierre de la tabla de símbolos de §1.3.2
+Y sí aparecen coincidencias en: `min_profitable_days`, `news_restrictions`, `weekend_holding`, `consistency_rule`, `profit_split`/`payout_cycle`, `challenge_cost`, `max_lots`/`max_positions`, EAs, "Programa de referencia" (placeholders deliberadamente intactos)
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg 'Europe/Athens' docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`
+ENTONCES retorna >=1 coincidencia (server_tz confirmado)
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg 'Europe/Prague' docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`
+ENTONCES retorna >=1 coincidencia en la fila `daily_reset_time` (zona de reset, distinta de server_tz)
+Y `rg 'Europe/Athens.*Europe/Prague|Europe/Prague.*Europe/Athens' docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` no colapsa ambas zonas en una misma oración salvo en la nota explícita que las distingue
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg 'issue #20|2026-07-12' docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md -c`
+ENTONCES retorna un conteo >= 6 (una cita por cada campo sustituido: server_tz, daily_reset_time, daily_loss_limit, max_loss_limit, tabla de símbolos, nota de historia)
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg 'out/run_d' docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`
+ENTONCES si hay coincidencias, todas están explícitamente marcadas como referencia informativa ad-hoc no versionada (nunca como fuente normativa primaria); no hay ninguna ruta `out/run_d/*.json` citada como única fuente de un valor confirmado
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg -c 'Historia disponible en el Free Trial' docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`
+ENTONCES retorna 1 (la subsección existe una sola vez, dentro de §1.3.2)
+Y `rg -A2 'Realidad de profundidad de ticks' docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` incluye una referencia a "§1.3.2" en las 2 líneas siguientes (cross-ref desde §4.1)
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `git diff --no-index docs/SPEC_GENESIS_v1.3_PropTrading_TorneoCandidatos.md docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`
+ENTONCES ningún hunk cae en las líneas correspondientes a §7.1-7.4, §2.2.1 ni §7.5 (gates y criterio mecánico intactos)
+Y todos los hunks caen dentro de: encabezado, bloque changelog nuevo, §1.3.2 (filas/nota de la tabla de símbolos, subsección nueva), y el bullet de §4.1 con la referencia cruzada
+```
+
+```
+DADO el repo en su estado tras el change
+CUANDO se ejecuta `git status --porcelain src/genesis/data/profiles/the5ers.json src/genesis/strategy/inspector_config.json`
+ENTONCES no produce salida (ambos archivos sin cambios de tracking)
+Y `fd 'ftmo.json' src/genesis/data/profiles/` no encuentra ningún archivo nuevo bajo control de versiones
+```
+
+```
+DADO el repo en su estado tras el change
+CUANDO se ejecuta `rg 'SPEC_GENESIS_v1\.1' CLAUDE.md AGENTS.md README.md`
+ENTONCES retorna >=1 coincidencia en cada uno de los 3 archivos (punteros sin cambios, consistente con la decisión R11 y el precedente v1.2→v1.3)
+```
+
+```
+DADO el repo en su estado tras el change
+CUANDO se ejecuta `git diff --name-only | rg '^src/'`
+ENTONCES no retorna ninguna coincidencia (change doc-only, ningún archivo bajo src/ modificado)
+```
+
+```
+DADO el repo en su estado tras el change
+CUANDO se ejecuta `mise run test` (o `uv run pytest`)
+ENTONCES la suite existente pasa en verde (excepción doc-only de `.agents/rules/eval-tdd-conventions.md`: no se añaden tests nuevos, solo se exige que la suite existente no se rompa)
+```
+
+## Riesgos
+
+- **DST no resuelto**: `Europe/Athens` es una única observación de verano (offset +3);
+  riesgo de que un lector interprete que la regla de transición DST completa ya está
+  confirmada. Mitigación: R2 exige redacción explícita "offset confirmado / regla DST
+  pendiente", nunca "confirmado" a secas para toda la fila.
+- **Colapso `server_tz`/`daily_reset_tz`**: riesgo de que una edición apresurada dependa
+  todavía de la ecuación anterior "reset = server_tz". Mitigación: R3 exige revisar ambas
+  filas juntas y el eval verifica explícitamente que no se colapsan en una misma zona.
+- **Fuente no perenne**: `out/run_d/` no está versionado y podría limpiarse; la única
+  fuente auditable perenne que queda es el issue #20 (GitHub), dependencia externa al
+  repo. Riesgo residual aceptado — mismo patrón que The5ers/§1.3.1 (cita "Issue B").
+- **Falsos positivos/negativos en el eval de "solo N zonas tocadas"**: si el changelog no
+  lista textualmente los placeholders que permanecen intactos (R9), el eval de ausencia
+  de cambios podría no distinguir entre un placeholder deliberadamente conservado y uno
+  olvidado. Mitigación: R9 exige el listado textual completo.
+- **Deriva de alcance hacia `profiles/ftmo.json`**: riesgo de que apply/design se tienten
+  a versionar el perfil de código aprovechando que ya existen los valores. Mitigación: R10
+  y el eval de `git status --porcelain` sobre `the5ers.json`/`inspector_config.json` +
+  ausencia de `profiles/ftmo.json` nuevo.
+
+## Preguntas abiertas (elevar al humano antes de `DESIGN → APPLY`)
+
+1. **`firm_profile_hash` (`465ae475…`)**: este spec fija que **no se cita** en v1.4 (no
+   existe `profiles/ftmo.json` versionado al que anclarlo). Si el humano prefiere dejar
+   una nota de trabajo mencionándolo como referencia futura, es una decisión de diseño a
+   confirmar en `design.md`, no reabre este spec.
+2. **Regla DST de `server_tz`**: queda explícitamente pendiente (R2). No bloquea este
+   backfill, pero condiciona cualquier corrida futura sobre la ventana 2025-10-26 →
+   2025-11-02; conviene que quede rastreada como seguimiento (¿issue nuevo o nota en
+   §1.3.2 basta?).
+3. **Punteros a "SSoT" (R11)**: este spec fija "no tocar" por consistencia con el
+   precedente v1.2→v1.3. Si el humano prefiere aprovechar este change para corregir los
+   tres punteros a v1.1 (deuda documental preexistente, no introducida por este change),
+   eso ampliaría el alcance doc-only declarado en el issue — requiere decisión explícita
+   antes de `design`.
