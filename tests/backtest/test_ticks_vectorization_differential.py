@@ -7,7 +7,11 @@ contra referencias de fuerza bruta ya existentes (`_tick_in_bar_window`, filtrad
 escalar `_to_utc`), no tests de una feature nueva.
 """
 
-from datetime import UTC, datetime
+import tempfile
+from dataclasses import replace
+from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from hypothesis import example, given, settings
@@ -16,10 +20,20 @@ from hypothesis import strategies as st
 from genesis.backtest.ticks import (
     TickRow,
     _bisect_window_bounds,
+    _candidate_server_dates,
+    _day_window,
     _tick_in_bar_window,
+    _to_utc,
+    iter_ticks,
 )
+from genesis.data.mt5_export import Granularity, RawParquetStore
+from genesis.data.profile import FirmProfile, load_firm_profile
+from tests.backtest.fakes import build_server_local_tick_chunk
 
 pytestmark = pytest.mark.unit
+
+_SYMBOL = "US500"
+_SERVER_TZS = ("Europe/Athens", "America/New_York")
 
 _instant_strategy = st.datetimes(
     min_value=datetime(2020, 1, 1),
@@ -83,3 +97,142 @@ def test_bisect_window_bounds_equivale_al_filtrado_lineal(
 
     assert list(day_ticks[start:end]) == ref
     assert (start < end) == bool(ref)
+
+
+# --- Test 2 (R113): iter_ticks (híbrida) == referencia escalar `_to_utc` fila a fila ---
+
+# `entries`: lista de `(day_offset, wall_clock local, precio base)`. `day_offset` in
+# {0, 1} agrupa cada tick en el chunk físico del servidor `base_date + day_offset`
+# días (permite ejercitar tanto un único chunk como el spillover D/D+1 de R81).
+_ENTRY_STRATEGY = st.tuples(
+    st.integers(min_value=0, max_value=1),
+    st.times(),
+    st.floats(min_value=0.01, max_value=100_000.0, allow_nan=False, allow_infinity=False),
+)
+
+# Times repartidos a lo largo del día completo: los extremos (00:00 / 23:59:59)
+# quedan a ambos lados de cualquier hora de transición DST real (siempre entre
+# 01:00-04:00 locales), de modo que sirven tanto para fechas sin transición como
+# para las de spring-forward/fall-back.
+_SPREAD_DAY_ENTRIES: list[tuple[int, time, float]] = [
+    (0, time(0, 0, 0), 100.0),
+    (0, time(6, 0, 0), 101.0),
+    (0, time(12, 0, 0), 102.0),
+    (0, time(18, 0, 0), 103.0),
+    (0, time(23, 59, 59), 104.0),
+]
+_SPILLOVER_ENTRIES: list[tuple[int, time, float]] = [
+    (0, time(23, 0, 0), 100.0),  # wall-clock 23:00 día D (golden R81 de #21).
+    (1, time(0, 30, 0), 101.0),  # wall-clock 00:30 día D+1 (mismo trading_day UTC).
+]
+
+
+def _scalar_iter(
+    store: RawParquetStore, symbol: str, trading_day: date, profile: FirmProfile
+) -> list[TickRow]:
+    """Referencia escalar de `iter_ticks` (bucle sin optimizar, pre-#24): `_to_utc` fila a fila.
+
+    Réplica de la lógica pre-vectorización de este Change (mismo criterio de
+    filtro/orden que la producción, `itertuples` en vez de `iterrows` — diferencia
+    irrelevante para el resultado). Oráculo de la reescritura híbrida de T4: debe
+    permanecer verde contra la implementación vectorizada final, no solo contra la
+    baseline escalar de T2/T3.
+    """
+    window = _day_window(trading_day)
+    server_tz = ZoneInfo(profile.server_tz)
+    rows: list[TickRow] = []
+    for server_date in _candidate_server_dates(window, server_tz):
+        chunk_window = _day_window(server_date)
+        if not store.has_chunk(symbol, Granularity.TICK, chunk_window):
+            continue
+        frame = store.read_chunk(symbol, Granularity.TICK, chunk_window)
+        for tick in frame.itertuples(index=False):
+            # `itertuples` retorna namedtuples reales en runtime; el stub de pandas los
+            # tipa como `tuple[Any, ...]` genérico (falso positivo conocido de ty).
+            timestamp_utc = _to_utc(tick.timestamp, server_tz)  # ty: ignore[unresolved-attribute]
+            if window.start <= timestamp_utc < window.end:
+                rows.append(
+                    TickRow(
+                        timestamp_utc=timestamp_utc,
+                        bid=float(tick.bid),  # ty: ignore[unresolved-attribute]
+                        ask=float(tick.ask),  # ty: ignore[unresolved-attribute]
+                        last=float(tick.last),  # ty: ignore[unresolved-attribute]
+                    )
+                )
+    rows.sort(key=lambda tick: tick.timestamp_utc)
+    return rows
+
+
+@given(
+    server_tz_name=st.sampled_from(_SERVER_TZS),
+    base_date=st.dates(min_value=date(2020, 1, 2), max_value=date(2029, 12, 30)),
+    entries=st.lists(_ENTRY_STRATEGY, min_size=1, max_size=12),
+)
+@example(  # Sin transición DST: 2024-01-02 (Europe/Athens), mismo valor que test_ticks.py.
+    server_tz_name="Europe/Athens",
+    base_date=date(2024, 1, 2),
+    entries=_SPREAD_DAY_ENTRIES,
+)
+@example(  # Sin transición DST: 2024-01-02 (America/New_York).
+    server_tz_name="America/New_York",
+    base_date=date(2024, 1, 2),
+    entries=_SPREAD_DAY_ENTRIES,
+)
+@example(  # Spring-forward Europe/Athens: 2024-03-31.
+    server_tz_name="Europe/Athens",
+    base_date=date(2024, 3, 31),
+    entries=_SPREAD_DAY_ENTRIES,
+)
+@example(  # Spring-forward America/New_York: 2024-03-10.
+    server_tz_name="America/New_York",
+    base_date=date(2024, 3, 10),
+    entries=_SPREAD_DAY_ENTRIES,
+)
+@example(  # Fall-back Europe/Athens: 2024-10-27.
+    server_tz_name="Europe/Athens",
+    base_date=date(2024, 10, 27),
+    entries=_SPREAD_DAY_ENTRIES,
+)
+@example(  # Fall-back America/New_York: 2024-11-03.
+    server_tz_name="America/New_York",
+    base_date=date(2024, 11, 3),
+    entries=_SPREAD_DAY_ENTRIES,
+)
+@example(  # Multi-chunk spillover D/D+1: 2026-06-26 -> 2026-06-27 (Athens, golden R81 de #21).
+    server_tz_name="Europe/Athens",
+    base_date=date(2026, 6, 26),
+    entries=_SPILLOVER_ENTRIES,
+)
+@settings(max_examples=200, deadline=None)
+def test_iter_ticks_vectorizado_equivale_a_escalar(
+    server_tz_name: str, base_date: date, entries: list[tuple[int, time, float]]
+) -> None:
+    """R92-R102/R113: `iter_ticks` == referencia escalar `_to_utc` fila a fila.
+
+    Guarda de regresión (no RED genuino): contra el baseline escalar (T2, pre-T4) la
+    referencia es trivialmente igual a `iter_ticks` (misma implementación); tras la
+    reescritura híbrida de T4 sigue verde únicamente si la ruta vectorizada +
+    fallback DST preservan exactamente el mismo resultado, elemento a elemento
+    (orden + 4 campos, incluido `timestamp_utc`).
+    """
+    groups: dict[int, list[tuple[int, time, float]]] = {}
+    for entry in entries:
+        day_offset = entry[0]
+        groups.setdefault(day_offset, []).append(entry)
+
+    profile = replace(load_firm_profile(), server_tz=server_tz_name)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        store = RawParquetStore(Path(tmp_dir))
+        for day_offset, group_entries in groups.items():
+            server_date = base_date + timedelta(days=day_offset)
+            rows = [
+                (datetime.combine(server_date, local_time), price, price + 0.1, price + 0.05)
+                for _, local_time, price in group_entries
+            ]
+            build_server_local_tick_chunk(store, _SYMBOL, server_date, rows)
+
+        actual = list(iter_ticks(store, _SYMBOL, base_date, profile))
+        expected = _scalar_iter(store, _SYMBOL, base_date, profile)
+
+    assert actual == expected
