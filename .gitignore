@@ -44,6 +44,11 @@ node_modules/
 .env
 .env.*
 
+# Datos crudos y artefactos derivados de corridas (nunca versionados;
+# reproducibilidad vía config_version + dataset_hash en cada artefacto)
+data/
+out/
+
 # Scratch
 prompt.md
 todo.md

@@ -1,0 +1,47 @@
+# CI de genesis — réplica fiel de `mise run ci` (lint + ty + test) en runner limpio.
+# Verificación independiente del entorno local; los tests usan fixtures sintéticas
+# (no requieren MT5 ni datos de data/).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHONPATH: src
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Instalar Python y dependencias
+        run: |
+          uv python install 3.14
+          uv sync --all-groups
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: bandit
+        run: uv run bandit -c pyproject.toml -r src/
+
+      - name: vulture
+        run: uv run vulture
+
+      - name: deptry
+        run: uv run deptry src/
+
+      - name: ty check
+        run: uv run ty check
+
+      - name: pytest
+        run: uv run pytest

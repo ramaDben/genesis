@@ -1,0 +1,13 @@
+# Dependabot — actualizaciones semanales de dependencias Python (uv.lock) y de las
+# GitHub Actions del workflow de CI.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
