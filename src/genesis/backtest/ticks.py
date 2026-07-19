@@ -8,9 +8,11 @@ excepción (R16); solo un chunk presente-pero-inválido lanza `BacktestConfigErr
 borde de la ventana de cobertura `(T-60s, T]` (RI-G5, ADR-G8, Rg-3 §5.2).
 """
 
+from bisect import bisect_right
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from operator import attrgetter
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -23,6 +25,7 @@ from genesis.data.store import AnnotatedBar
 
 _REQUIRED_COLUMNS = ("bid", "ask", "last")
 _COVERAGE_WINDOW = timedelta(seconds=60)
+_TIMESTAMP_KEY = attrgetter("timestamp_utc")
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +159,21 @@ def _tick_in_bar_window(tick_timestamp: datetime, bar_timestamp: datetime) -> bo
     return lower_bound < tick_timestamp <= bar_timestamp
 
 
+def _bisect_window_bounds(day_ticks: Sequence[TickRow], bar_timestamp: datetime) -> tuple[int, int]:
+    """Índices `[start, end)` de `day_ticks` en la ventana `(bar_timestamp - 60s, bar_timestamp]`.
+
+    Asume `day_ticks` **ascendente** por `timestamp_utc` (R65/R101, invariante de
+    `iter_ticks`); no reordena. Replica exactamente el borde `(T-60s, T]` de
+    `_tick_in_bar_window` (estricto en el extremo bajo, cerrado en el alto) vía dos
+    `bisect_right`: sobre una secuencia ordenada, `day_ticks[start:end]` es el mismo
+    subconjunto contiguo que el filtrado lineal con `_tick_in_bar_window` (R107/R114).
+    """
+    lower_bound = bar_timestamp - _COVERAGE_WINDOW
+    start_idx = bisect_right(day_ticks, lower_bound, key=_TIMESTAMP_KEY)
+    end_idx = bisect_right(day_ticks, bar_timestamp, key=_TIMESTAMP_KEY)
+    return (start_idx, end_idx)
+
+
 def has_sufficient_tick_coverage(
     store: RawParquetStore,
     symbol: str,
@@ -183,7 +201,8 @@ def has_sufficient_tick_coverage(
     if not chunk_exists:
         return False
 
-    return any(_tick_in_bar_window(tick.timestamp_utc, bar.timestamp_utc) for tick in day_ticks)
+    start_idx, end_idx = _bisect_window_bounds(day_ticks, bar.timestamp_utc)
+    return start_idx < end_idx
 
 
 def ticks_in_bar_window(bar: AnnotatedBar, day_ticks: Sequence[TickRow]) -> list[TickRow]:
@@ -191,8 +210,8 @@ def ticks_in_bar_window(bar: AnnotatedBar, day_ticks: Sequence[TickRow]) -> list
 
     Ordenados por `timestamp_utc` ascendente (forward-only); usado por el motor de
     fills de `simulator.py` (R35) — misma fuente de borde que `has_sufficient_tick_coverage`.
+    `day_ticks` ya viene ascendente (invariante de `iter_ticks`), por lo que la slice
+    de `_bisect_window_bounds` ya está ordenada (sin reordenar de nuevo).
     """
-    in_window = [
-        tick for tick in day_ticks if _tick_in_bar_window(tick.timestamp_utc, bar.timestamp_utc)
-    ]
-    return sorted(in_window, key=lambda tick: tick.timestamp_utc)
+    start_idx, end_idx = _bisect_window_bounds(day_ticks, bar.timestamp_utc)
+    return list(day_ticks[start_idx:end_idx])
