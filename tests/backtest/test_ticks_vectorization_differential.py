@@ -22,6 +22,7 @@ from genesis.backtest.ticks import (
     _bisect_window_bounds,
     _candidate_server_dates,
     _day_window,
+    _has_dst_transition,
     _tick_in_bar_window,
     _to_utc,
     iter_ticks,
@@ -214,11 +215,26 @@ def test_iter_ticks_vectorizado_equivale_a_escalar(
     reescritura híbrida de T4 sigue verde únicamente si la ruta vectorizada +
     fallback DST preservan exactamente el mismo resultado, elemento a elemento
     (orden + 4 campos, incluido `timestamp_utc`).
+
+    Belt-and-suspenders (diferido de T3, R94): por cada chunk físico (agrupado por
+    `day_offset`), `_has_dst_transition` sobre los extremos del chunk debe coincidir
+    con el chequeo de fuerza bruta de si *algún par* de instantes del chunk tiene
+    `utcoffset()` distinto (verdadero bajo Rg-12: a lo sumo una transición por chunk).
     """
     groups: dict[int, list[tuple[int, time, float]]] = {}
     for entry in entries:
         day_offset = entry[0]
         groups.setdefault(day_offset, []).append(entry)
+
+    server_tz = ZoneInfo(server_tz_name)
+    for day_offset, group_entries in groups.items():
+        server_date = base_date + timedelta(days=day_offset)
+        naive_times = [
+            datetime.combine(server_date, local_time) for _, local_time, _ in group_entries
+        ]
+        naive_min, naive_max = min(naive_times), max(naive_times)
+        observed_offsets = {t.replace(tzinfo=server_tz).utcoffset() for t in naive_times}
+        assert _has_dst_transition(naive_min, naive_max, server_tz) == (len(observed_offsets) > 1)
 
     profile = replace(load_firm_profile(), server_tz=server_tz_name)
 

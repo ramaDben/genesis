@@ -97,6 +97,22 @@ def _validate_tick_schema(frame: pd.DataFrame, *, symbol: str, trading_day: date
             raise BacktestConfigError(message)
 
 
+def _has_dst_transition(naive_min: datetime, naive_max: datetime, server_tz: ZoneInfo) -> bool:
+    """`True` sii `server_tz` tiene distinto `utcoffset()` en `naive_min` y `naive_max`.
+
+    Supuesto explícito (Rg-12, no verificado exhaustivamente para husos exóticos no
+    soportados): a lo sumo una transición de horario dentro del chunk (verdadero para
+    todos los husos IANA reales soportados, `Europe/Athens`/`America/New_York`/
+    `Australia/Sydney` — ninguno tiene 2 transiciones en <25h). Bajo ese supuesto,
+    comparar únicamente los dos extremos de un chunk ascendente basta para decidir si
+    el offset es constante en todo el rango.
+    """
+    return (
+        naive_min.replace(tzinfo=server_tz).utcoffset()
+        != naive_max.replace(tzinfo=server_tz).utcoffset()
+    )
+
+
 def iter_ticks(
     store: RawParquetStore,
     symbol: str,
@@ -110,16 +126,24 @@ def iter_ticks(
     día `trading_day` objetivo (UTC) puede intersectar 1-N chunks de servidor
     adyacentes (`_candidate_server_dates`, R63). Por cada candidato cuyo chunk exista
     (`store.has_chunk`), lo lee (`store.read_chunk`), valida su esquema y reinterpreta
-    cada timestamp crudo como `server_tz` vía `_to_utc` (R62). Acumula, filtra a la
-    ventana UTC objetivo `[00:00, 24:00)` de `trading_day` (R65) y emite `TickRow`
-    ordenados por `timestamp_utc` ascendente.
+    cada timestamp crudo como `server_tz` (R62). Acumula, filtra a la ventana UTC
+    objetivo `[00:00, 24:00)` de `trading_day` (R65) y emite `TickRow` ordenados por
+    `timestamp_utc` ascendente.
+
+    Mecanismo híbrido por chunk (Issue #24, sin cambio de comportamiento observable):
+    si `_has_dst_transition` detecta un cambio de horario dentro del chunk (~2 días/año
+    por huso) se reconvierte fila a fila con `_to_utc` (fallback escalar, `itertuples`);
+    en el caso normal (sin transición) se resta el offset constante de forma
+    vectorizada sobre toda la columna (ruta rápida). Ambas rutas producen el mismo
+    resultado que la conversión escalar fila a fila.
 
     Si *ningún* candidato tiene chunk persistido, retorna secuencia vacía sin excepción
     (R66, extiende R16). Si un candidato existe pero su esquema es inválido (columnas
     `bid`/`ask`/`last` ausentes o mal tipadas), lanza `BacktestConfigError` (R67,
     extiende R17). Solo usa `has_chunk`/`read_chunk`, ya públicos de `RawParquetStore`
     (R70). Con `profile.server_tz="UTC"` el comportamiento observable es idéntico al
-    pre-fix (R71).
+    pre-fix (R71); `_has_dst_transition` siempre es `False` (offset 0 en ambos
+    extremos) y la ruta rápida se toma siempre.
     """
     window = _day_window(trading_day)
     server_tz = ZoneInfo(profile.server_tz)
@@ -132,20 +156,53 @@ def iter_ticks(
 
         frame = store.read_chunk(symbol, Granularity.TICK, chunk_window)
         _validate_tick_schema(frame, symbol=symbol, trading_day=trading_day)
+        if frame.empty:
+            continue
 
-        for _, row in frame.iterrows():
-            timestamp_utc = _to_utc(row["timestamp"], server_tz)
-            if window.start <= timestamp_utc < window.end:
-                rows.append(
-                    TickRow(
-                        timestamp_utc=timestamp_utc,
-                        bid=float(row["bid"]),
-                        ask=float(row["ask"]),
-                        last=float(row["last"]),
+        naive_col = frame["timestamp"].dt.tz_localize(None)
+        naive_min = naive_col.iloc[0].to_pydatetime()
+        naive_max = naive_col.iloc[-1].to_pydatetime()
+
+        if _has_dst_transition(naive_min, naive_max, server_tz):
+            # Fallback escalar (acotado al puñado de chunks/año con transición real):
+            # misma conversión fila a fila que la implementación pre-#24, vía `itertuples`
+            # (no vía el iterador fila-a-fila de pandas basado en `Series`).
+            for tick in frame.itertuples(index=False):
+                timestamp_utc = _to_utc(tick.timestamp, server_tz)  # ty: ignore[unresolved-attribute]
+                if window.start <= timestamp_utc < window.end:
+                    rows.append(
+                        TickRow(
+                            timestamp_utc=timestamp_utc,
+                            bid=float(tick.bid),  # ty: ignore[unresolved-attribute]
+                            ask=float(tick.ask),  # ty: ignore[unresolved-attribute]
+                            last=float(tick.last),  # ty: ignore[unresolved-attribute]
+                        )
                     )
-                )
+        else:
+            # Ruta rápida: el offset es constante en todo el chunk -> resta vectorizada
+            # de un único `Timedelta` en vez de una llamada `astimezone()` por fila.
+            offset = naive_min.replace(tzinfo=server_tz).utcoffset()
+            utc_naive = naive_col - pd.Timedelta(offset)
+            py_naive = utc_naive.dt.to_pydatetime()
+            for ts_naive, bid, ask, last in zip(
+                py_naive,
+                frame["bid"].to_numpy(),
+                frame["ask"].to_numpy(),
+                frame["last"].to_numpy(),
+                strict=True,
+            ):
+                timestamp_utc = ts_naive.replace(tzinfo=UTC)
+                if window.start <= timestamp_utc < window.end:
+                    rows.append(
+                        TickRow(
+                            timestamp_utc=timestamp_utc,
+                            bid=float(bid),
+                            ask=float(ask),
+                            last=float(last),
+                        )
+                    )
 
-    rows.sort(key=lambda tick: tick.timestamp_utc)
+    rows.sort(key=_TIMESTAMP_KEY)
     yield from rows
 
 
