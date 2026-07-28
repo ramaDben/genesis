@@ -1,51 +1,133 @@
 # genesis
 
-Pipeline de validación institucional para prop firms — **torneo de candidatos de estrategia** bajo gates mecánicos (Spec Génesis v1.1). Estructura de tooling tomada de [Bajmein/pulse](https://github.com/Bajmein/pulse) y adaptada a Windows.
+Pipeline de validación institucional para prop firms: un **torneo de candidatos de estrategia** evaluado bajo gates mecánicos idénticos (G/C/P/T), con un motor de backtest propio event-driven sobre M1 + ticks.
 
-- **SSoT**: [`docs/SPEC_GENESIS_v1.1_PropTrading_TorneoCandidatos.md`](docs/SPEC_GENESIS_v1.1_PropTrading_TorneoCandidatos.md)
-- **Gobernanza**: [`CLAUDE.md`](CLAUDE.md) (comandos/convenciones) · [`AGENTS.md`](AGENTS.md) (flujo SDD)
+> **Software propietario.** Todos los derechos reservados. El acceso a este repositorio no concede licencia de uso. Ver [`LICENSE`](LICENSE).
 
-## Setup (Windows)
+El objetivo no es "hacer backtests bonitos": es producir un veredicto **GO / NO-GO** reproducible y no negociable sobre si una estrategia sobrevive la economía real de un challenge de prop firm, con los costos completos y las reglas de la firma aplicadas.
 
-Requisitos: [mise](https://mise.jdx.dev), [uv](https://docs.astral.sh/uv/), Docker Desktop, Git for Windows (provee el `bash` que usan las tasks), `gh` autenticado con acceso a `Bajmein/pulse`.
+## Principios de diseño
 
-```powershell
-cd C:\Users\bbrav\genesis
-mise trust
-mise install          # python 3.14, uv, LSPs y utilidades CLI (cargo:* requiere toolchain Rust)
-mise run setup        # uv sync --all-groups
-mise run ci           # lint + ty + test
-```
-
-Copia `.env.example` a `.env` y completa los tokens (no se commitea).
-
-## Plugin SDD de pulse (`/pulse:*`)
-
-El plugin vive en `.claude/plugins/pulse/` (skills, agentes por fase, hooks) y el marketplace local en `.claude-plugin/marketplace.json`. Registro en Claude Code:
-
-```powershell
-claude plugin marketplace add C:\Users\bbrav\genesis
-claude plugin install pulse@genesis
-```
-
-Alternativa por sesión (sin instalar): `claude --plugin-dir .claude\plugins\pulse`.
-
-Con el plugin activo, el flujo SDD completo queda disponible como skills:
-`/pulse:explore → propose → specify → design → break-to-tasks → apply → review → close` (más `orchestrate`, `diagram-expert` y `pulse-sdd-transition`).
-
-## MCP
-
-`.mcp.json` (scope proyecto) define: `pulse-engine` (Docker, imagen `ghcr.io/bajmein/pulse/mcp-pulse:latest`, repo montado en `/work`), `serena`, `filesystem` y `memory`. Los servers `github`, `context7` y `sequential-thinking` ya están a scope de usuario en esta máquina.
-
-```powershell
-mise run docker:pull   # actualizar imagen del engine
-mise run mcp:list      # salud de los MCPs
-```
-
-## Configuración opcional de Claude Code
-
-`.claude/settings.json.example` trae la config sugerida (permisos, hook de inyección de fase SDD, enforcement de rg/fd). Revísala y renómbrala a `settings.json` si quieres activarla — los hooks ejecutan `.agents/hooks/sdd_context_injector.py` en cada prompt.
+- **Anti-lookahead por construcción**: el estado de estrategia es incremental y forward-only; violarlo levanta `LookaheadError` en vez de degradar en silencio. Propiedad central verificada con `hypothesis`: ningún output de `on_bar(t)` cambia si se mutan barras posteriores a `t`.
+- **Reproducibilidad institucional**: cada artefacto registra `config_version`, hash de dataset, `firm_profile_hash`, semillas y commit de git. Un veredicto obtenido con datos de una firma **no es transferible** a otra.
+- **Gates mecánicos**: los umbrales son constantes nombradas en código, comparadas contra números ya calculados. No se relajan para que un candidato pase.
+- **Fail-fast con contexto** y determinismo total.
 
 ## Estado del proyecto
 
-Esqueleto inicial: `src/genesis/{data,strategy,backtest,validation}` vacíos. Próximo paso: **Issue A** (`docs(spec)`: spec definitivo — fija umbrales, universos, ficha The5ers) vía `/pulse:explore`. Las dependencias runtime (`MetaTrader5`, `pandas`, `pyarrow`, …) se agregan en el Issue B; hay wheels de MetaTrader5 para Python 3.14 en Windows (`cp314-win_amd64`).
+Las cuatro capas están construidas y verificadas: **640 tests** en verde, más lint (`ruff`, `bandit`, `vulture`, `deptry`) y type-check (`ty`) limpios en CI.
+
+| Capa | Paquete | Estado |
+|---|---|---|
+| 1. Datos | `genesis/data/` | Export MT5 (M1 + ticks), calendario económico, sesiones por índice, controles de calidad, store Parquet, ficha de firma |
+| 2. Estrategia | `genesis/strategy/` | Contrato plugin `StrategyCandidate`, Inspector compartido, componentes comunes (VWAP, zonas) |
+| 3. Backtest | `genesis/backtest/` | Simulador event-driven, equity intradía, fills por tick, modelo de costos con stress, ledger append-only, métricas prop |
+| 4. Validación | `genesis/validation/` | WFA, Monte Carlo (símbolo y portafolio), Purged K-Fold, DSR/PBO, sensibilidad, `prop_sim`, veredicto de torneo, tearsheet y manifest |
+
+Candidatos:
+
+| Candidato | Estrategia | Estado |
+|---|---|---|
+| **A** | CT sweep-fade | **Parcial.** `smc/` (estructura de mercado) y `diagnostics.py` (diagnóstico de señal desnuda, kill-switch §2.2.1) están implementados, pero A **no** se registra en `CANDIDATE_REGISTRY`: aún no es un `StrategyCandidate` ejecutable. El gatillo CT queda condicionado al veredicto del diagnóstico. |
+| **B** | ORB intradía en índices | **Ejecutable.** Implementa `StrategyCandidate` y `RiskLevelsProvider`. |
+| **C** | TSMOM | Diferido, no implementado. |
+
+## Requisitos
+
+- **Python 3.14** (gestionado por `mise`)
+- [`mise`](https://mise.jdx.dev) y [`uv`](https://docs.astral.sh/uv/)
+- **Git for Windows** en Windows: las tasks de `mise` se ejecutan con su `bash`
+- **MetaTrader 5** — solo para *exportar datos*. No se necesita para correr los tests: las fixtures son sintéticas y el CI corre en Linux sin MT5.
+- Docker Desktop y `gh` — solo si vas a usar el flujo SDD interno (ver más abajo). No hacen falta para compilar, testear ni ejecutar el pipeline.
+
+## Setup
+
+```powershell
+git clone https://github.com/ramaDben/genesis.git
+cd genesis
+
+mise trust
+mise install            # Python 3.14, uv, LSPs y utilidades CLI
+cp .env.example .env    # mise carga .env; sin él, las tasks fallan
+mise run setup          # uv sync --all-groups
+mise run ci             # lint + ty + test
+```
+
+Los valores de `.env` son placeholders y solo aplican al flujo SDD; el pipeline de backtest no lee ninguno. Nunca commitees `.env`.
+
+Si el `.venv` queda inutilizable (`no Python executable was found`), renombralo y reconstruilo: `mv .venv .venv-old && uv sync --all-groups`.
+
+## Comandos
+
+| Comando | Qué hace |
+|---|---|
+| `mise run setup` / `s` | `uv sync --all-groups` |
+| `mise run ci` | lint + ty + test en paralelo (réplica exacta del workflow de CI) |
+| `mise run test` / `t` | `pytest` |
+| `mise run ty` / `tc` | `ty check` |
+| `mise run format` / `f` | `ruff check --fix` + `ruff format` |
+| `mise run clean` | limpia cachés de herramientas (no toca `.pulse/` ni `.venv/`) |
+
+Las dependencias se gestionan siempre vía `uv` (`uv add`, `uv sync`, `uv run`).
+
+## CLI
+
+Dos entry points, ambos con `--help`:
+
+```powershell
+uv run mt5-export export                  # descarga M1/ticks de símbolos MT5 a data/
+uv run mt5-export confirm-firm-profile    # contrasta los símbolos esperados contra una cuenta demo real
+uv run genesis-validate diagnose          # diagnóstico de señal desnuda del Candidato A (kill-switch §2.2.1)
+```
+
+El resto del pipeline (simulador, WFA, Monte Carlo, veredicto) se consume hoy como biblioteca desde `genesis.backtest` y `genesis.validation`; todavía no hay un CLI de torneo end-to-end.
+
+## Datos y reproducibilidad
+
+**Los resultados de este repositorio no son reproducibles por un tercero, y es intencional.**
+
+- `data/` y `out/` están fuera de control de versiones: los datos crudos son propiedad del broker y pesan demasiado.
+- El insumo es un export de MetaTrader 5 contra un **servidor de broker específico** (actualmente FTMO). El spread real de ticks es propio de ese par broker/servidor y alimenta tanto el criterio de archivo como los gates de economía prop.
+- Por eso un veredicto se registra siempre en su forma canónica `GO (candidato X, firma Y)`: cambiar de firma invalida el veredicto y exige re-corrida completa.
+- La trazabilidad no depende de versionar los datos, sino de que cada artefacto lleve `config_version` + hash de dataset + `firm_profile_hash` + semillas + commit.
+
+Advertencia operativa: el servidor de FTMO usa NY+7 con regla DST de EE.UU., que **no** coincide con `Europe/Athens` en las ventanas de transición de octubre-noviembre y marzo. Esos días se excluyen del análisis.
+
+## Documentación
+
+- **SSoT vigente**: [`docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`](docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md) — arquitectura, umbrales go/no-go definitivos, manejo de errores, estrategia de testing y gobernanza.
+- Las versiones v1.1 a v1.3 se conservan en `docs/` solo como historial. **No las uses como referencia.**
+- Todo cambio de alcance se valida contra el spec; los gates no se relajan.
+- Convenciones de trabajo: [`CLAUDE.md`](CLAUDE.md) · flujo SDD: [`AGENTS.md`](AGENTS.md) · reglas detalladas en `.agents/rules/`.
+
+## Testing
+
+Según spec §9: unit + property-based (`hypothesis`), golden tests, integración y tests estadísticos contra casos publicados. Marcadores disponibles: `unit`, `integration`, `e2e`, `statistical`, `slow`.
+
+```powershell
+uv run pytest -m unit
+uv run pytest -m statistical
+```
+
+## Flujo SDD interno (opcional)
+
+El ciclo de vida del desarrollo lo orquesta el plugin `pulse` (versionado en `.claude/plugins/pulse/`) contra un MCP en Docker:
+
+`/pulse:explore → propose → specify → design → break-to-tasks → apply → review → close`
+
+```powershell
+claude plugin marketplace add .
+claude plugin install pulse@genesis
+mise run docker:pull    # imagen del engine
+mise run mcp:list       # salud de los MCPs
+```
+
+Gate humano obligatorio: solo una persona llama `approve_design`. Los agentes nunca auto-aprueban. El estado de cada fase se codifica en labels de issues de GitHub.
+
+Configuración sugerida de Claude Code en [`.claude/settings.json.example`](.claude/settings.json.example) — revisala antes de renombrarla a `settings.json`, porque instala hooks que se ejecutan en cada prompt.
+
+## Licencia
+
+Propietaria — todos los derechos reservados. Ver [`LICENSE`](LICENSE). No se concede permiso de uso, copia, modificación ni distribución sin autorización previa y por escrito del titular.
+
+Este software es una herramienta de investigación cuantitativa. No es asesoría de inversión, y los resultados de backtest no predicen resultados futuros.

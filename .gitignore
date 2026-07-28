@@ -43,6 +43,8 @@ node_modules/
 # Configs / Secrets
 .env
 .env.*
+# La plantilla sí se versiona (solo placeholders, ningún valor real)
+!.env.example
 
 # Datos crudos y artefactos derivados de corridas (nunca versionados;
 # reproducibilidad vía config_version + dataset_hash en cada artefacto)
