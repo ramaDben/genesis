@@ -1,0 +1,57 @@
+# Licencia propietaria — Todos los derechos reservados
+
+Copyright (c) 2026 Benjamin Bravo (hxhbenja@gmail.com). Todos los derechos reservados.
+
+## 1. Titularidad
+
+Este repositorio y todo su contenido —código fuente, especificaciones, documentación,
+configuración, datos derivados y artefactos de corrida— son propiedad exclusiva del
+titular del copyright indicado arriba. La publicación de este repositorio, sea pública
+o privada, **no** constituye una licencia de uso de ninguna clase.
+
+## 2. Prohibiciones
+
+Salvo autorización previa, expresa y por escrito del titular, queda prohibido:
+
+- usar, ejecutar o evaluar este software con cualquier fin, comercial o no comercial;
+- copiar, reproducir o almacenar el contenido, total o parcialmente;
+- modificar, adaptar, traducir o crear obras derivadas;
+- distribuir, publicar, sublicenciar, vender, arrendar o transferir el contenido a
+  terceros por cualquier medio;
+- realizar ingeniería inversa sobre los métodos, umbrales o parámetros aquí descritos;
+- utilizar el contenido, total o parcialmente, como material de entrenamiento de
+  modelos de aprendizaje automático.
+
+## 3. Ausencia de licencia implícita
+
+No se concede ninguna licencia, derecho ni interés, ni de forma expresa ni implícita,
+por preclusión ni de ningún otro modo, sobre patentes, marcas, secretos comerciales o
+derechos de autor del titular. El acceso al repositorio, la aceptación de una
+invitación de colaboración o la recepción de una copia no alteran esta cláusula.
+
+## 4. Contribuciones
+
+Toda contribución enviada al repositorio (código, documentación, issues o comentarios)
+se cede al titular del copyright, quien podrá usarla sin restricción ni contraprestación.
+Quien contribuye declara tener derecho a hacerlo.
+
+## 5. Ausencia de garantía
+
+EL SOFTWARE SE PROPORCIONA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO, EXPRESA O IMPLÍCITA,
+INCLUIDAS —SIN LIMITACIÓN— LAS GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN PROPÓSITO
+PARTICULAR Y NO INFRACCIÓN. EN NINGÚN CASO EL TITULAR SERÁ RESPONSABLE POR RECLAMACIÓN,
+DAÑO U OTRA RESPONSABILIDAD, YA SEA EN ACCIÓN CONTRACTUAL, EXTRACONTRACTUAL O DE OTRO
+TIPO, DERIVADA DE O EN CONEXIÓN CON EL SOFTWARE O SU USO.
+
+## 6. Ausencia de asesoría financiera
+
+Este software es una herramienta de investigación cuantitativa. No constituye asesoría
+de inversión, recomendación de compra o venta de instrumentos financieros, ni oferta de
+servicio financiero alguno. Los resultados de backtest y simulación **no predicen
+resultados futuros**. La operación con instrumentos apalancados puede ocasionar la
+pérdida total del capital. Cualquier decisión de trading tomada a partir de este
+software es responsabilidad exclusiva de quien la toma.
+
+## 7. Permisos
+
+Para solicitar una licencia de uso, contactar al titular en hxhbenja@gmail.com.
