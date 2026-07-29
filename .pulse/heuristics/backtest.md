@@ -14,3 +14,11 @@
 **Contexto:** Cierre del Change #21 (dominio backtest); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-07-18T02:51:45.641746+00:00; tests_passed_at=2026-07-18T03:37:40.008587+00:00; artefactos: /work/.pulse/changes/21-fix-backtest-iter-ticks-emite-timestamps-del-reloj-del-servidor/idea.md, /work/.pulse/changes/21-fix-backtest-iter-ticks-emite-timestamps-del-reloj-del-servidor/proposal.md, /work/.pulse/changes/21-fix-backtest-iter-ticks-emite-timestamps-del-reloj-del-servidor/design.md, /work/.pulse/changes/21-fix-backtest-iter-ticks-emite-timestamps-del-reloj-del-servidor/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de backtest.
+### Heurística: cierre Change #24 backtest [#24 · backtest · 2026-07-29]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 24-perf-backtest-iter-ticks-itera-con-iterrows-tz-por-fila-47x-medi
+**Contexto:** Cierre del Change #24 (dominio backtest); bump 0.1.12→0.1.13.
+**Observacion:** design_approved_at=2026-07-19T15:32:22.755716+00:00; tests_passed_at=2026-07-19T18:49:30.857728+00:00; artefactos: /work/.pulse/changes/24-perf-backtest-iter-ticks-itera-con-iterrows-tz-por-fila-47x-medi/idea.md, /work/.pulse/changes/24-perf-backtest-iter-ticks-itera-con-iterrows-tz-por-fila-47x-medi/proposal.md, /work/.pulse/changes/24-perf-backtest-iter-ticks-itera-con-iterrows-tz-por-fila-47x-medi/design.md, /work/.pulse/changes/24-perf-backtest-iter-ticks-itera-con-iterrows-tz-por-fila-47x-medi/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de backtest.
