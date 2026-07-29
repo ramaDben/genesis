@@ -1113,3 +1113,628 @@ ENTONCES lint + ty + test pasan en verde (exit code 0, R85, R91)
 - `.agents/rules/architecture-conventions.md`, `.agents/rules/eval-tdd-conventions.md`,
   `.agents/rules/tooling-conventions.md` — convenciones de proceso.
 - `CLAUDE.md` (raíz) — arquitectura de 4 capas, flujo SDD, convenciones de commits/testing.
+
+<!-- change:24-perf-backtest-iter-ticks-itera-con-iterrows-tz-por-fila-47x-medi -->
+# Specification: perf(backtest) — vectorizar `iter_ticks` e indexar con `bisect` las ventanas por evento (Issue #24)
+
+SSoT: `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` (en adelante «el spec») — §2.2.1
+(diagnóstico de señal desnuda), §9 (testing EDD/TDD), §11 (gobernanza SDD). Este documento formaliza
+`idea.md` y `proposal.md` de este Change en requisitos verificables y **continúa** la numeración de
+`.pulse/specs/backtest/spec.md` (R1-R61 promovido de Change #6/G, R62-R91 promovido de Change #21) a
+partir de **R92**, sin renumerar ni contradecir ningún requisito ya promovido. Los gates G/C/P/T del
+spec **nunca se relajan**; este Change no toca ninguno de ellos.
+
+Convención de rutas: todas las rutas de este documento son las reales del repo (`src/genesis/...`).
+
+Este Change es la secuela directa de Change #21 (`fix(backtest): iter_ticks reinterpreta
+server_tz`, cerrado 2026-07-18, mismo archivo `ticks.py`): #21 corrigió la **correctitud** de la
+reinterpretación de `server_tz`; #24 corrige el **rendimiento** del mismo código que #21 acaba de
+tocar, sin reabrir ninguna de sus decisiones (R62-R91 permanecen intactos).
+
+---
+
+## 1. Objetivo y alcance
+
+### 1.1. Objetivo
+
+Optimizar el rendimiento de `iter_ticks`, `has_sufficient_tick_coverage` y `ticks_in_bar_window`
+(`src/genesis/backtest/ticks.py`, post Change #21) sin alterar su contrato público ni su semántica
+observable:
+
+1. **Vectorizar `iter_ticks`**: sustituir el bucle `for _, row in frame.iterrows(): timestamp_utc =
+   _to_utc(row["timestamp"], server_tz)` (`ticks.py:133-143`, 112 µs/fila medido, ~29 s/día de 256k
+   ticks) por un mecanismo **híbrido** por chunk: detectar si hay una transición DST dentro del
+   chunk muestreando el offset de `server_tz` en sus dos extremos; si no la hay (caso común), aplicar
+   una resta vectorizada de `Timedelta` constante (0,61 s/día medido, ~47x); si la hay (raro, ~2
+   días/año por huso), reutilizar sin modificar el bucle escalar `_to_utc` existente, acotado a ese
+   chunk — bit-identidad garantizada por construcción, nunca por disambiguación de pandas.
+2. **Indexar con `bisect` las ventanas por evento**: sustituir el escaneo lineal `any(...)` (
+   `has_sufficient_tick_coverage`) y la list-comprehension + `sorted()` redundante (
+   `ticks_in_bar_window`) por dos índices `bisect_right` sobre `day_ticks` (ya ordenado ascendente,
+   invariante existente) derivados de un único helper privado compartido.
+
+Restaura la viabilidad de tiempo de ejecución de `genesis-validate diagnose` (1h46min medido en la
+corrida D, US500, 173 sesiones) y evita que las fases G/C/P/T (WFA, purged K-fold, Monte Carlo,
+`prop_sim`) hereden el mismo coste multiplicado ×10-100 antes de arrancar (Issue H en adelante).
+
+### 1.2. Alcance IN
+
+- `src/genesis/backtest/ticks.py`: reescritura **interna** de `iter_ticks` (mecanismo híbrido
+  vectorizado/escalar-por-chunk); dos funciones privadas nuevas, `_has_dst_transition` y
+  `_bisect_window_bounds`; reescritura interna de `has_sufficient_tick_coverage`/
+  `ticks_in_bar_window` sobre `_bisect_window_bounds`. **Ninguna firma pública cambia** (a
+  diferencia de #21, que sí rompió firmas deliberadamente).
+- `scripts/bench_iter_ticks.py`: script nuevo de benchmark ad-hoc, no-pytest, sin dependencia dev
+  nueva (directorio `scripts/` ya existe en la raíz, vacío).
+- `tests/backtest/test_ticks_vectorization_differential.py`: archivo de test nuevo (property test
+  `hypothesis` de equivalencia escalar↔vectorizado + `@example` DST pinneados).
+- `tests/backtest/` (archivo existente o nuevo, a discreción de `design.md`): test de equivalencia
+  `_bisect_window_bounds` vs. filtrado lineal de referencia.
+- Re-ejecución empírica (no pytest) de `genesis-validate diagnose` sobre el dataset completo de la
+  corrida D (US500) como evidencia de aceptación del cierre de este Change.
+
+### 1.3. Alcance OUT (YAGNI explícito)
+
+- **No** cambia ninguna firma pública de `ticks.py` (`iter_ticks`, `has_sufficient_tick_coverage`,
+  `ticks_in_bar_window` conservan parámetros y tipos de retorno actuales, R119) ni el `__all__`
+  curado de `genesis.backtest` (`tests/backtest/test_public_api.py` sin modificar).
+- **No** modifica `TickRow` (mismo dataclass, mismos 4 campos, R120).
+- **No** modifica `src/genesis/backtest/simulator.py`, `src/genesis/backtest/costs.py` ni
+  `src/genesis/validation/signal_diagnostic.py` (R109-R111): se benefician de la aceleración sin
+  ningún cambio de código ni de firma.
+- **No** cambia el esquema de `SignalDiagnosticReport`/`ArtifactMetadata` ni el `CONFIG_VERSION` de
+  `signal_diagnostic.py` (permanece `"genesis-validation-d/2"`, R125): los valores calculados no
+  cambian, solo el tiempo de cómputo — a diferencia de #21, que sí incrementó `CONFIG_VERSION`
+  porque los valores calculados cambiaban.
+- **No** toca `src/genesis/data/` ni `src/genesis/strategy/` (capas cerradas, R57/R86 heredados,
+  R121 de este documento).
+- **No** añade ningún método nuevo a `RawParquetStore`/`mt5_export.py` (R70 heredado, R122 de este
+  documento): `iter_ticks` sigue consumiendo exclusivamente `has_chunk`/`read_chunk` ya públicos.
+- **No** modifica `_to_utc` (copia local sincronizada con `store.py::_to_utc`, Rg-9) ni
+  `_candidate_server_dates` (R63) — se reutilizan tal cual.
+- **No** relaja ni cambia ningún criterio o umbral de gate (§2.2.1 ARCHIVE/CONTINUE, gates G/C/P/T
+  de §7 del spec, R88 heredado, R124 de este documento): es un fix de rendimiento puro.
+- **No** resuelve Rg-8 (discrepancia `_day_window` UTC-literal vs. `_trading_day()`) ni Rg-10 (límite
+  de fechas candidatas para husos DST no verificados exhaustivamente) — riesgos heredados de #21,
+  fuera de alcance de un Change de rendimiento.
+- **No** implementa paralelización a nivel de proceso/hilo (mitigación operacional externa ya
+  existente, complementaria, fuera de `src/`).
+- **No** añade `pytest-benchmark` ni ninguna dependencia de runtime o dev nueva (`bisect` es stdlib,
+  R123).
+- **No** vectoriza más allá de la conversión de zona horaria y la construcción de `TickRow`: si medir
+  la materialización de `TickRow` como cuello de botella aparte del benchmark de R115 amerita un
+  experimento aislado, queda diferido a un Change futuro (§9, no bloquea este Change).
+- **No** decide si `_tick_in_bar_window` se conserva como referencia documental o se elimina tras
+  dejar de tener llamadores en el camino caliente — diferido a `design.md` (R107), no afecta ningún
+  comportamiento observable.
+
+---
+
+## 2. Convenciones de esta especificación
+
+- Los requisitos usan **DEBE** (MUST) y **NO DEBE**, numerados continuando la secuencia de
+  `.pulse/specs/backtest/spec.md` desde **R92**, cada uno verificable por al menos un test o una
+  aserción `rg`/`fd`.
+- Nombres de las dos funciones privadas nuevas (`_has_dst_transition`, `_bisect_window_bounds`) son
+  **normativos** (deben existir exactamente con ese nombre, verificable por `rg`); el orden exacto
+  de sus parámetros (posicionales vs. keyword-only) se resuelve en `design.md` respetando el
+  comportamiento aquí descrito (mismo patrón que fijó `.pulse/specs/backtest/spec.md` §2 para
+  `_to_utc`/`_candidate_server_dates` en Change #21).
+- Identificadores en inglés, docstrings y mensajes de error en español (convención del repo).
+- `bisect.bisect_right(seq, valor, key=...)` (soportado nativamente desde Python 3.10, disponible en
+  `requires-python=">=3.14"`) es la **primera introducción** de este patrón en `genesis.backtest`
+  (`rg -n "bisect" src/ tests/` retorna 0 coincidencias antes de este Change).
+- "Bit-idéntico"/"comportamiento observable idéntico" en este documento significa: mismos valores de
+  `TickRow.timestamp_utc`/`bid`/`ask`/`last` emitidos, en el mismo orden, para la misma entrada —
+  nunca una aproximación o tolerancia numérica.
+
+---
+
+## 3. Resolución de las decisiones residuales de `proposal.md`
+
+`proposal.md` (§"Decisiones residuales que specify/design.md deben formalizar") dejó 6 puntos
+pendientes de esta fase. Esta sección fija la resolución normativa de cada uno.
+
+| # | Decisión residual | Resolución de este documento | Requisitos |
+|---|---|---|---|
+| 1 | Nombre y firma exactos del helper de detección de transición DST y del helper `bisect` compartido | `_has_dst_transition(naive_min: datetime, naive_max: datetime, server_tz: ZoneInfo) -> bool` y `_bisect_window_bounds(day_ticks: Sequence[TickRow], bar_timestamp: datetime) -> tuple[int, int]`, ambas privadas de `ticks.py`. Orden exacto de argumentos (posicional/keyword-only) diferido a `design.md`. | R94, R103 |
+| 2 | Condición de activación exacta del fallback per-chunk | **Únicamente** detección de transición DST (`_has_dst_transition`); NUNCA combinada con, ni sustituida por, un umbral de tamaño mínimo de frame — un chunk pequeño sin transición no tiene riesgo de correctitud y debe vectorizarse igual; uno grande con transición sí lo tiene y debe usar el fallback igual. | R108 |
+| 3 | Ubicación/formato exacto de `scripts/bench_iter_ticks.py` | Ubicación fija: `scripts/bench_iter_ticks.py`, invocable vía `uv run python scripts/bench_iter_ticks.py`, mide el escenario de referencia del issue (día de ~256k ticks + símbolo completo) y reporta tiempo antes/después + factor de mejora, de forma reproducible (misma entrada, mismo resultado relativo). Formato exacto de salida (texto/JSON) y argumentos CLI diferidos a `design.md`. | R115 |
+| 4 | Si medir la materialización de `TickRow` en el mismo benchmark basta, o si amerita un experimento aislado | **Diferido, no bloqueante**: se mide como parte del mismo benchmark de R115; si resulta cuello de botella dominante, queda documentado como oportunidad de un Change futuro (§9). No es criterio de éxito de este Change. | — |
+| 5 | Nombre exacto del archivo de test diferencial + qué días DST concretos se usan como fixtures del caso multi-chunk con spillover | `tests/backtest/test_ticks_vectorization_differential.py`. Matriz fija de fixtures: día sin transición `2024-01-02` (mismo valor que `tests/backtest/test_ticks.py`); spring-forward `2024-03-31` (Europe/Athens) / `2024-03-10` (America/New_York); fall-back `2024-10-27` (Europe/Athens) / `2024-11-03` (America/New_York) — mismas fechas que los `@example` ya pinneados de `test_ticks_server_tz_property.py`; multi-chunk spillover `2026-06-26`→`2026-06-27` (Europe/Athens) — mismas fechas del golden R81 de Change #21. | R113 |
+| 6 | Si el `sort()` final de `iter_ticks` puede demostrarse no-op | **Diferido a `design.md`**: se conserva incondicionalmente como red de seguridad (R101) salvo que `design.md` demuestre analítica y empíricamente que es no-op sin impacto medible en el benchmark — no bloquea este Change en ningún sentido observable (la bit-identidad se mantiene con o sin el `sort()`). | R101 (conserva), diferido |
+
+---
+
+## 4. Requisitos por módulo
+
+### 4.1. `src/genesis/backtest/ticks.py` — vectorización híbrida de `iter_ticks`
+
+**Requisitos**:
+
+- **R92** (DEBE). `iter_ticks` DEBE reemplazar el bucle `for _, row in frame.iterrows():
+  timestamp_utc = _to_utc(row["timestamp"], server_tz)` (`ticks.py:133-143`) por un mecanismo
+  híbrido por chunk candidato (R94-R98), preservando exactamente el comportamiento observable
+  (mismos `TickRow` emitidos, mismo orden, mismo filtrado a la ventana UTC objetivo) que el bucle
+  escalar actual.
+- **R93** (NO DEBE). `_validate_tick_schema` NO DEBE cambiar de comportamiento: sigue ejecutándose
+  sobre el frame crudo devuelto por `read_chunk`, inmediatamente después de la lectura y **antes**
+  de cualquier conversión de zona horaria (vectorizada o escalar) — extiende R67 sin cambios de
+  comportamiento fail-fast (responde la Pregunta 6 de `idea.md`).
+- **R94** (DEBE). `ticks.py` DEBE definir una función privada `_has_dst_transition(naive_min:
+  datetime, naive_max: datetime, server_tz: ZoneInfo) -> bool` que retorna `True` si y solo si
+  `naive_min.replace(tzinfo=server_tz).utcoffset() != naive_max.replace(tzinfo=server_tz)
+  .utcoffset()`. Por cada chunk candidato leído, `iter_ticks` DEBE invocarla con `naive_min`/
+  `naive_max` derivados de la primera y última fila de `frame["timestamp"]` tras retirar la etiqueta
+  UTC incorrecta (`.dt.tz_localize(None)`) — acceso en O(1) porque el frame ya llega ordenado
+  ascendentemente por `timestamp` (invariante de `_normalize_frame`, `mt5_export.py:264`), sin
+  calcular `.min()`/`.max()` sobre toda la columna. Si el frame leído no tiene ninguna fila (chunk
+  vacío), `iter_ticks` NO DEBE invocar `_has_dst_transition` sobre un frame vacío — se trata como
+  cero ticks aportados, equivalente a que el bucle escalar tampoco iteraría ninguna fila.
+- **R95** (DEBE). Si `_has_dst_transition` (R94) retorna `False` para un chunk (caso normal, sin
+  transición DST — la mayoría de días del año), `iter_ticks` DEBE convertir `frame["timestamp"]` a
+  UTC real mediante una operación vectorizada equivalente a: (a) retirar la etiqueta UTC incorrecta;
+  (b) restar el `Timedelta` igual al offset único muestreado en R94 (resta constante, sin invocar
+  `.dt.tz_localize(server_tz, ambiguous=..., nonexistent=...)` para la disambiguación); (c) adjuntar
+  `tzinfo=UTC` al resultado. El valor de cada `TickRow.timestamp_utc` producido DEBE ser bit-idéntico
+  (mismo instante, mismo tzinfo `UTC`) al que produce `_to_utc(raw_timestamp, server_tz)` fila a fila
+  sobre el mismo valor crudo — bit-identidad garantizada analíticamente (resta de offset constante),
+  porque sin transición dentro del chunk no hay ambigüedad ni hueco horario que resolver.
+- **R96** (DEBE). Si `_has_dst_transition` (R94) retorna `True` para un chunk (transición DST
+  detectada dentro de ese chunk — raro, ~2 días/año por huso soportado), `iter_ticks` DEBE resolver
+  la conversión de zona horaria de **ese** chunk reutilizando literalmente la función `_to_utc`
+  (R99, sin modificarla) aplicada fila a fila, acotada exclusivamente a ese chunk — garantiza
+  bit-identidad por construcción con el bucle escalar actual (es literalmente la misma función que
+  ya pasa los 8 `@example` DST pinneados de `test_ticks_server_tz_property.py`), no por
+  razonamiento nuevo sobre offsets. El coste O(n) del fallback se paga solo en el chunk con
+  transición, preservando la aceleración ~47x en el resto de chunks del año.
+- **R97** (NO DEBE). Ningún camino de conversión de `iter_ticks` (ni el vectorizado de R95 ni el
+  fallback de R96) DEBE usar `DataFrame.iterrows()` — el patrón que motiva el issue desaparece por
+  completo del módulo (`rg -n "iterrows" src/genesis/backtest/ticks.py` DEBE retornar 0
+  coincidencias). La iteración fila a fila del fallback de R96 DEBE usar un mecanismo alternativo
+  (p. ej. `itertuples()`, `zip` sobre columnas ya extraídas) que siga invocando `_to_utc` por cada
+  valor crudo; la forma exacta de esa iteración queda a `design.md`.
+- **R98** (NO DEBE). Ningún camino de conversión de `iter_ticks` DEBE invocar
+  `pandas.Series.dt.tz_localize` con los parámetros `ambiguous=` o `nonexistent=` distintos de sus
+  defaults fail-fast (`"raise"`) para resolver disambiguación de horas ambiguas/inexistentes — la
+  lógica de disambiguación es exclusivamente la de `_to_utc`/`zoneinfo` (`fold=0` implícito, PEP
+  495), nunca delegada a las opciones de pandas (ninguna combinación de `ambiguous=`/`nonexistent=`
+  reproduce la regla "siempre offset pre-transición, nunca desplaza el wall-clock" que aplica
+  `fold=0` de forma uniforme a ambos casos).
+- **R99** (NO DEBE). `_to_utc` (copia local, Rg-9) NO se modifica en este Change: se reutiliza tal
+  cual como fallback per-chunk (R96) y sigue siendo la única fuente de verdad de la semántica de
+  reinterpretación de zona horaria escalar (zoneinfo, nunca offset fijo, R28/R40).
+- **R100** (DEBE). La construcción de `TickRow` en el camino vectorizado (R95) DEBE producir, para
+  cada fila, los mismos 4 campos (`timestamp_utc`, `bid`, `ask`, `last`) con los mismos valores que
+  produciría hoy el bucle escalar sobre el mismo frame — sin cambiar el dataclass `TickRow` (mismos
+  4 campos, `frozen=True, slots=True`, R120).
+- **R101** (DEBE). Tras procesar todos los chunks candidatos (vectorizados y/o escalares según
+  R95/R96), `iter_ticks` DEBE seguir filtrando el conjunto combinado a la ventana UTC objetivo
+  `[window.start, window.end)` de `trading_day` (R65, sin cambios) y ordenando por `timestamp_utc`
+  ascendente antes de emitir (invariante existente). El `sort()` explícito se conserva
+  incondicionalmente como red de seguridad salvo que `design.md` demuestre que es no-op sin impacto
+  medible (decisión residual #6, §3).
+- **R102** (DEBE). Con `profile.server_tz == "UTC"`, el comportamiento observable de `iter_ticks`
+  (valores de `TickRow.timestamp_utc` emitidos) DEBE seguir siendo idéntico al actual (extiende
+  R71): con offset 0 en ambos extremos, `_has_dst_transition` (R94) siempre retorna `False` —
+  la ruta vectorizada (R95) se toma siempre, nunca se activa el fallback (R96) — invarianza de
+  regresión también en la ruta acelerada.
+
+### 4.2. `src/genesis/backtest/ticks.py` — indexado con `bisect` de las ventanas por evento
+
+**Requisitos**:
+
+- **R103** (DEBE). `ticks.py` DEBE definir un helper privado compartido `_bisect_window_bounds(
+  day_ticks: Sequence[TickRow], bar_timestamp: datetime) -> tuple[int, int]` que retorne
+  `(start_idx, end_idx)` tal que `day_ticks[start_idx:end_idx]` sea exactamente el subconjunto de
+  `day_ticks` en la ventana semiabierta `(bar_timestamp - 60s, bar_timestamp]`, calculado vía dos
+  llamadas a `bisect.bisect_right` sobre `day_ticks` (asumido ya ordenado ascendente por
+  `timestamp_utc`, invariante de R65/R101) usando `key=attrgetter("timestamp_utc")` en ambos
+  límites. NO DEBE reordenar `day_ticks` ni asumir nada distinto de que ya viene ordenado.
+- **R104** (DEBE). `has_sufficient_tick_coverage` DEBE derivar la condición (b) (al menos un tick en
+  la ventana de cobertura) evaluando `start_idx < end_idx` sobre el resultado de
+  `_bisect_window_bounds(day_ticks, bar.timestamp_utc)` (R103) — NUNCA reimplementar
+  independientemente el cálculo de límites ni escanear linealmente `day_ticks` con `any(...)`. La
+  condición (a) (existencia de al menos un chunk candidato, R69) no cambia.
+- **R105** (DEBE). `ticks_in_bar_window` DEBE retornar `day_ticks[start_idx:end_idx]` derivado de
+  `_bisect_window_bounds(day_ticks, bar.timestamp_utc)` (R103) — NUNCA reimplementar
+  independientemente el cálculo de límites. NO DEBE aplicar ningún `sorted()` adicional sobre el
+  resultado: una slice de una secuencia ya ordenada ascendente está ya ordenada (el `sorted()`
+  redundante actual desaparece).
+- **R106** (NO DEBE). Ni `has_sufficient_tick_coverage` ni `ticks_in_bar_window` cambian de firma
+  pública (mismos parámetros, mismo tipo de retorno) respecto al código actual — extiende R68/R72:
+  ningún llamador (`simulator.py`, `signal_diagnostic.py`) requiere ningún cambio de código.
+- **R107** (DEBE). El resultado de `has_sufficient_tick_coverage`/`ticks_in_bar_window` tras adoptar
+  `_bisect_window_bounds` (R103-R105) DEBE ser bit-idéntico, para cualquier `day_ticks` (ordenado
+  ascendente) y `bar.timestamp_utc`, al que produce hoy el escaneo lineal + `_tick_in_bar_window`
+  (criterio único de borde `(T-60s, T]`, RI-G5/ADR-G8) — el boundary no puede divergir entre ambas
+  funciones ni con el motor de fills de `simulator.py` (que consume `ticks_in_bar_window` sin
+  conocer `bisect` internamente, R109). Si `_tick_in_bar_window` deja de tener llamadores en el
+  camino caliente de ambas funciones tras este Change, su conservación como referencia documental
+  del criterio o su eliminación queda a discreción de `design.md` — no afecta ningún comportamiento
+  observable.
+
+### 4.3. Condición de activación del fallback per-chunk
+
+**Requisitos**:
+
+- **R108** (NO DEBE). El fallback per-chunk al bucle escalar (R96) DEBE activarse **únicamente**
+  por la detección de transición DST (`_has_dst_transition`, R94) — NO DEBE combinarse con, ni
+  sustituirse por, ningún criterio adicional de tamaño mínimo de frame (p. ej. "si el chunk tiene
+  menos de N filas, no vectorizar"): un chunk pequeño sin transición DST no tiene riesgo de
+  correctitud y DEBE vectorizarse igual que uno grande; un chunk grande con transición SÍ tiene el
+  riesgo y DEBE usar el fallback igual que uno pequeño, sin importar su tamaño (formaliza la
+  decisión residual #2, §3, y la Alternativa descartada #8 de `proposal.md`).
+
+### 4.4. Consumidores — sin cambios de comportamiento ni de firma
+
+**Requisitos**:
+
+- **R109** (NO DEBE). `src/genesis/backtest/simulator.py` NO DEBE modificarse en este Change:
+  `Simulator._day_ticks_for` (`simulator.py:288-296`), `_process_bar` (`298-324`),
+  `_manage_open_positions` (`326-332`), `_resolve_fill`/`_resolve_fill_from_ticks`/
+  `_resolve_entry_fill` (`128-181`), `_open_position` (`495-543`), `_force_close_all_positions`
+  (`450-463`) siguen invocando `iter_ticks`/`has_sufficient_tick_coverage`/`ticks_in_bar_window`
+  exactamente igual — extiende R73-R75 (Change #21): se benefician de la aceleración sin ningún
+  cambio de código ni de firma en este módulo.
+- **R110** (NO DEBE). `src/genesis/validation/signal_diagnostic.py` NO DEBE modificarse en este
+  Change: `estimate_roundtrip_cost` (`96-136`)/`run_signal_diagnostic` (`154-209`) siguen invocando
+  `iter_ticks`/`has_sufficient_tick_coverage`/`ticks_in_bar_window` exactamente igual;
+  `CONFIG_VERSION` (línea 41) permanece `"genesis-validation-d/2"` — NO se incrementa: los valores
+  calculados (`roundtrip_cost`, `excluded_events_no_tick_coverage`) no cambian, solo el tiempo de
+  cómputo — a diferencia de #21, que sí bumpeó de `-d/1` a `-d/2` porque los valores calculados
+  cambiaban.
+- **R111** (NO DEBE). `src/genesis/backtest/costs.py::spread_for` (`33-54`) NO DEBE modificarse:
+  sigue consumiendo el `Sequence[TickRow] | None` ya filtrado que le pasa su llamador
+  (`_open_position`), sin invocar directamente `has_sufficient_tick_coverage`/`ticks_in_bar_window`
+  — consumidor indirecto, sin cambios.
+
+### 4.5. Testing (`tests/backtest/`, `scripts/`)
+
+**Requisitos**:
+
+- **R112** (DEBE). `tests/backtest/test_ticks_server_tz_property.py` (property test existente, 1000
+  ejemplos + 8 `@example` DST pinneados) DEBE ejecutarse **sin ninguna modificación** contra la
+  nueva implementación y pasar en verde — es el oráculo principal de equivalencia bit a bit entre la
+  ruta híbrida vectorizada/escalar y la semántica `_to_utc` original.
+- **R113** (DEBE). `tests/backtest/test_ticks_vectorization_differential.py` (archivo nuevo) DEBE
+  incluir un test de propiedad `hypothesis` (`max_examples>=200`, marcado `pytest.mark.unit`,
+  análogo en estructura a `test_ticks_server_tz_property.py`) que, para un chunk de ticks arbitrario
+  (múltiples timestamps por chunk, `server_tz` arbitrario entre `{"Europe/Athens",
+  "America/New_York"}`), compare la secuencia de `TickRow` que emite `iter_ticks` (ruta híbrida)
+  contra la secuencia que produciría invocar `_to_utc` fila a fila (bucle escalar de referencia,
+  sin optimizar) sobre el mismo frame, y verifique que son idénticas elemento a elemento (mismo
+  orden, mismos 4 campos, mismo `timestamp_utc`). DEBE incluir, como mínimo, los siguientes
+  `@example` pinneados (mismas fechas fijadas en la tabla de §3, decisión residual #5):
+  - Un día sin transición DST (`_TRADING_DAY = date(2024, 1, 2)`, mismo valor que
+    `tests/backtest/test_ticks.py`).
+  - El día de spring-forward de cada huso: `2024-03-31` (Europe/Athens), `2024-03-10`
+    (America/New_York) — mismas fechas que los `@example` pinneados de
+    `test_ticks_server_tz_property.py`.
+  - El día de fall-back de cada huso: `2024-10-27` (Europe/Athens), `2024-11-03`
+    (America/New_York) — ídem.
+  - El caso multi-chunk con spillover D/D+1 (`server_date` `2026-06-26`→`2026-06-27`,
+    `server_tz="Europe/Athens"`, mismas fechas del golden R81 de Change #21).
+  DEBE reutilizar `build_server_local_tick_chunk` (`tests/backtest/fakes.py`, sin modificarlo).
+- **R114** (DEBE). `tests/backtest/` DEBE incluir un test (unitario o de propiedad `hypothesis`,
+  `max_examples>=200`) que, para una secuencia arbitraria de `day_ticks` ordenada ascendente y un
+  `bar_timestamp` arbitrario, verifique que `_bisect_window_bounds(day_ticks, bar_timestamp)` (R103)
+  produce el mismo `(start_idx, end_idx)` — y por tanto el mismo resultado observable de
+  `has_sufficient_tick_coverage`/`ticks_in_bar_window` — que el filtrado lineal de referencia
+  (`[tick for tick in day_ticks if _tick_in_bar_window(tick.timestamp_utc, bar_timestamp)]`),
+  incluyendo explícitamente los casos borde: `day_ticks` vacío, ningún tick en la ventana, todos los
+  ticks en la ventana, y ticks exactamente en los bordes `bar_timestamp - 60s` (excluido) y
+  `bar_timestamp` (incluido).
+- **R115** (DEBE). El benchmark antes/después DEBE materializarse como un script versionado en
+  `scripts/bench_iter_ticks.py`, invocable vía `uv run python scripts/bench_iter_ticks.py`, que mida
+  de forma reproducible (misma entrada, mismo resultado relativo en repeticiones) el mismo escenario
+  de referencia usado como evidencia del issue (un día de ~256k ticks + al menos un símbolo completo
+  de la corrida D) y reporte el tiempo antes/después y el factor de mejora. NO forma parte de la
+  suite pytest ni depende de `pytest-benchmark` (sin dependencia dev nueva, R123). El formato exacto
+  de salida (texto/JSON) y los argumentos CLI quedan a discreción de `design.md`.
+- **R116** (DEBE). Como evidencia de aceptación de cierre de este Change (no parte de la suite
+  pytest versionada), DEBE re-ejecutarse `genesis-validate diagnose --candidate A --firm ftmo
+  --symbol US500 ...` sobre el dataset completo de la corrida D y diferenciarse el `report.json`
+  resultante contra `out/signal_diagnostic/US500/report.json` (oráculo, 173 sesiones,
+  `config_version=genesis-validation-d/2`, ya post-fix de #21), confirmando igualdad byte a byte
+  salvo el campo `git_commit`.
+- **R117** (DEBE). Los 6 archivos de test de regresión existentes (`tests/backtest/test_ticks.py`,
+  `tests/backtest/test_ticks_server_tz_property.py`, `tests/backtest/test_forward_only_property.py`,
+  `tests/backtest/test_simulator_fills.py`, `tests/backtest/test_public_api.py`,
+  `tests/validation/test_signal_diagnostic.py`) NO DEBEN modificarse (`git diff --stat` vacío sobre
+  los 6, a diferencia de #21 que sí los adaptó a la nueva firma) y DEBEN seguir en verde contra la
+  nueva implementación.
+- **R118** (DEBE). `uv run mise run ci` (ruff+bandit+vulture+deptry+ty+test) DEBE pasar en verde
+  sobre `src/genesis/backtest/ticks.py`, `scripts/bench_iter_ticks.py` y todos los tests afectados
+  (existentes y nuevos).
+
+---
+
+## 5. Invariantes transversales
+
+- **R119** (NO DEBE). Ninguna firma pública de `ticks.py` cambia en este Change:
+  `iter_ticks(store, symbol, trading_day, profile) -> Iterator[TickRow]`,
+  `has_sufficient_tick_coverage(store, symbol, bar, day_ticks, profile) -> bool`,
+  `ticks_in_bar_window(bar, day_ticks) -> list[TickRow]` conservan exactamente sus parámetros y
+  tipos de retorno actuales (extiende R64/R68/R72 sin reabrirlos; verificable por diff de línea, no
+  solo de nombre).
+- **R120** (NO DEBE). `TickRow` no se modifica: mismo dataclass `frozen=True, slots=True`, mismos 4
+  campos (`timestamp_utc`, `bid`, `ask`, `last`).
+- **R121** (NO DEBE). Ningún archivo de `src/genesis/data/` ni de `src/genesis/strategy/` DEBE
+  modificarse en este Change (extiende R57/R86: `git diff --stat -- src/genesis/data
+  src/genesis/strategy` vacío).
+- **R122** (NO DEBE). Este Change NO DEBE añadir ningún método nuevo a `RawParquetStore`/
+  `mt5_export.py` (extiende R70): `iter_ticks` sigue consumiendo exclusivamente `has_chunk`/
+  `read_chunk` ya públicos.
+- **R123** (NO DEBE). Este Change NO DEBE añadir ninguna dependencia de runtime ni de dev nueva a
+  `pyproject.toml` (`[project.dependencies]`/grupos dev) — `bisect` es stdlib; sin
+  `pytest-benchmark` (extiende R89).
+- **R124** (NO DEBE). Este Change NO DEBE relajar ni modificar ningún umbral o criterio de gate
+  (§2.2.1 ARCHIVE/CONTINUE, gates G/C/P/T de §7 del spec) — extiende R88: es un fix de rendimiento
+  puro, el veredicto mecánico no cambia para ningún dataset ya evaluado (R116 lo verifica
+  empíricamente).
+- **R125** (NO DEBE). Este Change NO DEBE modificar el esquema (campos) de `SignalDiagnosticReport`
+  ni de `ArtifactMetadata` (extiende R90) ni el `CONFIG_VERSION` de `signal_diagnostic.py`
+  (permanece `"genesis-validation-d/2"`, R110).
+- **R126** (DEBE). `uv run mise run ci` DEBE pasar en verde sobre todo el repositorio tras este
+  Change (extiende R85/R91/R118).
+
+---
+
+## 6. Manejo de errores (resumen normativo — sin cambios respecto a `.pulse/specs/backtest/spec.md` §6)
+
+Este Change no introduce ninguna excepción de dominio nueva. La tabla de excepciones de
+`.pulse/specs/backtest/spec.md` §6 sigue vigente sin modificaciones:
+
+| Excepción | Módulo | Disparador (tras este Change) | Efecto |
+|---|---|---|---|
+| `BacktestConfigError` | `genesis.backtest.errors` | Al menos un chunk candidato de `_candidate_server_dates` existe pero su esquema es inválido (R93, extiende R67 sin cambios) | Aborta el run (sin cambios) |
+| (sin excepción) | `genesis.backtest.ticks` | Ningún chunk candidato existe (R66, sin cambios) | `iter_ticks` retorna secuencia vacía; `has_sufficient_tick_coverage` retorna `False` (R69, sin cambios) |
+
+---
+
+## 7. Criterios de aceptación (evals ejecutables)
+
+```
+DADO   el archivo src/genesis/backtest/ticks.py
+CUANDO rg -n "def _has_dst_transition" src/genesis/backtest/ticks.py
+       y rg -n "def _bisect_window_bounds" src/genesis/backtest/ticks.py
+ENTONCES ambas retornan >=1 coincidencia (R94, R103: los dos helpers nuevos existen con el nombre
+         normativo fijado)
+```
+
+```
+DADO   el archivo src/genesis/backtest/ticks.py
+CUANDO rg -n "iterrows" src/genesis/backtest/ticks.py
+ENTONCES retorna 0 coincidencias (R97: el patrón que motiva el issue desaparece del módulo, incluso
+         en el camino de fallback)
+```
+
+```
+DADO   el archivo src/genesis/backtest/ticks.py
+CUANDO rg -n "tz_localize\([^)]*ambiguous" src/genesis/backtest/ticks.py
+       y rg -n "tz_localize\([^)]*nonexistent" src/genesis/backtest/ticks.py
+ENTONCES ambas retornan 0 coincidencias (R98: ningún camino delega la disambiguación DST a pandas)
+```
+
+```
+DADO   el archivo src/genesis/backtest/ticks.py
+CUANDO rg -n "bisect" src/genesis/backtest/ticks.py
+ENTONCES retorna >=1 coincidencia (import + uso; adopción confirmada del mecanismo elegido, R103)
+```
+
+```
+DADO   el archivo src/genesis/backtest/ticks.py
+CUANDO rg -n "def iter_ticks" src/genesis/backtest/ticks.py
+       y rg -n "def has_sufficient_tick_coverage" src/genesis/backtest/ticks.py
+       y rg -n "def ticks_in_bar_window" src/genesis/backtest/ticks.py
+       y rg -n "class TickRow" -A 6 src/genesis/backtest/ticks.py
+ENTONCES las 3 firmas son idénticas (línea a línea) a las actuales, y TickRow muestra los mismos 4
+         campos (R119, R120)
+```
+
+```
+DADO   un chunk sintético de un día calendario de servidor sin transición DST (offsets iguales en
+       ambos extremos del frame)
+CUANDO se invoca iter_ticks(store, symbol, trading_day, profile) con ese chunk
+ENTONCES emite exactamente la misma secuencia de TickRow.timestamp_utc que invocar _to_utc fila a
+         fila sobre el mismo frame (R95, R100 — caso normal, ruta vectorizada)
+```
+
+```
+DADO   un chunk sintético que cruza el spring-forward de Europe/Athens (2024-03-31) o
+       America/New_York (2024-03-10)
+CUANDO se invoca iter_ticks sobre ese chunk
+ENTONCES _has_dst_transition detecta la transición, se activa el fallback escalar (R96), y la
+         secuencia de TickRow.timestamp_utc emitida es idéntica a invocar _to_utc fila a fila
+         (R113, test diferencial)
+```
+
+```
+DADO   un chunk sintético que cruza el fall-back de Europe/Athens (2024-10-27) o America/New_York
+       (2024-11-03)
+CUANDO se invoca iter_ticks sobre ese chunk
+ENTONCES _has_dst_transition detecta la transición, se activa el fallback escalar (R96), y la
+         secuencia de TickRow.timestamp_utc emitida coincide con _to_utc fila a fila, incluyendo el
+         mismo tratamiento fold=0 de la hora ambigua que ya acepta test_ticks_server_tz_property.py
+         (R113)
+```
+
+```
+DADO   dos chunks de servidor adyacentes 2026-06-26/2026-06-27 (Europe/Athens, mismo patrón que el
+       golden R81 de Change #21)
+CUANDO se invoca iter_ticks sobre trading_day=2026-06-26
+ENTONCES el resultado fusionado y ordenado es idéntico al que produce _to_utc fila a fila sobre
+         ambos chunks (R113, caso multi-chunk con spillover)
+```
+
+```
+DADO   una secuencia arbitraria day_ticks (ordenada ascendente) y un bar_timestamp arbitrario,
+       incluyendo los casos borde day_ticks vacío y ticks exactamente en T-60s/T
+CUANDO se comparan _bisect_window_bounds(day_ticks, bar_timestamp) contra el filtrado lineal de
+       referencia (_tick_in_bar_window aplicado elemento a elemento)
+ENTONCES ambos producen el mismo subconjunto/booleano observable (R107, R114)
+```
+
+```
+DADO   el property test existente tests/backtest/test_ticks_server_tz_property.py (sin modificar)
+CUANDO uv run pytest tests/backtest/test_ticks_server_tz_property.py -v
+ENTONCES pasa en verde con los 1000 ejemplos y los 8 @example DST pinneados contra la nueva
+         implementación (R112, oráculo principal de equivalencia)
+```
+
+```
+DADO   los 6 archivos de test de regresión (test_ticks.py, test_ticks_server_tz_property.py,
+       test_forward_only_property.py, test_simulator_fills.py, test_public_api.py,
+       test_signal_diagnostic.py)
+CUANDO git diff --stat -- tests/backtest/test_ticks.py tests/backtest/test_ticks_server_tz_property.py
+       tests/backtest/test_forward_only_property.py tests/backtest/test_simulator_fills.py
+       tests/backtest/test_public_api.py tests/validation/test_signal_diagnostic.py
+       y uv run pytest <esos 6 archivos> -v
+ENTONCES el diff está vacío (ninguno de los 6 se modifica) y la suite pasa en verde (R117)
+```
+
+```
+DADO   el dataset completo de la corrida D (US500, 173 sesiones)
+CUANDO se re-ejecuta genesis-validate diagnose --candidate A --firm ftmo --symbol US500 ... y se
+       diferencia el report.json resultante contra out/signal_diagnostic/US500/report.json
+       (jq 'del(.data_metadata.git_commit)' <ambos> | diff)
+ENTONCES no hay diferencias (R116, criterio de éxito (a) del proposal)
+```
+
+```
+DADO   el script scripts/bench_iter_ticks.py
+CUANDO uv run python scripts/bench_iter_ticks.py sobre el escenario de referencia (día de ~256k
+       ticks + símbolo completo de la corrida D)
+ENTONCES reporta una mejora de ~30-50x documentada, reproducible en repeticiones (R115, criterio de
+         éxito (c) del proposal)
+```
+
+```
+DADO   el archivo src/genesis/validation/signal_diagnostic.py
+CUANDO rg -n "CONFIG_VERSION" src/genesis/validation/signal_diagnostic.py
+ENTONCES sigue mostrando "genesis-validation-d/2" (R110, R125: sin bump, los valores calculados no
+         cambian)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO git diff --stat -- src/genesis/data src/genesis/strategy pyproject.toml uv.lock
+       y git diff --stat -- src/genesis/backtest/simulator.py src/genesis/backtest/costs.py
+ENTONCES todos vacíos (R121, R123, R109, R111: capas cerradas y consumidores intactos, sin
+         dependencias nuevas)
+```
+
+```
+DADO   el repositorio tras completar este Change
+CUANDO uv run mise run ci
+ENTONCES lint + ty + test pasan en verde (exit code 0, R118, R126)
+```
+
+---
+
+## 8. Riesgos
+
+Riesgos heredados de Change #21 (Rg-8, Rg-9, Rg-10, Rg-11 de `.pulse/specs/backtest/spec.md`, no
+reabiertos por este documento): Rg-8 (discrepancia `_day_window` UTC-literal vs. `_trading_day()`)
+y Rg-10 (límite de fechas candidatas para husos DST no verificados exhaustivamente) permanecen fuera
+de alcance sin cambios; Rg-9 (sincronía obligatoria `ticks.py::_to_utc` ↔ `store.py::_to_utc`) se
+vuelve **más relevante** en este Change porque `_to_utc` pasa a ejecutarse condicionalmente (solo en
+el chunk con transición, R96) en vez de siempre — un futuro cambio que rompa la sincronía sería
+detectado igual por el property test (R112), pero solo si ese test ejercita chunks con transición
+(ya lo hace, 8 `@example` pinneados); Rg-11 (artefactos derivados con el bug de #21 activo) ya fue
+mitigado por el cierre de #21 y no aplica a este Change.
+
+Riesgos nuevos de este Change:
+
+| # | Riesgo | Impacto | Mitigación |
+|---|---|---|---|
+| Rg-12 | El mecanismo de `_has_dst_transition` (R94) asume que, dentro de un chunk (~24-25h, un día calendario de servidor), a lo sumo hay **una** transición DST — verdadero para todos los husos IANA reales, pero no verificado exhaustivamente contra la base de datos completa `tz`. | Un huso exótico no soportado hoy con 2 transiciones DST en <25h (no existe en la práctica) haría que el muestreo de solo los 2 extremos del chunk no detecte una transición intermedia. | Acotado a los husos reales usados por los perfiles y tests (`Europe/Athens`, `America/New_York`, `Australia/Sydney`); ninguno tiene 2 transiciones en un lapso de 25h. Documentado como supuesto explícito no verificado para husos no soportados hoy — mismo patrón que Rg-10 heredado de #21. |
+| Rg-13 | El benchmark de R115 es sensible al hardware/carga del entorno de ejecución (no determinista bit a bit como los tests); el factor "~30-50x" es una guía de orden de magnitud, no un umbral exacto que bloquee CI. | Una máquina más lenta/rápida o con carga concurrente podría reportar un factor distinto al medido en el issue, sin que eso indique una regresión real. | Documentado explícitamente como evidencia no-pytest (no bloquea `mise run ci`, R118/R126) — mismo patrón que R84 de #21 (re-corrida empírica documentada, no un test versionado con umbral duro). |
+| Rg-14 | Si el chunk que activa el fallback per-chunk (R96, transición DST detectada) coincide con un día de alto volumen de ticks (p. ej. ~256k ticks el mismo día que una transición DST), el coste O(n) del fallback se paga igual ese día puntual, sin la aceleración ~47x. | Un día concreto del año (el de la transición) no se beneficia de la vectorización, aunque sea un día de alto volumen. | Comportamiento esperado y aceptado explícitamente: es el trade-off de activar el fallback por transición detectada en vez de por tamaño de frame (R108, Alternativa descartada #8 de `proposal.md`) — ~2 días/año por huso, no un defecto. |
+
+---
+
+## 9. Preguntas abiertas (no bloquean este Change)
+
+- Si medir la materialización de `TickRow` como experimento aislado (además del benchmark de R115)
+  amerita un Change futuro, en caso de que el benchmark muestre que instanciar N dataclasses es
+  ahora el cuello de botella dominante tras vectorizar la conversión de zona horaria (decisión
+  residual #4, §3; Pregunta 5 de `idea.md`).
+- Si el `sort()` final de `iter_ticks` (R101) puede demostrarse no-op cuando la construcción en
+  bloque preserva el orden de `_normalize_frame` (decisión residual #6, §3) — diferido a
+  `design.md`; no bloquea el criterio de éxito de este Change en ningún sentido observable.
+- Orden exacto de los parámetros (posicional vs. keyword-only) de `_has_dst_transition`/
+  `_bisect_window_bounds` (R94/R103) — este documento fija el comportamiento observable y los
+  nombres, no la sintaxis exacta de la firma; `design.md` la resuelve respetando el patrón ya usado
+  por `_candidate_server_dates(window, server_tz)` (Change #21).
+- Formato exacto de salida (texto/JSON) y argumentos CLI de `scripts/bench_iter_ticks.py` (R115) —
+  diferido a `design.md`.
+- Si `_tick_in_bar_window` se conserva en el módulo como referencia documental del criterio de borde
+  o se elimina tras dejar de tener llamadores en el camino caliente de `has_sufficient_tick_coverage`/
+  `ticks_in_bar_window` (R107) — diferido a `design.md`; no afecta ningún comportamiento observable.
+- Si Rg-8/Rg-10 (heredados de #21) ameritan convertirse en un Change futuro explícito, o permanecer
+  documentados indefinidamente — no es responsabilidad de este Change decidirlo.
+
+---
+
+## 10. Referencias
+
+- Issue GitHub #24 — bbenja11/genesis (https://github.com/bbenja11/genesis/issues/24).
+- `idea.md`/`proposal.md` de este Change (fases explore/propose) — problema medido, contexto
+  observado, mecanismo híbrido DST, hipótesis A/B, 8 alternativas descartadas, 6 decisiones
+  residuales y sus respuestas, diseño propuesto por módulo, alcance de testing.
+- `.pulse/specs/backtest/spec.md` — R1-R61 (Change #6/G, contrato original de `iter_ticks`/
+  cobertura), R62-R91 (Change #21: `_to_utc`/`_candidate_server_dates`/multi-chunk/condición OR/
+  propagación `FirmProfile`), R57/R86 (capas cerradas), §6 (tabla de manejo de errores, sin
+  cambios), Rg-8/Rg-9/Rg-10/Rg-11 (riesgos heredados).
+- `src/genesis/backtest/ticks.py:1-198` — módulo completo a modificar internamente (`iter_ticks:
+  97-146`, bucle `iterrows`:133-143, `_tick_in_bar_window:149-156`,
+  `has_sufficient_tick_coverage:159-186`, `ticks_in_bar_window:189-198`, `_to_utc:44-60`,
+  `_candidate_server_dates:63-77`, sin cambios en estas dos últimas).
+- `src/genesis/backtest/simulator.py:288-296` (`_day_ticks_for`), `298-324` (`_process_bar`),
+  `326-332` (`_manage_open_positions`), `128-181` (`_resolve_fill_from_ticks`/`_resolve_fill`/
+  `_resolve_entry_fill`), `495-543` (`_open_position`), `450-463` (`_force_close_all_positions`) —
+  consumidores confirmados, sin cambios (R109).
+- `src/genesis/validation/signal_diagnostic.py:41` (`CONFIG_VERSION`), `96-136`
+  (`estimate_roundtrip_cost`), `154-209` (`run_signal_diagnostic`) — consumidor confirmado, sin
+  cambios (R110).
+- `src/genesis/backtest/costs.py:33-54` (`spread_for`) — consumidor indirecto de `TickRow`, sin
+  cambios (R111).
+- `src/genesis/data/store.py:41-56` (`_to_utc`, patrón normativo con el que la copia de `ticks.py`
+  debe permanecer sincronizada, Rg-9), `88` (`iter_bars`, mismo patrón `iterrows()` en capa 1,
+  fuera de alcance de este Change — R121).
+- `src/genesis/data/mt5_export.py:259-264` (`_normalize_frame`, confirma orden ascendente por
+  `timestamp` al escribir — base de la O(1) de R94), `303-308` (`read_chunk`), `310-340`
+  (`write_chunk`, confirma `timestamp` ya tz-aware UTC-mal-etiquetado tras roundtrip Parquet).
+- `src/genesis/data/profile.py:31-49` (`FirmProfile`, campo `server_tz: str`), `64-94`
+  (`load_firm_profile`, default `profiles/the5ers.json`, `server_tz="America/New_York"`).
+- `tests/backtest/test_ticks.py` (7 tests, sin modificar), `tests/backtest/test_ticks_server_tz_property.py`
+  (property test, 1000 ejemplos, 8 `@example` DST pinneados: `Europe/Athens` spring-forward
+  2024-03-31/fall-back 2024-10-27, `America/New_York` spring-forward 2024-03-10/fall-back
+  2024-11-03, `Australia/Sydney` spring-forward 2024-10-05/fall-back 2024-04-06, sin modificar),
+  `tests/backtest/test_forward_only_property.py` (2 property tests, sin modificar),
+  `tests/backtest/test_simulator_fills.py` (8 casos golden, sin modificar),
+  `tests/backtest/test_public_api.py` (`__all__` curado, sin modificar),
+  `tests/validation/test_signal_diagnostic.py` (3 tests, sin modificar),
+  `tests/backtest/fakes.py` (`build_tick_chunk`, `build_server_local_tick_chunk`, sin modificar).
+- `.pulse/changes/archive/6-g-feat-backtest-simulador-equity-intrad-a-fills-por-ticks-cierre/design.md`
+  — ADR-G6 (`iter_ticks` propio), ADR-G8 (ventana `(T-60s,T]`), RI-G5 (criterio compartido).
+- `.pulse/changes/archive/21-fix-backtest-iter-ticks-emite-timestamps-del-reloj-del-servidor/` —
+  `idea.md`/`proposal.md`/`spec.md`/`design.md`/`tasks.md` completos (Change inmediatamente
+  anterior sobre el mismo archivo; ADR-21-1 copia local de `_to_utc`, ADR-21-7 patrón
+  `build_server_local_tick_chunk`, Rg-9 sincronía, R79-R85 patrón de testing DST).
+- `pyproject.toml` — `requires-python=">=3.14"` (soporte nativo de `key=` en
+  `bisect.bisect_right`), `pandas>=3.0.3`, sin `pytest-benchmark`; `[tool.pytest.ini_options]`
+  marcador `slow` ya definido; `mise.toml` `[tasks.ci]` (lint+ty+test).
+- `out/run_d/issue_draft_perf_iter_ticks.md` — cuerpo íntegro del issue #24.
+- `out/signal_diagnostic/US500/report.json` — oráculo de bit-identidad (corrida D completa, 173
+  sesiones, `config_version=genesis-validation-d/2`, ya post-fix de #21).
+- Documentación pandas 3.0.4 (`tz_localize`, opciones `ambiguous`/`nonexistent`, defaults `"raise"`
+  y semántica de `shift_forward`/`shift_backward`/`infer` — consultada vía Context7 en la fase
+  propose para fundamentar R98).
+- `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` §2.2.1 (diagnóstico de señal desnuda),
+  §9 (testing EDD/TDD), §11 (gobernanza SDD).
+- `.agents/rules/architecture-conventions.md`, `.agents/rules/eval-tdd-conventions.md`,
+  `.agents/rules/tooling-conventions.md` — convenciones de proceso SDD.
+- `CLAUDE.md` (raíz) — arquitectura de 4 capas, flujo SDD, convenciones de commits/testing.
