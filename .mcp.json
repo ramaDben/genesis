@@ -1,27 +1,29 @@
 {
   "mcpServers": {
     "filesystem": {
-      "command": "cmd",
+      "command": "bash",
       "args": [
-        "/c",
-        "npx -y @modelcontextprotocol/server-filesystem C:/Users/bbrav/genesis"
+        "-c",
+        "npx -y @modelcontextprotocol/server-filesystem \"$(git rev-parse --show-toplevel)\""
       ]
     },
     "memory": {
-      "command": "cmd",
+      "command": "bash",
       "args": [
-        "/c",
-        "npx -y @modelcontextprotocol/server-memory"
-      ],
-      "env": {
-        "MEMORY_FILE_PATH": "C:/Users/bbrav/genesis/.pulse/memory/knowledge-graph.jsonl"
-      }
+        "-c",
+        "MEMORY_FILE_PATH=\"$(git rev-parse --show-toplevel)/.pulse/memory/knowledge-graph.jsonl\" exec npx -y @modelcontextprotocol/server-memory"
+      ]
     },
     "serena": {
-      "command": "cmd",
+      "command": "uvx",
       "args": [
-        "/c",
-        "uvx --from git+https://github.com/oraios/serena serena start-mcp-server --context claude-code --project C:/Users/bbrav/genesis"
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "claude-code",
+        "--project-from-cwd"
       ]
     }
   }
