@@ -82,6 +82,7 @@ depends = ["lint", "ty", "test"]
 [tasks.lint]
 description = "Ejecuta todos los linters en paralelo"
 depends = ["lint:ruff-check", "lint:bandit", "lint:vulture", "lint:deptry"]
+deny_net = true
 
 [tasks."lint:ruff-check"]
 description = "Ejecuta ruff check"
@@ -117,6 +118,7 @@ alias = "t"
 description = "Ejecuta tests con pytest"
 sources = ["src/**/*.py", "tests/**/*.py"]
 run = "uv run pytest"
+deny_net = true
 
 [tasks."ty"]
 alias = "tc"
