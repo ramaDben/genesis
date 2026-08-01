@@ -25,7 +25,7 @@ def _formed_candidate(
     risk_pct: float = 0.00375,
     reference_balance: float = 100_000.0,
     atr_period: int = 14,
-) -> CandidateB:  # ty: ignore[invalid-type-form]
+) -> CandidateB:
     candidate = CandidateB(
         figure=us500_figure,
         reference_balance=reference_balance,

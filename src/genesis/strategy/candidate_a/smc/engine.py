@@ -39,16 +39,37 @@ class SmcEngineConfigProtocol(Protocol):
     importar `candidate_a.config` desde `smc/`); cualquier objeto que satisfaga este
     protocolo (p. ej. `SmcEngineConfig`) también satisface el protocolo más angosto de
     `transition_sweep` por subtipado estructural.
+
+    Los miembros se declaran como properties de **solo lectura**: el motor solo lee la
+    configuración, y los objetos que la proveen son `@dataclass(frozen=True, slots=True)`
+    (`candidate_a.config.SmcEngineConfig`) — un miembro declarado como variable exigiría
+    también capacidad de escritura y ningún dataclass congelado la ofrece. La semántica de
+    cada campo vive en `candidate_a.config.SmcEngineConfig` (fuente única).
     """
 
-    fractal_n: int
-    eq_tolerance_atr: float
-    sweep_tolerance_atr: float
-    sweep_window_k: int
-    sweep_validity_m: int
-    free_path_radius_sigma: float
-    ct_zscore_min: float
-    atr_period: int
+    @property
+    def fractal_n(self) -> int: ...
+
+    @property
+    def eq_tolerance_atr(self) -> float: ...
+
+    @property
+    def sweep_tolerance_atr(self) -> float: ...
+
+    @property
+    def sweep_window_k(self) -> int: ...
+
+    @property
+    def sweep_validity_m(self) -> int: ...
+
+    @property
+    def free_path_radius_sigma(self) -> float: ...
+
+    @property
+    def ct_zscore_min(self) -> float: ...
+
+    @property
+    def atr_period(self) -> int: ...
 
 
 _MACRO_HIERARCHY: tuple[Timeframe, ...] = (Timeframe.H1, Timeframe.M15)

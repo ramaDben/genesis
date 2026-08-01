@@ -64,15 +64,22 @@ CANDIDATE_REGISTRY: dict[str, type[StrategyCandidate]] = {}
 """Registro módulo-nivel letra → clase de candidato (solo mapeo, no estado de ejecución)."""
 
 
-def register_candidate(letter: str) -> Callable[[type], type]:
+def register_candidate[CandidateT: StrategyCandidate](
+    letter: str,
+) -> Callable[[type[CandidateT]], type[CandidateT]]:
     """Decorador de clase: registra la clase decorada bajo `letter.upper()` (R5).
+
+    Genérico acotado a `StrategyCandidate`: liga el tipo de retorno al de la clase
+    decorada (el nombre decorado conserva su clase concreta y sigue siendo una forma de
+    tipo válida) y garantiza que lo que entra a `CANDIDATE_REGISTRY` sea un
+    `type[StrategyCandidate]`.
 
     Lanza `DuplicateCandidateError` con contexto (letra + clase ya registrada) si
     `letter` ya está registrada — ninguna colisión silenciosa.
     """
     normalized = letter.upper()
 
-    def decorator(strategy_type: type) -> type:
+    def decorator(strategy_type: type[CandidateT]) -> type[CandidateT]:
         if normalized in CANDIDATE_REGISTRY:
             existing = CANDIDATE_REGISTRY[normalized]
             message = (

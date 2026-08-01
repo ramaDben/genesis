@@ -13,7 +13,7 @@ from tests.strategy.fakes import make_annotated_bar
 pytestmark = pytest.mark.unit
 
 
-def _candidate(figure: SymbolFigure, *, n_minutes: int = 15) -> CandidateB:  # ty: ignore[invalid-type-form]
+def _candidate(figure: SymbolFigure, *, n_minutes: int = 15) -> CandidateB:
     return CandidateB(
         figure=figure,
         reference_balance=100_000.0,
