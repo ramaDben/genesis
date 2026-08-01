@@ -4,20 +4,29 @@ Evidencia **no-pytest** (no bloquea `mise run ci`, Rg-13), en la línea de
 `bench_iter_ticks.py`: mide por separado las tres etapas del diagnóstico y
 permite perfilar la más costosa con `cProfile`.
 
-A diferencia de `bench_iter_ticks.py`, **no requiere datos de MT5**: genera un
-frame M1 sintético contiguo del tamaño real de un símbolo (~78k barras, el orden
-de magnitud que reporta `m1_edge.json` de la corrida D). Eso lo hace ejecutable
-en cualquier entorno, incluido CI, y suficiente para localizar cuellos
-algorítmicos —que dependen del número de barras y de niveles acumulados, no de
-los valores concretos de precio—.
+Dos fuentes de barras, según lo que haya disponible:
 
-Limitación deliberada: no ejercita `estimate_roundtrip_cost` (capa 4), que lee
-ticks reales. El coste de esa etapa queda fuera de esta medición.
+- `--from-store <símbolo>` lee los Parquet reales de `data/raw/<símbolo>/m1/`. Es la
+  medición representativa: tamaño y tasa de eventos CT verdaderos.
+- `--bars N` genera un frame sintético, para entornos sin datos de MT5 (CI incluido).
+
+**Limitación del modo sintético.** Emite timestamps naive contiguos que `iter_bars`
+reinterpreta como hora local del servidor; al cruzar una transición DST la
+secuencia deja de ser monótona en UTC y el reloj de la capa 2 aborta con
+`LookaheadError` — correctamente, porque el dato de entrada es inválido. Por eso
+`_MAX_SYNTHETIC_BARS` acota el rango sintético a la ventana que no alcanza la
+transición de marzo. Para medir por encima de ese tope hay que usar
+`--from-store`. Los datos reales no tienen el problema: MT5 no emite barras en
+horas inexistentes ni repetidas (verificado sobre las 17 particiones de
+`US500.cash` y `EURUSD`, cero retrocesos y cero naive duplicados).
+
+Limitación de ambas fuentes: no se ejercita `estimate_roundtrip_cost` (capa 4),
+que lee ticks. El coste de esa etapa queda fuera de esta medición.
 
 Uso:
-    uv run python scripts/bench_diagnose.py
+    uv run python scripts/bench_diagnose.py --from-store US500.cash
     uv run python scripts/bench_diagnose.py --bars 20000
-    uv run python scripts/bench_diagnose.py --profile-stage detect --top 15
+    uv run python scripts/bench_diagnose.py --from-store US500.cash --profile-stage detect
     uv run python scripts/bench_diagnose.py --json
 """
 
@@ -45,17 +54,31 @@ _DEFAULT_BARS = 78_000
 _DEFAULT_SYMBOL = "US500"
 """Nombre canónico de la tabla de sesiones (sin el sufijo del broker, p. ej. `.cash`)."""
 _DEFAULT_SESSION = "londres-ny"
+_SYNTHETIC_START = datetime(2026, 1, 5, 0, 0)
+_MAX_SYNTHETIC_BARS = 110_000
+"""Tope del modo sintético: 110k minutos desde `_SYNTHETIC_START` llegan al 2026-03-21,
+antes de la transición DST europea del 29 de marzo. Cruzarla haría que la secuencia
+naive deje de ser monótona en UTC y el reloj de la capa 2 abortaría con
+`LookaheadError`. Para medir por encima de este tope, usar `--from-store`."""
+
+_STORE_ROOT = Path("data/raw")
 
 
 def synthetic_m1_frame(n_bars: int, seed: int = 7) -> pd.DataFrame:
     """Frame M1 contiguo y reproducible: random walk con rango intrabar no degenerado."""
+    if n_bars > _MAX_SYNTHETIC_BARS:
+        raise SystemExit(
+            f"--bars {n_bars:,} excede el tope sintético de {_MAX_SYNTHETIC_BARS:,}: el rango "
+            f"cruzaría la transición DST del 2026-03-29 y la secuencia dejaría de ser monótona "
+            f"en UTC (LookaheadError en la capa 2). Usá --from-store <símbolo> para medir con "
+            f"el tamaño real del dataset."
+        )
     rng = np.random.default_rng(seed)
-    start = datetime(2026, 1, 5, 0, 0)
     close = 5000.0 + rng.normal(0.0, 0.35, size=n_bars).cumsum()
     half_range = np.abs(rng.normal(0.0, 0.8, size=n_bars))
     return pd.DataFrame(
         {
-            "timestamp": [start + timedelta(minutes=i) for i in range(n_bars)],
+            "timestamp": [_SYNTHETIC_START + timedelta(minutes=i) for i in range(n_bars)],
             "open": close - rng.normal(0.0, 0.2, size=n_bars),
             "high": close + half_range,
             "low": close - half_range,
@@ -63,6 +86,21 @@ def synthetic_m1_frame(n_bars: int, seed: int = 7) -> pd.DataFrame:
             "tick_volume": rng.integers(20, 400, size=n_bars),
         }
     )
+
+
+def store_m1_frame(symbol: str, limit: int | None = None) -> pd.DataFrame:
+    """Concatena las particiones M1 reales de `symbol` desde el store Parquet."""
+    partitions = sorted((_STORE_ROOT / symbol / "m1").rglob("*.parquet"))
+    if not partitions:
+        raise SystemExit(
+            f"No hay particiones M1 para '{symbol}' en {_STORE_ROOT}/{symbol}/m1/. "
+            f"Restaurá el dataset con: gh release download dataset-ftmo-2026-08-01 "
+            f"-R ramaDben/genesis"
+        )
+    frame = pd.concat([pd.read_parquet(p) for p in partitions], ignore_index=True)
+    if limit is not None:
+        frame = frame.head(limit)
+    return frame
 
 
 def _resolve_profile(explicit: str | None) -> FirmProfile:
@@ -111,6 +149,13 @@ def _stage_times(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bars", type=int, default=_DEFAULT_BARS)
+    parser.add_argument(
+        "--from-store",
+        default=None,
+        metavar="SIMBOLO",
+        help="lee las barras reales del store (p. ej. US500.cash) en vez de sintetizarlas",
+    )
+    parser.add_argument("--limit", type=int, default=None, help="corta las barras del store")
     parser.add_argument("--symbol", default=_DEFAULT_SYMBOL)
     parser.add_argument("--session", default=_DEFAULT_SESSION)
     parser.add_argument("--profile", default=None, help="ruta de la ficha de firma (ftmo.json)")
@@ -122,18 +167,26 @@ def main(argv: list[str] | None = None) -> int:
 
     firm_profile = _resolve_profile(args.profile)
     config = load_candidate_a_config()
-    frame = synthetic_m1_frame(args.bars)
+
+    if args.from_store:
+        frame = store_m1_frame(args.from_store, args.limit)
+        fuente = f"store:{args.from_store}"
+    else:
+        frame = synthetic_m1_frame(args.bars)
+        fuente = "sintetico"
 
     measured, bars, events = _stage_times(frame, firm_profile, config, args.symbol, args.session)
     measured["horizons_minutes"] = list(config.diagnostics.horizons_minutes)
     measured["extrapolated_min"] = measured["total_s"] * args.symbols / 60
+    measured["source"] = fuente
 
     if args.json:
         print(json.dumps(measured, indent=2))
     else:
         total = measured["total_s"]
         print(
-            f"barras={measured['n_bars']:,}  eventos CT={measured['n_events']:,}  "
+            f"fuente={fuente}  barras={measured['n_bars']:,}  "
+            f"eventos CT={measured['n_events']:,}  "
             f"horizontes={measured['horizons_minutes']}\n"
         )
         for label, key in (
