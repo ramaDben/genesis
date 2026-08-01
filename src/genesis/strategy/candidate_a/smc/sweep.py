@@ -54,11 +54,20 @@ class SweepConfigProtocol(Protocol):
     necesita importar `config.py` para tipar; ambos son capa 2, sin ciclo). Un objeto
     con más atributos (p. ej. `SmcEngineConfig` completo, o el protocolo más amplio de
     `engine.py`) satisface esta estructura por subtipado estructural.
+
+    Los miembros son properties de **solo lectura**: los configs que llegan aquí son
+    `@dataclass(frozen=True, slots=True)` (`SmcEngineConfig` en producción, fakes de 3
+    campos en los tests de la FSM) y no aceptan escrituras.
     """
 
-    sweep_tolerance_atr: float
-    sweep_window_k: int
-    sweep_validity_m: int
+    @property
+    def sweep_tolerance_atr(self) -> float: ...
+
+    @property
+    def sweep_window_k(self) -> int: ...
+
+    @property
+    def sweep_validity_m(self) -> int: ...
 
 
 def _is_beyond(price: float, level_price: float, *, is_high: bool) -> bool:

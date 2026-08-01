@@ -16,7 +16,7 @@ _RANGE_HIGH = 4505.0
 _RANGE_LOW = 4498.0
 
 
-def _new_candidate(us500_figure: SymbolFigure) -> CandidateB:  # ty: ignore[invalid-type-form]
+def _new_candidate(us500_figure: SymbolFigure) -> CandidateB:
     return CandidateB(
         figure=us500_figure,
         reference_balance=100_000.0,
@@ -28,7 +28,7 @@ def _new_candidate(us500_figure: SymbolFigure) -> CandidateB:  # ty: ignore[inva
 
 
 def _run_formation(
-    candidate: CandidateB,  # ty: ignore[invalid-type-form]
+    candidate: CandidateB,
     *,
     first_close: float,
 ) -> None:

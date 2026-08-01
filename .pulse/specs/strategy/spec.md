@@ -1868,3 +1868,198 @@ bloqueante); la decisión fijada aquí es únicamente submódulo-vs-plano al niv
   `tests/strategy/test_contract_lookahead_property.py`, `tests/strategy/fixtures/sample_m1.csv`.
 - Reglas de proceso: `.agents/rules/architecture-conventions.md`,
   `.agents/rules/eval-tdd-conventions.md`, `.agents/rules/tooling-conventions.md`.
+
+<!-- change:39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables -->
+# Specification: fix(strategy) — protocolos de config con miembros de solo lectura y registro de candidatos genérico (Issue #39)
+
+> **Fase Specify del ciclo SDD.** Formaliza `idea.md` + `proposal.md` en requisitos verificables.
+> SSoT: `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` (§2.1/§11.1, PA-3). Este Change es
+> **exclusivamente correctivo de anotaciones de tipo**: no altera ningún gate G/C/P/T, ninguna regla
+> de negocio ni ningún artefacto de reproducibilidad.
+
+Numeración: continúa la del dominio `strategy` en `.pulse/specs/strategy/spec.md` (máximo vigente
+`R126`) → este Change define **R127-R135**.
+
+---
+
+## 1. Objetivo y alcance
+
+### 1.1. Objetivo
+
+Que el contrato estático declarado por los protocolos de configuración de `candidate_a/smc/` y por el
+registro de candidatos de `strategy/contract.py` describa lo que el código realmente hace (solo
+lectura de config; registro de subtipos de `StrategyCandidate`), de modo que `ty` 0.0.64 no reporte
+diagnóstico alguno y el PR #29 (bump `ty` 0.0.48 → 0.0.64) sea mergeable sin relajar nada.
+
+### 1.2. Alcance IN
+
+| Archivo | Cambio |
+|---|---|
+| `src/genesis/strategy/candidate_a/smc/engine.py` | 8 miembros de `SmcEngineConfigProtocol` → properties de solo lectura |
+| `src/genesis/strategy/candidate_a/smc/sweep.py` | 3 miembros de `SweepConfigProtocol` → properties de solo lectura |
+| `src/genesis/strategy/contract.py` | `register_candidate` → decorador genérico PEP 695 acotado a `StrategyCandidate` |
+| `tests/strategy/candidate_b/test_trigger.py` | quitar 1 `# ty: ignore[invalid-type-form]` (línea 22) |
+| `tests/strategy/candidate_b/test_direction_doji.py` | quitar 1 (línea 16) |
+| `tests/strategy/candidate_b/test_golden_session.py` | quitar 2 (líneas 19 y 31) |
+| `tests/strategy/candidate_b/test_sizing.py` | quitar 1 (línea 28) |
+| `tests/strategy/candidate_b/test_integration_simulator.py` | quitar 1 (línea 54) |
+
+### 1.3. Alcance OUT (YAGNI explícito)
+
+1. `src/genesis/strategy/candidate_a/config.py`: **no se toca**. `SmcEngineConfig`,
+   `DiagnosticsConfig` y `CandidateAConfig` siguen `@dataclass(frozen=True, slots=True)`.
+2. Lógica de negocio: FSM de sweep, ATR incremental, fractales, liquidez, VWAP, diagnóstico de señal
+   desnuda, simulador, validación: **cero cambios**.
+3. `StrategyCandidate.candidate_id` (`contract.py:56`): sigue siendo variable mutable. El defecto
+   latente queda documentado (§6, Rg-39-3), no corregido en este Change.
+4. `RiskLevelsProvider` (`backtest/simulator.py:59-70`): no tiene el defecto (solo miembro método).
+5. `uv.lock` / bump de `ty`: pertenece al PR #29. Este Change no modifica dependencias (R135).
+6. Reducir `SmcEngineConfigProtocol` a los miembros efectivamente leídos vía el protocolo
+   (`ct_zscore_min` se declara y se consume por otra vía, `config.smc.ct_zscore_min` en
+   `diagnostics.py:134`): fuera de alcance; cambiar la superficie del protocolo no hace falta para
+   cerrar #39.
+7. Reescritura de fakes de test, migración a `pydantic`, o cualquier refactor de estilo.
+
+---
+
+## 2. Convenciones de esta especificación
+
+- **DEBE** = requisito verificable por un eval de §5; **NO DEBE** = prohibición verificable.
+- "Property de solo lectura" = miembro de `Protocol` declarado como
+  `@property def <nombre>(self) -> <T>: ...` (sin setter).
+- "Diagnóstico" = cualquier línea emitida por `ty check`, de severidad `error`, `warning` o `info`.
+- Baseline de referencia: HEAD `1e426de` (`main`), árbol limpio, 19 errores con `ty` 0.0.64, 639 tests
+  recolectados (638 pasan + 1 skip).
+
+---
+
+## 3. Requisitos
+
+### 3.1. `smc/engine.py`
+
+- **R127** (DEBE). `SmcEngineConfigProtocol` DEBE declarar sus **8** miembros como properties de solo
+  lectura, conservando nombre y tipo exactos: `fractal_n: int`, `eq_tolerance_atr: float`,
+  `sweep_tolerance_atr: float`, `sweep_window_k: int`, `sweep_validity_m: int`,
+  `free_path_radius_sigma: float`, `ct_zscore_min: float`, `atr_period: int`. NO DEBE agregar,
+  quitar ni renombrar miembros, ni cambiar sus tipos.
+- **R128** (DEBE). El protocolo DEBE conservar el decorador `@runtime_checkable` y su docstring DEBE
+  seguir explicando (a) por qué existe el protocolo en lugar de importar `candidate_a.config`, y
+  (b) que es superconjunto estructural de `sweep.SweepConfigProtocol`; DEBE agregar la razón de las
+  properties (los configs consumidos son `frozen`, de solo lectura).
+- **R129** (DEBE). El subtipado estructural ancho → angosto DEBE preservarse: `update_smc_engine`
+  (`engine.py:187`) sigue pasando un `SmcEngineConfigProtocol` donde `transition_sweep` espera
+  `SweepConfigProtocol`, sin `cast` ni supresión.
+
+### 3.2. `smc/sweep.py`
+
+- **R130** (DEBE). `SweepConfigProtocol` DEBE declarar sus **3** miembros (`sweep_tolerance_atr:
+  float`, `sweep_window_k: int`, `sweep_validity_m: int`) como properties de solo lectura,
+  conservando `@runtime_checkable` y el sentido de su docstring.
+
+### 3.3. `strategy/contract.py`
+
+- **R131** (DEBE). `register_candidate` DEBE estar tipado de forma que (a) el valor asignado en
+  `CANDIDATE_REGISTRY[normalized]` sea asignable a `type[StrategyCandidate]` sin supresión, y (b) el
+  tipo de la clase decorada se **preserve** (el nombre decorado sigue siendo utilizable como forma de
+  tipo y como constructor con sus propios parámetros). Forma normativa: función genérica PEP 695 con
+  variable de tipo acotada a `StrategyCandidate`.
+- **R132** (NO DEBE). NO DEBE cambiar el comportamiento en runtime de `register_candidate`:
+  normalización `letter.upper()`, detección de colisión con `DuplicateCandidateError` (mensaje con
+  letra + `__qualname__` de la clase ya registrada) y retorno de la clase decorada sin envolverla.
+
+### 3.4. Supresiones y limpieza
+
+- **R133** (DEBE). Las **6** supresiones `# ty: ignore[invalid-type-form]` sobre anotaciones
+  `CandidateB` (`test_trigger.py:22`, `test_direction_doji.py:16`, `test_golden_session.py:19,31`,
+  `test_sizing.py:28`, `test_integration_simulator.py:54`) DEBEN eliminarse, porque R131 las vuelve
+  innecesarias y `ty` reporta `unused-ignore-comment` con exit code 1.
+- **R134** (NO DEBE). NO DEBE introducirse ninguna supresión nueva (`# ty: ignore`, `# type: ignore`,
+  `# noqa`) en `src/` ni en `tests/`. La supresión ajena `test_config.py:29`
+  (`# ty: ignore[invalid-assignment]`, escritura deliberada sobre un config frozen) se conserva
+  intacta.
+
+### 3.5. Alcance cerrado
+
+- **R135** (NO DEBE). NO DEBE modificarse `pyproject.toml`, `uv.lock`, `mise.toml`,
+  `.github/workflows/`, `candidate_a/config.py`, ni ningún archivo fuera de la tabla §1.2.
+
+---
+
+## 4. Invariantes transversales
+
+1. **Comportamiento idéntico.** El cambio es de anotaciones: ninguna ruta de ejecución cambia. Los
+   protocolos no se verifican en runtime y las properties de un `Protocol` nunca se ejecutan (los
+   objetos reales son los dataclasses).
+2. **`isinstance` invariante.** Con `@runtime_checkable`, `isinstance` compara presencia de
+   atributos; una property en el cuerpo del protocolo produce el mismo resultado que la variable
+   anotada (verificado en Python 3.14.6). Los asserts `isinstance(...)` de
+   `tests/strategy/test_contract.py:66`, `tests/strategy/test_fakes.py:16`,
+   `tests/backtest/test_simulator_contract.py:44-45` siguen valiendo.
+3. **Aislamiento de capas (spec §2.1/§2.5).** `smc/` sigue sin importar `candidate_a.config`,
+   `numpy`, `pandas`, `genesis.backtest` ni `genesis.validation`
+   (`test_engine.py::test_layering_smc_no_importa_numpy_pandas_backtest_ni_validation`).
+4. **Reproducibilidad.** No cambia ningún `CONFIG_VERSION`, `dataset_hash`, `firm_profile_hash`,
+   `risk_profile_hash` ni esquema de artefacto. Ningún golden fixture se regenera.
+5. **Inmutabilidad de la config.** Los dataclasses de `config.py` siguen `frozen=True, slots=True`
+   (la corrección va en el protocolo, no en el productor).
+
+---
+
+## 5. Criterios de aceptación (evals ejecutables)
+
+Todos desde la raíz del repo, con el entorno de `mise run setup`.
+
+| # | Comando | Resultado exigido |
+|---|---|---|
+| E1 | `uvx ty@0.0.64 check --python .venv` | `All checks passed!`, exit 0, **0 diagnósticos** (baseline: 19 errores) |
+| E2 | `uv run ty check` (0.0.48, pin de la rama) | `All checks passed!`, exit 0 |
+| E3 | `uv run pytest` | `639 passed, 1 skipped`, exit 0 |
+| E4 | `uv run ruff check .` | `All checks passed!` |
+| E5 | `uv run ruff format --check .` | `186 files already formatted` (0 reformateos) |
+| E6 | `uv run vulture` | sin hallazgos |
+| E7 | `uv run bandit -c pyproject.toml -r src/` + `uv run deptry src/` | sin hallazgos |
+| E8 | `git diff --stat` | exactamente 3 archivos en `src/genesis/strategy/` + 5 en `tests/strategy/candidate_b/`; **ninguna** línea de `candidate_a/config.py`, `pyproject.toml` ni `uv.lock` |
+| E9 | `rg -n "ty: ignore\[invalid-type-form\]" src tests` | 0 resultados |
+| E10 | `rg -n '^    [a-z_]+: (int\|float)$' src/genesis/strategy/candidate_a/smc/engine.py src/genesis/strategy/candidate_a/smc/sweep.py` | 0 resultados (ningún miembro de protocolo quedó como variable anotada; los campos homónimos de `config.py` siguen intactos) |
+| E11 | `git diff -- tests/` | solo eliminación de comentarios: ninguna línea de assert, expectativa, fixture o lógica de test modificada |
+| E12 | CI del PR #29 tras el merge de #39 | verde (los 8 pasos de `.github/workflows/ci.yml`) |
+
+Prueba de tipos explícita (opcional pero recomendada, E1 la cubre indirectamente): un archivo de
+verificación temporal con `reveal_type(CandidateB)` DEBE reportar `<class 'CandidateB'>`, no
+`type[StrategyCandidate]`.
+
+---
+
+## 6. Riesgos
+
+| Id | Riesgo | Mitigación |
+|---|---|---|
+| Rg-39-1 | La conversión a properties oculta un consumidor que sí escribe en el config. | Verificado por búsqueda: los únicos accesos son lecturas (`engine.py:86,110,113,115`, `sweep.py:102,138,147,177`). E1+E3 lo confirman. |
+| Rg-39-2 | PEP 695 en `contract.py` exige Python ≥ 3.12. | El proyecto exige ≥ 3.14 (`pyproject.toml:6`, `.python-version`); `target-version = "py314"` en ruff. Sin riesgo. |
+| Rg-39-3 | `StrategyCandidate.candidate_id` queda con el mismo defecto latente (fuera de alcance). | Documentado aquí y en `design.md`; verificado que hoy no produce error (CandidateB y los fakes son clases normales) y que el arreglo futuro es seguro. Candidato a issue de seguimiento. |
+| Rg-39-4 | R131 empieza a verificar el bound de las clases decoradas: un candidato/fake que no satisfaga `StrategyCandidate` produciría un error nuevo. | Verificado: `CandidateB` y los 3 fakes decorados en `tests/strategy/test_contract.py` satisfacen el puerto, incluso con `candidate_id = "Q"` sin anotar (`ty` ensancha a `str`). E1/E2 lo cubren. |
+| Rg-39-5 | El CI de la rama corre `ty` 0.0.48 y no detectaría una regresión de 0.0.64. | E1 es obligatorio y su salida se adjunta al PR; el cierre real lo valida el CI de #29 (E12). |
+
+---
+
+## 7. Preguntas abiertas (no bloquean este Change)
+
+1. ¿Se abre un issue de seguimiento para `StrategyCandidate.candidate_id` (Rg-39-3) y para achicar
+   `SmcEngineConfigProtocol` a los miembros efectivamente leídos?
+2. ¿Conviene fijar en `[tool.ty.rules]` una regla que convierta `unused-ignore-comment` en `error`,
+   para que la deuda de supresiones no se acumule en silencio?
+
+---
+
+## 8. Referencias
+
+- `idea.md` (problema + inventario medido), `proposal.md` (enfoque + 6 alternativas + evidencia).
+- Código: `src/genesis/strategy/candidate_a/smc/engine.py:34-51,72-115,187`,
+  `smc/sweep.py:48-61,72-102`, `candidate_a/config.py:23-49`, `candidate_a/diagnostics.py:113,134`,
+  `strategy/contract.py:46-86`, `backtest/simulator.py:59-70,229`.
+- Tests: `tests/strategy/candidate_a/smc/test_engine.py`, `test_sweep.py`, `test_sweep_property.py`,
+  `test_smc_lookahead_property.py`, `tests/strategy/test_contract.py`,
+  `tests/strategy/candidate_b/*.py`.
+- Issue #39; PR #29 (CI run 30420132741, `Found 19 diagnostics`).
+- `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` §2.1/§9/§11.1 y PA-3;
+  `.agents/rules/architecture-conventions.md`, `.agents/rules/eval-tdd-conventions.md`.
