@@ -51,7 +51,7 @@ def _synthetic_us500_frame() -> pd.DataFrame:
 
 
 def _build_simulator(
-    candidate: CandidateB,  # ty: ignore[invalid-type-form]
+    candidate: CandidateB,
     *,
     symbol_figure: SymbolFigure,
 ) -> Simulator:

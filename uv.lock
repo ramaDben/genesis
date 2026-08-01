@@ -116,7 +116,7 @@ wheels = [
 
 [[package]]
 name = "genesis"
-version = "0.1.13"
+version = "0.1.14"
 source = { editable = "." }
 dependencies = [
     { name = "metatrader5", marker = "sys_platform == 'win32'" },
@@ -212,7 +212,7 @@ name = "metatrader5"
 version = "5.0.5735"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "sys_platform == 'win32'" },
+    { name = "numpy" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/33/51/4a70004f8af537393861c31a3c211f818b8199fea8baf8c0b1f571d67c56/metatrader5-5.0.5735-cp314-cp314-win_amd64.whl", hash = "sha256:b69765be2eece9f884b60b6d008c7608ad77d7bfc5fbfbb8c23e3e3bb8dc88ba", size = 49590, upload-time = "2026-04-04T16:44:12.306Z" },

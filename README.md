@@ -115,14 +115,45 @@ El ciclo de vida del desarrollo lo orquesta el plugin `pulse` (versionado en `.c
 
 `/pulse:explore → propose → specify → design → break-to-tasks → apply → review → close`
 
-```powershell
+```bash
 claude plugin marketplace add .
 claude plugin install pulse@genesis
-mise run docker:pull    # imagen del engine
 mise run mcp:list       # salud de los MCPs
 ```
 
 Gate humano obligatorio: solo una persona llama `approve_design`. Los agentes nunca auto-aprueban. El estado de cada fase se codifica en labels de issues de GitHub.
+
+### Requisitos del engine: Linux o WSL2
+
+El `.mcp.json` del plugin usa `--user "$(id -u):$(id -g)"` y `$(git rev-parse --show-toplevel)`, así que **requiere un entorno POSIX**. En Windows nativo el engine no arranca con esa configuración, y el modo nativo (sin Docker) se cuelga al ejecutar el gate determinista.
+
+Antes del primer `close_change` hacen falta dos pasos que no se pueden expresar en el `.mcp.json`:
+
+**1. Construir la imagen desde el código actual del engine.** La imagen publicada `ghcr.io/bajmein/pulse/mcp-pulse:latest` es la v0.13.0 (2026-06-09), seis versiones atrás del `main` de pulse, y es anterior al hardening que hace `promote_delta` idempotente: un cierre con ella falla con `Delta duplicado` y deja efectos parciales.
+
+```bash
+gh repo clone Bajmein/pulse ~/pulse-src -- --depth 20
+docker build -t mcp-pulse:0.13.6 ~/pulse-src
+```
+
+**2. Preparar los volúmenes con el owner correcto.** Docker crea los volúmenes nuevos como `root:root`; como el contenedor corre con tu UID, `uv` no puede inicializar su caché y los seis checks del gate fallan con `exit_code=2` en menos de un segundo.
+
+```bash
+for v in pulse-venv uv_warm_cache; do
+  docker volume create "$v"
+  docker run --rm --user 0:0 -v "$v:/vol" --entrypoint sh mcp-pulse:0.13.6 \
+    -c "chown -R $(id -u):$(id -g) /vol"
+done
+```
+
+El volumen `pulse-venv` es imprescindible: el `pyvenv.cfg` del `.venv` local apunta al Python gestionado por mise, ruta que no existe dentro del contenedor. Sin ese volumen el gate recrearía el venv con otro intérprete y rompería el entorno del host.
+
+**3. Identidad git local al repo.** El Dockerfile del engine fija `HOME=/tmp`, así que git no ve la configuración global del host y el commit de release falla con `Author identity unknown`:
+
+```bash
+git config --local user.name "tu-nombre"
+git config --local user.email "tu@email"
+```
 
 Configuración sugerida de Claude Code en [`.claude/settings.json.example`](.claude/settings.json.example) — revisala antes de renombrarla a `settings.json`, porque instala hooks que se ejecutan en cada prompt.
 

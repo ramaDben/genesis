@@ -22,3 +22,11 @@
 **Contexto:** Cierre del Change #16 (dominio strategy); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-07-11T14:50:32.651956+00:00; tests_passed_at=2026-07-11T15:49:07.258518+00:00; artefactos: /work/.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/idea.md, /work/.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/proposal.md, /work/.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/design.md, /work/.pulse/changes/16-d-feat-strategy-smc-engine-diagn-stico-de-se-al-desnuda-kill-swi/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de strategy.
+### Heurística: cierre Change #39 strategy [#39 · strategy · 2026-08-01]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables
+**Contexto:** Cierre del Change #39 (dominio strategy); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-08-01T03:33:27.047641+00:00; tests_passed_at=2026-08-01T03:53:56.176206+00:00; artefactos: /work/.pulse/changes/39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables/idea.md, /work/.pulse/changes/39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables/proposal.md, /work/.pulse/changes/39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables/design.md, /work/.pulse/changes/39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de strategy.

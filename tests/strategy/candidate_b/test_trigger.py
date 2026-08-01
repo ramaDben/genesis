@@ -19,7 +19,7 @@ _RANGE_LOW = 4498.0
 
 def _formed_candidate(
     us500_figure: SymbolFigure, *, direction: Direction | None = Direction.LONG
-) -> CandidateB:  # ty: ignore[invalid-type-form]
+) -> CandidateB:
     """Candidato con rango ya congelado (`_range_high=4505.0`, `_range_low=4498.0`)."""
     candidate = CandidateB(
         figure=us500_figure, reference_balance=100_000.0, n_minutes=_N_MINUTES, risk_pct=0.00375
