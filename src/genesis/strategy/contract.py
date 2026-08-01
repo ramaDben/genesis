@@ -1,4 +1,4 @@
-"""Contrato plugin `StrategyCandidate` (PA-3, `docs/SPEC_GENESIS_v1.2...md` §11.1).
+"""Contrato plugin `StrategyCandidate` (PA-3, `docs/SPEC_GENESIS_v1.4...md` §11.1).
 
 Interfaz mínima que todo candidato de estrategia implementa, sin lógica de negocio
 (spec §2.1/§2.5: aislamiento entre candidatos, ningún estado compartido). Este módulo

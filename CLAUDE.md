@@ -2,7 +2,7 @@
 
 ## Qué es este proyecto
 
-Pipeline de validación institucional para prop firms: un **torneo de candidatos de estrategia** (A: CT sweep-fade, B: ORB intradía en índices — prioridad, C: TSMOM — diferido) bajo gates mecánicos idénticos (G/C/P/T). **SSoT**: `docs/SPEC_GENESIS_v1.1_PropTrading_TorneoCandidatos.md` — todo cambio de alcance se valida contra el spec, los gates nunca se relajan.
+Pipeline de validación institucional para prop firms: un **torneo de candidatos de estrategia** (A: CT sweep-fade, B: ORB intradía en índices — prioridad, C: TSMOM — diferido) bajo gates mecánicos idénticos (G/C/P/T). **SSoT**: `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` — todo cambio de alcance se valida contra el spec, los gates nunca se relajan.
 
 ## Arquitectura (4 capas agnósticas a la estrategia, `src/genesis/`)
 
