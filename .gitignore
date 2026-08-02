@@ -55,3 +55,6 @@ out/
 prompt.md
 todo.md
 scratch.md
+
+# Backups que genera `claude doctor` al reescribir la config local
+*.doctor-bak
