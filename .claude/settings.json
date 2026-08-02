@@ -1,0 +1,15 @@
+{
+  "enabledMcpjsonServers": [
+    "filesystem",
+    "memory",
+    "serena"
+  ],
+  "permissions": {
+    "allow": [
+      "mcp__plugin_pulse_pulse-engine__request_sdd_transition"
+    ]
+  },
+  "enabledPlugins": {
+    "pulse@genesis": true
+  }
+}
