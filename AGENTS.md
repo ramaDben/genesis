@@ -27,10 +27,35 @@ Reglas duras:
 
 ## Toolchain MCP
 
-- `pulse-engine` — máquina de estados SDD (Docker, `ghcr.io/bajmein/pulse/mcp-pulse`, workspace en `/work`).
-- `serena` — navegación simbólica LSP e integridad.
-- `filesystem`, `memory` — navegación y knowledge graph (`.pulse/memory/`).
+- `pulse-engine` — máquina de estados SDD. Docker con el workspace en `/work`; la imagen se
+  **construye desde el `main` de pulse** (`mcp-pulse:0.13.6`), no se toma de
+  `ghcr.io/bajmein/pulse/mcp-pulse:latest`, que va seis versiones atrás y rompe el cierre.
+  Requiere entorno POSIX: en Windows nativo no arranca.
+- `serena` — navegación simbólica LSP, integridad y memorias de proyecto (`write_memory`).
+  Su arranque puede exceder el timeout de 30 s en el health check y reconectar después.
+- `memory` — knowledge graph en `.pulse/memory/knowledge-graph.jsonl`. Está en `.gitignore`:
+  no sobrevive a un reinstall salvo por el respaldo del release `archive-2026-07-28`.
 - A scope de usuario: `github`, `context7`, `sequential-thinking`, `superpowers`.
+
+Preferencia operativa: las acciones sobre GitHub (PRs, issues, merges, releases) van por
+`mcp__github__*`, **no** por la CLI `gh`. Cargar todas las tools necesarias en **una sola**
+llamada a `ToolSearch`, con la forma `select:tool1,tool2,...`.
+
+## Memoria entre sesiones
+
+Las **memorias de Serena** (`.serena/memories/`, versionadas) son el canal de contexto entre
+sesiones: lo que un agente nuevo necesita saber y no puede deducir del código.
+
+**Obligatorio al arrancar**: `list_memories` y leer las relevantes **antes** de explorar el repo
+o responder. Repetirlo cuando una instrucción entre en un área que no cubriste todavía —
+llegar a una conclusión que una memoria ya contradecía es un fallo de proceso evitable.
+
+**Al terminar un trabajo con hallazgos duraderos**, escribirlos con `write_memory`: la decisión
+y su porqué, la medición y sus condiciones, la trampa que costó tiempo, la hipótesis que el dato
+refutó. Actualizar la memoria existente en lugar de crear una nueva casi igual.
+
+Son observaciones fechadas, no estado vivo: verificar contra el código actual toda cita de
+archivo, símbolo o cifra antes de darla por vigente.
 
 ## Invariantes de código (del spec)
 

@@ -24,9 +24,23 @@ Invariantes de diseño: estado incremental **forward-only** (anti-lookahead por 
 | `mise run test` / `t` | pytest |
 | `mise run ty` / `tc` | `uv run ty check` |
 | `mise run format` / `f` | ruff fix + format |
-| `mise run docker:pull` | pull de `ghcr.io/bajmein/pulse/mcp-pulse` |
+| `mise run docker:pull` | pull de `ghcr.io/bajmein/pulse/mcp-pulse` — **no usar para cerrar changes**: la `:latest` publicada es la v0.13.0 y falla en `promote_delta`. Construir desde `main` (ver README) |
 
 Dependencias siempre vía `uv` (`uv add`, `uv sync`, `uv run`). Python 3.14. Búsquedas con `rg`/`fd`/`ast-grep`, no `grep`/`find`.
+
+Perfilado del diagnóstico (no bloquea CI): `uv run python scripts/bench_diagnose.py --from-store US500.cash`.
+
+## Entorno de desarrollo
+
+**Linux o WSL2, no Windows nativo.** El repo de trabajo vive en el filesystem de Linux
+(`~/genesis`); trabajar desde `/mnt/c/...` cruza la frontera de filesystems y es más lento.
+El engine de pulse requiere POSIX (`$(id -u)`, `$(git rev-parse --show-toplevel)`) y en
+Windows nativo el gate determinista se cuelga.
+
+Al editar desde una sesión de Claude Code en Windows, el repo de WSL se alcanza por UNC
+(`\\wsl$\Ubuntu\home\<usuario>\genesis\`) y los comandos se lanzan con
+`wsl -d Ubuntu -- bash -lc "..."` — el login shell es obligatorio para tener `uv` y `mise`
+en el `PATH`.
 
 ## Flujo SDD (plugin pulse)
 
@@ -37,6 +51,24 @@ El ciclo de vida lo orquesta el MCP `pulse-engine` (Docker, workspace montado en
 - **Gate humano obligatorio**: solo un humano llama `approve_design` (en design o break-to-tasks). Nunca auto-aprobar.
 - Estado del proyecto en GitHub: issues/labels codifican las fases (`state:1-explore` … `state:8-close`).
 - Cadena de issues del spec: A (spec definitivo, bloquea al resto) → B (data) → C (contrato+Inspector) → {D/E paralelos, G} → H → I → J → K.
+
+## Memoria entre sesiones (Serena MCP)
+
+Lo que deba sobrevivir al fin de una sesión va a las **memorias de Serena**
+(`write_memory` / `read_memory`), versionadas en `.serena/memories/`. Son el mecanismo por el
+que un agente que arranca sin contexto entiende el estado real del proyecto.
+
+- **Al inicio de cada sesión, y de nuevo cuando llega una instrucción sobre un área que todavía
+  no exploraste**, listar las memorias (`list_memories`) y leer las que el nombre señale como
+  relevantes, **antes** de tocar código o responder.
+- **Qué guardar**: decisiones con su porqué, mediciones y sus condiciones, restricciones del
+  entorno, trampas ya pagadas e hipótesis que los datos refutaron. Una memoria por tema, con
+  nombre descriptivo; enlazar entre ellas con `` `mem:nombre` ``.
+- **Qué NO guardar**: lo que el repo ya registra (estructura del código, historial de git, este
+  archivo) ni lo que solo importa dentro de la conversación en curso.
+- Las memorias son **observaciones fechadas, no estado vivo**: si una cita un archivo, una
+  función o una cifra, verificarlo contra el código actual antes de afirmarlo. Cuando algo
+  cambie, actualizar la memoria existente en vez de acumular duplicados.
 
 ## Convenciones
 

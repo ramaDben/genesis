@@ -15,7 +15,7 @@ El objetivo no es "hacer backtests bonitos": es producir un veredicto **GO / NO-
 
 ## Estado del proyecto
 
-Las cuatro capas están construidas y verificadas: **640 tests** en verde, más lint (`ruff`, `bandit`, `vulture`, `deptry`) y type-check (`ty`) limpios en CI.
+Las cuatro capas están construidas y verificadas: **639 tests** en verde, más lint (`ruff`, `bandit`, `vulture`, `deptry`) y type-check (`ty`) limpios en CI.
 
 | Capa | Paquete | Estado |
 |---|---|---|
@@ -32,17 +32,27 @@ Candidatos:
 | **B** | ORB intradía en índices | **Ejecutable.** Implementa `StrategyCandidate` y `RiskLevelsProvider`. |
 | **C** | TSMOM | Diferido, no implementado. |
 
+Limitación conocida de rendimiento: el diagnóstico del Candidato A tarda **~26 min por símbolo**
+sobre las 232.487 barras M1 reales de un índice, y **98,2%** de ese tiempo está en
+`detect_ct_events` — el coste crece de forma cuadrática porque `LiquidityMap` nunca purga los
+niveles mitigados. Medido con `scripts/bench_diagnose.py`; el plan de optimización está en el
+[issue #38](https://github.com/ramaDben/genesis/issues/38).
+
 ## Requisitos
 
+- **Linux o WSL2** — el entorno soportado. El código es portable, pero el flujo SDD exige POSIX
+  y en Windows nativo el gate determinista del engine se cuelga. Bajo WSL2, el repo debe vivir
+  en el filesystem de Linux (`~/genesis`), no en `/mnt/c/...`.
 - **Python 3.14** (gestionado por `mise`)
 - [`mise`](https://mise.jdx.dev) y [`uv`](https://docs.astral.sh/uv/)
-- **Git for Windows** en Windows: las tasks de `mise` se ejecutan con su `bash`
-- **MetaTrader 5** — solo para *exportar datos*. No se necesita para correr los tests: las fixtures son sintéticas y el CI corre en Linux sin MT5.
-- Docker Desktop y `gh` — solo si vas a usar el flujo SDD interno (ver más abajo). No hacen falta para compilar, testear ni ejecutar el pipeline.
+- **MetaTrader 5** — solo para *exportar datos*, y solo corre en Windows. No se necesita para los
+  tests: las fixtures son sintéticas y el CI corre en Linux sin MT5.
+- Docker y `gh` — solo si vas a usar el flujo SDD interno (ver más abajo). No hacen falta para
+  compilar, testear ni ejecutar el pipeline.
 
 ## Setup
 
-```powershell
+```bash
 git clone https://github.com/ramaDben/genesis.git
 cd genesis
 
@@ -74,13 +84,22 @@ Las dependencias se gestionan siempre vía `uv` (`uv add`, `uv sync`, `uv run`).
 
 Dos entry points, ambos con `--help`:
 
-```powershell
+```bash
 uv run mt5-export export                  # descarga M1/ticks de símbolos MT5 a data/
 uv run mt5-export confirm-firm-profile    # contrasta los símbolos esperados contra una cuenta demo real
 uv run genesis-validate diagnose          # diagnóstico de señal desnuda del Candidato A (kill-switch §2.2.1)
 ```
 
 El resto del pipeline (simulador, WFA, Monte Carlo, veredicto) se consume hoy como biblioteca desde `genesis.backtest` y `genesis.validation`; todavía no hay un CLI de torneo end-to-end.
+
+Fuera del CLI, `scripts/bench_diagnose.py` cronometra y perfila las etapas del diagnóstico. Es
+evidencia no-pytest, no bloquea el CI:
+
+```bash
+uv run python scripts/bench_diagnose.py --from-store US500.cash   # barras reales del store
+uv run python scripts/bench_diagnose.py --bars 20000              # sintético, sin datos de MT5
+uv run python scripts/bench_diagnose.py --from-store US500.cash --profile-stage detect
+```
 
 ## Datos y reproducibilidad
 
@@ -93,6 +112,23 @@ El resto del pipeline (simulador, WFA, Monte Carlo, veredicto) se consume hoy co
 
 Advertencia operativa: el servidor de FTMO usa NY+7 con regla DST de EE.UU., que **no** coincide con `Europe/Athens` en las ventanas de transición de octubre-noviembre y marzo. Esos días se excluyen del análisis.
 
+### El dataset actual no se puede volver a exportar
+
+El export de FTMO se hizo con una cuenta de prueba **ya expirada**, así que no hay forma de
+regenerarlo: los brokers sirven el historial de ticks en ventana móvil y una cuenta nueva
+traería otra profundidad y otro `dataset_hash`. Por eso los 1,21 GB de particiones Parquet
+están archivados como assets del release privado `dataset-ftmo-2026-08-01` (ocho símbolos más
+los CSV y el manifest). Para restaurarlos:
+
+```bash
+gh release download dataset-ftmo-2026-08-01 -R ramaDben/genesis -D /tmp/ds
+for f in /tmp/ds/*.tar.gz; do tar -xzf "$f"; done   # recrea data/ en la raíz del repo
+```
+
+Los bordes M1 y la profundidad de historial originales están en `history_depth.json` y
+`m1_edge.json`, dentro del release `archive-2026-07-28`. Contrastá contra ellos cualquier
+export nuevo antes de comparar resultados entre datasets.
+
 ## Documentación
 
 - **SSoT vigente**: [`docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`](docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md) — arquitectura, umbrales go/no-go definitivos, manejo de errores, estrategia de testing y gobernanza.
@@ -104,7 +140,7 @@ Advertencia operativa: el servidor de FTMO usa NY+7 con regla DST de EE.UU., que
 
 Según spec §9: unit + property-based (`hypothesis`), golden tests, integración y tests estadísticos contra casos publicados. Marcadores disponibles: `unit`, `integration`, `e2e`, `statistical`, `slow`.
 
-```powershell
+```bash
 uv run pytest -m unit
 uv run pytest -m statistical
 ```
