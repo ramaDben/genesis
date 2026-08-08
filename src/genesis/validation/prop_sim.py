@@ -29,6 +29,7 @@ import numpy as np
 from genesis.backtest.ledger import FillRecord, Ledger
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
 from genesis.data.profile import FirmProfile
+from genesis.validation._shared import clip
 from genesis.validation.errors import PropSimConfigError
 
 CONFIG_VERSION: str = "genesis-validation-j/1"
@@ -217,13 +218,9 @@ este (es decir, una ficha confirmada, no el placeholder de fábrica).
 """
 
 
-def _clip(value: int, low: int, high: int) -> int:
-    return max(low, min(high, value))
-
-
 def _default_block_size(n_days: int) -> int:
     """`clip(round(n_days ** (1/3)), 5, 60)` (R18), misma fórmula que en `montecarlo.py`."""
-    return _clip(round(n_days ** (1.0 / 3.0)), _MIN_BLOCK_SIZE, _MAX_BLOCK_SIZE)
+    return clip(round(n_days ** (1.0 / 3.0)), _MIN_BLOCK_SIZE, _MAX_BLOCK_SIZE)
 
 
 def _extract_exit_deltas_by_day(ledger: Ledger) -> list[tuple[date, float]]:

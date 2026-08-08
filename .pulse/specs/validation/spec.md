@@ -2391,3 +2391,44 @@ ENTONCES ambos pasan en verde (exit code 0, R114-R115)
   `.agents/rules/eval-tdd-conventions.md`, `.agents/rules/tooling-conventions.md`.
 - `CLAUDE.md` (raíz) — arquitectura de 4 capas, flujo SDD, cadena de dependencias
   A→B→C→{D/E,G}→H→I→J→K.
+
+<!-- change:46-perf-core-reducir-complejidad-algor-tmica-del-camino-caliente-y -->
+<!-- change:46-perf-core-reducir-complejidad-algor-tmica-del-camino-caliente-y -->
+# Delta: relajación acotada de la prohibición de importar privados (Issue #46 / perf(core))
+
+Este bloque modifica una regla de los Changes H e I de esta misma capa. No toca ningún gate
+G/C/P/T, que **nunca se relajan**, ni ningún requisito de cálculo.
+
+## Qué decía la regla y por qué existía
+
+ADR-I1 y ADR-I2 (y su expresión como requisitos en este documento) prohíben importar símbolos
+con prefijo `_` de un módulo ya cerrado por un Change anterior. El objetivo era legítimo:
+impedir que un Change nuevo se acoplara a los internos de otro y los congelara de hecho.
+
+El precio se pagó en duplicación. `clip` terminó escrito **tres veces**, byte por byte, en
+`montecarlo.py`, `purged_cv.py` y `prop_sim.py`.
+
+## Qué cambia
+
+Se permite un módulo **interno compartido** dentro de la propia capa, `genesis/validation/_shared.py`,
+para helpers que sean **idénticos** en todas sus copias. Lleva prefijo `_`, no se exporta en
+`genesis/validation/__init__.py` y por tanto no amplía la superficie pública de la capa: la
+preocupación original —acoplarse a los internos de otro módulo— no aplica, porque nadie importa
+un privado ajeno; importan un helper común que no pertenece a ningún Change.
+
+Alcance de la relajación, deliberadamente estrecho:
+
+| Helper | Decisión | Motivo |
+|---|---|---|
+| `clip` | **Consolidado** en `_shared.py` | Las 3 copias eran byte-idénticas |
+| `_default_block_size` | **No se toca** | La variante de `strategy/candidate_a/diagnostics.py` usa otros bounds (sin piso de 5, con guarda `n <= 0`): unificarla cambiaría resultados numéricos |
+| `_first_fill_record` | **No se toca** | Difiere en firma (kwarg `candidate_id`) y en el tipo de excepción entre `montecarlo.py` y `purged_cv.py` |
+| Partición contigua (`dsr_pbo` / `purged_cv`) | **No se toca** | Difieren en el tipo de retorno (`tuple` vs `list`) |
+| `_extract_exit_returns` (`wfa` / `montecarlo`) | **No se toca**; ADR-H5 sigue vigente | Fundirlos obliga a reabrir un módulo cerrado por un beneficio cosmético. El riesgo real —que las copias divergieran en silencio— se cierra con un test de equivalencia entre ambas, no con un import |
+
+## Por qué no se consolidó más
+
+Porque el criterio no es «reducir líneas» sino «no cambiar resultados». Tres de los cuatro
+helpers restantes parecen duplicados y no lo son; unificarlos a ciegas habría alterado la
+salida numérica sin que ningún test lo delatara. La regla que gobierna este Change —equivalencia
+observacional bit a bit— manda sobre el impulso de deduplicar.

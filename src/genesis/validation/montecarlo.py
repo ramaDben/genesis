@@ -22,6 +22,7 @@ import numpy as np
 
 from genesis.backtest.ledger import FillRecord, Ledger, RunProvenance
 from genesis.backtest.risk_profile import RiskProfile
+from genesis.validation._shared import clip
 from genesis.validation.errors import MonteCarloConfigError
 
 _MIN_BLOCK_SIZE = 5
@@ -104,13 +105,9 @@ def _first_fill_record(ledger: Ledger) -> FillRecord:
     return first_fill
 
 
-def _clip(value: int, low: int, high: int) -> int:
-    return max(low, min(high, value))
-
-
 def _default_block_size(n_trades: int) -> int:
     """`clip(round(n_trades ** (1/3)), 5, 60)` (R41, decisión 4 §3)."""
-    return _clip(round(n_trades ** (1.0 / 3.0)), _MIN_BLOCK_SIZE, _MAX_BLOCK_SIZE)
+    return clip(round(n_trades ** (1.0 / 3.0)), _MIN_BLOCK_SIZE, _MAX_BLOCK_SIZE)
 
 
 def _path_max_drawdown(equity_path: np.ndarray) -> float:
