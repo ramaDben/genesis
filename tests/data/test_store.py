@@ -76,6 +76,44 @@ def test_iter_bars_in_session_matches_session_window() -> None:
     assert bars[1].in_session is False
 
 
+def test_iter_bars_resuelve_la_ventana_de_sesion_una_vez_por_dia(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R14 del Change #46: `session_window` se consulta por día, nunca por barra.
+
+    El bench ya lo confirmó sobre datos reales (464.974 → 173 llamadas), pero una
+    medición no impide una regresión: quien reintroduzca la llamada por barra vería la
+    suite en verde. Este test no.
+    """
+    profile = load_firm_profile()
+    frame = _server_local_frame(
+        [
+            datetime(2024, 3, 1, 10, 0),
+            datetime(2024, 3, 1, 11, 0),
+            datetime(2024, 3, 1, 12, 0),
+            datetime(2024, 3, 4, 10, 0),
+            datetime(2024, 3, 4, 11, 0),
+        ]
+    )
+
+    dias_consultados: list[date] = []
+    original = session_window
+
+    def espiar(symbol: str, session_date: date) -> tuple[datetime, datetime]:
+        dias_consultados.append(session_date)
+        return original(symbol, session_date)
+
+    monkeypatch.setattr("genesis.data.store.session_window", espiar)
+
+    bars = list(iter_bars(frame, "US500", profile))
+
+    assert len(bars) == 5
+    assert len(dias_consultados) == len(set(dias_consultados)), (
+        "cada trading_day debe consultarse una sola vez"
+    )
+    assert len(dias_consultados) == len({bar.trading_day for bar in bars})
+
+
 def test_iter_bars_out_of_order_timestamps_raise_day_boundary_error() -> None:
     profile = load_firm_profile()
     # Segunda barra retrocede un día completo respecto a la primera: corte de día
