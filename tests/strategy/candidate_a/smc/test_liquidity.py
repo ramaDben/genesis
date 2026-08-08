@@ -86,6 +86,49 @@ def test_mitigacion_por_cierre_mas_alla_del_nivel() -> None:
     assert liquidity.active_levels(Timeframe.M1) == []
 
 
+def test_nivel_mitigado_se_purga_del_mapa_interno() -> None:
+    """Mitigar es eliminar, no marcar: el nivel deja de existir (R21/R25 del Change #46).
+
+    El coste cuadrático medido venía de que los mitigados seguían en el diccionario y
+    todos los recorridos los visitaban para descartarlos después.
+    """
+    liquidity = LiquidityMap(_EQ_TOLERANCE_ATR)
+    liquidity.add_swing(_swing(SwingDirection.HIGH, 100.0, 0), _ATR)
+    level_id = liquidity.active_levels(Timeframe.M1)[0].level_id
+    assert liquidity.get(level_id).level_id == level_id
+
+    bar_beyond = to_m1_aggregated_bar(
+        make_annotated_bar(_BASE + timedelta(minutes=6), close=100.5, high=100.6, low=100.0)
+    )
+    liquidity.apply_close(bar_beyond)
+
+    assert liquidity.active_levels(Timeframe.M1) == []
+    with pytest.raises(KeyError):
+        liquidity.get(level_id)
+
+
+def test_purgar_un_nivel_no_altera_el_orden_de_los_restantes() -> None:
+    """El orden de creación se preserva tras purgar: decide qué nivel absorbe un swing.
+
+    El cierre se elige apenas por encima del nivel más bajo: un cierre alto mitigaría
+    también todos los niveles inferiores, porque "más allá" es una comparación de
+    precio, no de vecindad.
+    """
+    liquidity = LiquidityMap(_EQ_TOLERANCE_ATR)
+    for index, price in enumerate((100.0, 200.0, 300.0)):
+        liquidity.add_swing(_swing(SwingDirection.HIGH, price, index), _ATR)
+    ids_antes = [level.level_id for level in liquidity.active_levels(Timeframe.M1)]
+    assert len(ids_antes) == 3
+
+    bar = to_m1_aggregated_bar(
+        make_annotated_bar(_BASE + timedelta(minutes=10), close=100.5, high=100.6, low=100.0)
+    )
+    liquidity.apply_close(bar)
+
+    ids_despues = [level.level_id for level in liquidity.active_levels(Timeframe.M1)]
+    assert ids_despues == ids_antes[1:]
+
+
 def test_niveles_de_tf_distinto_no_se_agrupan_ni_se_mitigan_entre_si() -> None:
     liquidity = LiquidityMap(_EQ_TOLERANCE_ATR)
     swing_m1 = _swing(SwingDirection.HIGH, 100.0, 0)

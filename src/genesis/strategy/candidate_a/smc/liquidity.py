@@ -45,11 +45,13 @@ class LiquidityMap:
         self._id_sequence = count(1)
 
     def add_swing(self, swing: Swing, atr_of_tf: float) -> None:
-        """Agrega `swing` a un nivel existente dentro de tolerancia, o crea uno nuevo."""
+        """Agrega `swing` a un nivel existente dentro de tolerancia, o crea uno nuevo.
+
+        Recorre solo niveles activos: `apply_close` purga los mitigados, así que ya no
+        hace falta filtrarlos aquí.
+        """
         tolerance = self._eq_tolerance_atr * atr_of_tf
         for level_id, level in self._levels.items():
-            if level.mitigated:
-                continue
             if level.timeframe != swing.timeframe or level.direction != swing.direction:
                 continue
             if abs(level.price - swing.price) <= tolerance:
@@ -73,17 +75,26 @@ class LiquidityMap:
         )
 
     def apply_close(self, agg_bar: AggregatedBar) -> None:
-        """Marca `mitigated=True` los niveles del TF de `agg_bar` cuyo cierre los supera."""
-        for level_id, level in list(self._levels.items()):
-            if level.timeframe != agg_bar.timeframe or level.mitigated:
-                continue
-            beyond = (
+        """Purga los niveles del TF de `agg_bar` cuyo cierre los supera (R102).
+
+        Mitigar es **eliminar**: un nivel superado ya no participa de ninguna decisión
+        (`active_levels` lo filtraba de todos modos), y mantenerlo en el diccionario hacía
+        que este recorrido y el de `add_swing` crecieran sin cota — el coste cuadrático
+        medido en el issue #46. Los ids se recolectan primero y se borran después: mutar
+        el diccionario durante su propia iteración es un error en tiempo de ejecución.
+        """
+        mitigated_ids = [
+            level_id
+            for level_id, level in self._levels.items()
+            if level.timeframe == agg_bar.timeframe
+            and (
                 agg_bar.close > level.price
                 if level.direction == SwingDirection.HIGH
                 else agg_bar.close < level.price
             )
-            if beyond:
-                self._levels[level_id] = replace(level, mitigated=True)
+        ]
+        for level_id in mitigated_ids:
+            del self._levels[level_id]
 
     def active_levels(self, timeframe: Timeframe) -> list[LiquidityLevel]:
         """Niveles no mitigados del TF dado, en orden de creación."""
@@ -94,5 +105,10 @@ class LiquidityMap:
         ]
 
     def get(self, level_id: int) -> LiquidityLevel:
-        """Retorna el nivel vigente (posiblemente actualizado) para `level_id`."""
+        """Retorna el nivel **activo** con `level_id`.
+
+        Lanza `KeyError` si el nivel fue purgado por `apply_close` al mitigarse. El único
+        consumidor externo (`smc/engine.py`) condiciona ambas llamadas a que `level_id`
+        pertenezca a `active_levels()`, así que ese caso no ocurre en el flujo real.
+        """
         return self._levels[level_id]
