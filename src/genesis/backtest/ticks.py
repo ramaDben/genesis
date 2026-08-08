@@ -9,6 +9,7 @@ borde de la ventana de cobertura `(T-60s, T]` (RI-G5, ADR-G8, Rg-3 §5.2).
 """
 
 from bisect import bisect_right
+from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -206,6 +207,91 @@ def iter_ticks(
     yield from rows
 
 
+_DEFAULT_MAX_CACHED_DAYS = 2
+"""Días de ticks vivos a la vez: el actual y el anterior, por si un fill mira atrás."""
+
+
+class TickCache:
+    """Ticks por `(símbolo, trading_day)` con evicción LRU **acotada** (Change #46).
+
+    Existe por dos motivos distintos, y conviene no confundirlos:
+
+    1. **Cota de memoria** (el motivo principal). El caché que vivía dentro de cada
+       `Simulator` no evictaba nunca: sobre 173 días de `US500` retenía 4,0 GB medidos, y
+       una ventana IS+OOS de 378 días proyecta ~8,7 GB por símbolo — más de lo que tiene
+       la máquina. Con la cota, el techo es de dos días (~80 MB).
+    2. **Compartir entre combos**. Se construye una vez por ventana y se inyecta en cada
+       `Simulator`, de modo que varios backtests sobre el mismo tramo puedan reutilizar la
+       lectura en vez de repetirla.
+
+    Sobre el punto 2, sin adornos: con los 27 combos del WFA corriendo **en serie**, cada
+    uno recorre los días de principio a fin, así que una cota de dos días no alcanza para
+    que el combo siguiente encuentre nada cacheado. El ahorro de I/O real exige recorrer
+    los días una vez con los combos avanzando en paralelo, que es trabajo aparte y
+    condicionado a medición. Donde sí ahorra hoy es en tramos cortos revisitados —el OOS
+    de `run_sensitivity`, nueve backtests sobre el mismo slice—.
+
+    `max_days` es ajustable para quien pueda permitirse más memoria a cambio de más
+    aciertos; el default no obliga a nadie a recordar apagar nada.
+    """
+
+    def __init__(self, *, max_days: int = _DEFAULT_MAX_CACHED_DAYS) -> None:
+        if max_days < 1:
+            message = f"TickCache.max_days={max_days!r} debe ser >= 1 (Change #46, R33)."
+            raise BacktestConfigError(message)
+        self._max_days = max_days
+        self._entries: OrderedDict[tuple[str, date], list[TickRow]] = OrderedDict()
+        self._chunk_exists: dict[tuple[str, date], bool] = {}
+
+    def ticks_for_day(
+        self,
+        store: RawParquetStore,
+        symbol: str,
+        trading_day: date,
+        profile: FirmProfile,
+    ) -> list[TickRow]:
+        """Ticks de `(symbol, trading_day)`, leídos del store solo si no están cacheados."""
+        key = (symbol, trading_day)
+        cached = self._entries.get(key)
+        if cached is not None:
+            self._entries.move_to_end(key)
+            return cached
+
+        ticks = list(iter_ticks(store, symbol, trading_day, profile))
+        self._entries[key] = ticks
+        while len(self._entries) > self._max_days:
+            # Evicción hacia atrás (el menos recientemente usado): nunca prefetch de días
+            # futuros, que rompería el anti-lookahead.
+            self._entries.popitem(last=False)
+        return ticks
+
+    def has_chunk_for_day(
+        self,
+        store: RawParquetStore,
+        symbol: str,
+        trading_day: date,
+        profile: FirmProfile,
+    ) -> bool:
+        """`chunk_exists_for_day` memoizado por `(símbolo, día)` (Change #46, R38).
+
+        Se consultaba una vez por barra —1-3 `Path.exists()` cada vez, 232.833 llamadas
+        medidas en una corrida de 173 días— para un valor que solo cambia de día en día.
+
+        No participa de la evicción LRU: guardar un booleano por día no cuesta memoria
+        apreciable, y recalcularlo sí cuesta syscalls.
+        """
+        key = (symbol, trading_day)
+        cached = self._chunk_exists.get(key)
+        if cached is None:
+            cached = chunk_exists_for_day(store, symbol, trading_day, profile)
+            self._chunk_exists[key] = cached
+        return cached
+
+    def cached_days(self) -> int:
+        """Días vivos en el caché. Existe para que los tests puedan afirmar la cota."""
+        return len(self._entries)
+
+
 def _tick_in_bar_window(tick_timestamp: datetime, bar_timestamp: datetime) -> bool:
     """Criterio único de borde de la ventana de cobertura `(T-60s, T]` (RI-G5, ADR-G8).
 
@@ -231,6 +317,31 @@ def _bisect_window_bounds(day_ticks: Sequence[TickRow], bar_timestamp: datetime)
     return (start_idx, end_idx)
 
 
+def chunk_exists_for_day(
+    store: RawParquetStore,
+    symbol: str,
+    trading_day: date,
+    profile: FirmProfile,
+) -> bool:
+    """Condición (a) de la cobertura: existe algún chunk de servidor para `trading_day`.
+
+    Depende solo del día, nunca de la barra: es la mitad memoizable del criterio, y la
+    cara —cada evaluación son 1-3 `Path.exists()`— (Change #46, R38).
+    """
+    window = _day_window(trading_day)
+    server_tz = ZoneInfo(profile.server_tz)
+    return any(
+        store.has_chunk(symbol, Granularity.TICK, _day_window(server_date))
+        for server_date in _candidate_server_dates(window, server_tz)
+    )
+
+
+def has_ticks_in_bar_window(bar: AnnotatedBar, day_ticks: Sequence[TickRow]) -> bool:
+    """Condición (b) de la cobertura: hay al menos un tick en la ventana de `bar`."""
+    start_idx, end_idx = _bisect_window_bounds(day_ticks, bar.timestamp_utc)
+    return start_idx < end_idx
+
+
 def has_sufficient_tick_coverage(
     store: RawParquetStore,
     symbol: str,
@@ -248,18 +359,14 @@ def has_sufficient_tick_coverage(
     AND reportaría falsamente "sin cobertura" — y `(b)` hay al menos un tick en la
     ventana semiabierta-izquierda/cerrada-derecha `(bar.timestamp_utc - 60s,
     bar.timestamp_utc]` (tolerancia cero, Rg-3 §5.2, sin cambios).
-    """
-    window = _day_window(bar.trading_day)
-    server_tz = ZoneInfo(profile.server_tz)
-    chunk_exists = any(
-        store.has_chunk(symbol, Granularity.TICK, _day_window(server_date))
-        for server_date in _candidate_server_dates(window, server_tz)
-    )
-    if not chunk_exists:
-        return False
 
-    start_idx, end_idx = _bisect_window_bounds(day_ticks, bar.timestamp_utc)
-    return start_idx < end_idx
+    El criterio y su orden de evaluación son los mismos de siempre; lo único nuevo es que
+    cada condición vive en su propia función, para que quien recorra muchas barras del
+    mismo día pueda memoizar la parte (a), que solo depende del día (Change #46, R38).
+    """
+    if not chunk_exists_for_day(store, symbol, bar.trading_day, profile):
+        return False
+    return has_ticks_in_bar_window(bar, day_ticks)
 
 
 def ticks_in_bar_window(bar: AnnotatedBar, day_ticks: Sequence[TickRow]) -> list[TickRow]:

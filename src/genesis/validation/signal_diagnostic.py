@@ -79,7 +79,10 @@ def _tick_lookup_bar(event: ConditionalReturnEvent) -> AnnotatedBar:
 
     `has_sufficient_tick_coverage`/`ticks_in_bar_window` (capa 3) solo leen esos dos
     campos; el resto de campos OHLC/volumen/`in_session` son relleno inerte, ya que el
-    evento no conserva la vela M1 completa (solo su `entry_price`).
+    evento no conserva la vela M1 completa (solo su `entry_price`). Los bordes de sesión
+    son relleno igualmente —el evento no los conserva—: se fijan al propio instante del
+    evento, que es el único valor coherente con `in_session=True` sin inventar una
+    ventana. Esta barra no debe pasarse a `Simulator`, que sí interpreta esos bordes.
     """
     return AnnotatedBar(
         timestamp_utc=event.event_time,
@@ -90,6 +93,8 @@ def _tick_lookup_bar(event: ConditionalReturnEvent) -> AnnotatedBar:
         tick_volume=0,
         trading_day=event.trading_day,
         in_session=True,
+        session_open_utc=event.event_time,
+        session_close_utc=event.event_time,
     )
 
 

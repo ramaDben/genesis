@@ -10,6 +10,8 @@ al `FillRecord` inmediatamente anterior en el ledger (los `FillRecord` de entrad
 descuentan costos, nunca acreditan PnL de mercado).
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from genesis.backtest.ledger import BreachEvent, BreachKind, FillRecord, Ledger, RejectionRecord
@@ -39,9 +41,8 @@ def _exit_deltas(ledger: Ledger) -> list[float]:
     return [delta for fill, delta in _running_equity_deltas(ledger) if fill.is_exit]
 
 
-def profit_factor(ledger: Ledger) -> float:
-    """Ganancia bruta / pérdida bruta de los `FillRecord` de salida (R48)."""
-    deltas = _exit_deltas(ledger)
+def _profit_factor_from(deltas: list[float]) -> float:
+    """Fórmula de PF, aislada de cómo se obtuvieron los deltas."""
     gross_profit = sum(delta for delta in deltas if delta > 0)
     gross_loss = -sum(delta for delta in deltas if delta < 0)
     if gross_loss == 0:
@@ -49,9 +50,8 @@ def profit_factor(ledger: Ledger) -> float:
     return gross_profit / gross_loss
 
 
-def sharpe_pointwise(ledger: Ledger) -> float:
-    """Media / desviación estándar de los deltas de salida (R48); `0.0` si hay <2 muestras."""
-    deltas = _exit_deltas(ledger)
+def _sharpe_pointwise_from(deltas: list[float]) -> float:
+    """Fórmula del Sharpe puntual, aislada de cómo se obtuvieron los deltas."""
     if len(deltas) < _MIN_SHARPE_SAMPLES:
         return 0.0
     values = np.array(deltas, dtype=float)
@@ -61,9 +61,8 @@ def sharpe_pointwise(ledger: Ledger) -> float:
     return float(values.mean() / std)
 
 
-def max_drawdown(ledger: Ledger) -> float:
-    """Máxima caída desde el pico de la curva de `equity_after` (R48)."""
-    equity_curve = [fill.equity_after for fill, _ in _running_equity_deltas(ledger)]
+def _max_drawdown_from(equity_curve: list[float]) -> float:
+    """Fórmula del máximo drawdown, aislada de cómo se obtuvo la curva."""
     if not equity_curve:
         return 0.0
     peak = equity_curve[0]
@@ -74,23 +73,80 @@ def max_drawdown(ledger: Ledger) -> float:
     return worst
 
 
-def win_rate(ledger: Ledger) -> float:
-    """Fracción de `FillRecord` de salida con delta de equity positivo (R48)."""
-    deltas = _exit_deltas(ledger)
+def _win_rate_from(deltas: list[float]) -> float:
+    """Fórmula del win-rate, aislada de cómo se obtuvieron los deltas."""
     if not deltas:
         return 0.0
     wins = sum(1 for delta in deltas if delta > 0)
     return wins / len(deltas)
 
 
-def worst_daily_floating_excursion(ledger: Ledger) -> float:
-    """Peor `magnitude` entre los `BreachEvent(DAILY)` registrados (R49); `0.0` si no hay."""
-    magnitudes = [
-        payload.magnitude
+def _daily_breaches(ledger: Ledger) -> list[BreachEvent]:
+    """`BreachEvent` de tipo `DAILY` del ledger, en orden de aparición."""
+    return [
+        payload
         for entry in ledger.entries
         if isinstance(payload := entry.payload, BreachEvent) and payload.kind is BreachKind.DAILY
     ]
-    return max(magnitudes, default=0.0)
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerMetricsSummary:
+    """Las cuatro métricas clásicas de un `Ledger`, obtenidas de un solo recorrido."""
+
+    profit_factor: float
+    sharpe_pointwise: float
+    max_drawdown: float
+    win_rate: float
+
+
+def ledger_metrics_summary(ledger: Ledger) -> LedgerMetricsSummary:
+    """PF, Sharpe, MaxDD y win-rate con **una** pasada sobre `ledger.entries`.
+
+    Las cuatro funciones públicas siguen existiendo con su firma intacta y cada una hace
+    su propio recorrido: son correctas y baratas cuando se necesita una sola métrica, que
+    es el caso de todos los llamadores actuales. Esta función es para quien necesita
+    varias a la vez, y evita los cuatro recorridos que eso costaba.
+
+    Los valores son idénticos a los de las funciones individuales por construcción:
+    ambas rutas aplican las mismas fórmulas (`_profit_factor_from` y compañía) sobre las
+    mismas secuencias en el mismo orden, así que no hay reordenamiento de acumulaciones
+    de float que pueda mover el último bit.
+    """
+    running = _running_equity_deltas(ledger)
+    exit_deltas = [delta for fill, delta in running if fill.is_exit]
+    equity_curve = [fill.equity_after for fill, _ in running]
+    return LedgerMetricsSummary(
+        profit_factor=_profit_factor_from(exit_deltas),
+        sharpe_pointwise=_sharpe_pointwise_from(exit_deltas),
+        max_drawdown=_max_drawdown_from(equity_curve),
+        win_rate=_win_rate_from(exit_deltas),
+    )
+
+
+def profit_factor(ledger: Ledger) -> float:
+    """Ganancia bruta / pérdida bruta de los `FillRecord` de salida (R48)."""
+    return _profit_factor_from(_exit_deltas(ledger))
+
+
+def sharpe_pointwise(ledger: Ledger) -> float:
+    """Media / desviación estándar de los deltas de salida (R48); `0.0` si hay <2 muestras."""
+    return _sharpe_pointwise_from(_exit_deltas(ledger))
+
+
+def max_drawdown(ledger: Ledger) -> float:
+    """Máxima caída desde el pico de la curva de `equity_after` (R48)."""
+    return _max_drawdown_from([fill.equity_after for fill, _ in _running_equity_deltas(ledger)])
+
+
+def win_rate(ledger: Ledger) -> float:
+    """Fracción de `FillRecord` de salida con delta de equity positivo (R48)."""
+    return _win_rate_from(_exit_deltas(ledger))
+
+
+def worst_daily_floating_excursion(ledger: Ledger) -> float:
+    """Peor `magnitude` entre los `BreachEvent(DAILY)` registrados (R49); `0.0` si no hay."""
+    return max((breach.magnitude for breach in _daily_breaches(ledger)), default=0.0)
 
 
 def min_distance_to_daily_limit(ledger: Ledger, firm_profile: FirmProfile) -> float:
@@ -100,11 +156,7 @@ def min_distance_to_daily_limit(ledger: Ledger, firm_profile: FirmProfile) -> fl
     límite fue superado). Sin ningún breach DAILY, no hubo cercanía observada y se
     retorna `firm_profile.daily_loss_limit_pct` como distancia de referencia.
     """
-    distances = [
-        payload.threshold - payload.magnitude
-        for entry in ledger.entries
-        if isinstance(payload := entry.payload, BreachEvent) and payload.kind is BreachKind.DAILY
-    ]
+    distances = [breach.threshold - breach.magnitude for breach in _daily_breaches(ledger)]
     if not distances:
         return firm_profile.daily_loss_limit_pct
     return min(distances)

@@ -35,9 +35,9 @@ from genesis.backtest.ledger import (
 )
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile, risk_profile_hash
 from genesis.backtest.ticks import (
+    TickCache,
     TickRow,
-    has_sufficient_tick_coverage,
-    iter_ticks,
+    has_ticks_in_bar_window,
     ticks_in_bar_window,
 )
 from genesis.data.calendar import EconomicEvent, news_windows
@@ -224,6 +224,7 @@ class Simulator:
         tick_store: RawParquetStore | None,
         starting_balance: float,
         dataset_hash: str,
+        tick_cache: TickCache | None = None,
         stress: float = 1.0,
     ) -> None:
         if not isinstance(candidate, RiskLevelsProvider):
@@ -260,7 +261,9 @@ class Simulator:
         self.news_events = news_events
         self.tick_store = tick_store
         self.stress = stress
-        self._day_ticks_cache: dict[date, list[TickRow]] = {}
+        # Caché de ticks compartible: si el orquestador de la ventana no inyecta uno, este
+        # `Simulator` usa el suyo. En ambos casos la cota de días vivos es la misma.
+        self._tick_cache = tick_cache if tick_cache is not None else TickCache()
         self._starting_balance = starting_balance
         self._intraday_peak_equity = starting_balance
         self._all_time_peak_equity = starting_balance
@@ -286,14 +289,16 @@ class Simulator:
         return self.ledger
 
     def _day_ticks_for(self, trading_day: date) -> list[TickRow]:
-        """Cachea `day_ticks` por `trading_day`: una lectura por día, no por barra (RI-G1)."""
+        """Ticks del `trading_day`: una lectura por día, no por barra (RI-G1).
+
+        Delega en `TickCache`, que acota los días vivos: el caché anterior crecía sin
+        límite y retenía los ticks de todo el run (Change #46, R30/R33).
+        """
         if self.tick_store is None:
             return []
-        if trading_day not in self._day_ticks_cache:
-            self._day_ticks_cache[trading_day] = list(
-                iter_ticks(self.tick_store, self.symbol, trading_day, self.firm_profile)
-            )
-        return self._day_ticks_cache[trading_day]
+        return self._tick_cache.ticks_for_day(
+            self.tick_store, self.symbol, trading_day, self.firm_profile
+        )
 
     def _process_bar(self, bar: AnnotatedBar) -> None:
         # (0) reset diario: base doble del breach DAILY (R25).
@@ -304,12 +309,14 @@ class Simulator:
         self.clock.advance(bar)
 
         day_ticks = self._day_ticks_for(bar.trading_day)
+        # Mismo criterio de dos niveles que `has_sufficient_tick_coverage`, con la mitad
+        # que solo depende del día resuelta por el caché en vez de por barra (R38).
         coverage = (
-            has_sufficient_tick_coverage(
-                self.tick_store, self.symbol, bar, day_ticks, self.firm_profile
+            self.tick_store is not None
+            and self._tick_cache.has_chunk_for_day(
+                self.tick_store, self.symbol, bar.trading_day, self.firm_profile
             )
-            if self.tick_store is not None
-            else False
+            and has_ticks_in_bar_window(bar, day_ticks)
         )
 
         # (1) gestión de posiciones abiertas ANTES de nuevas entradas.
@@ -410,8 +417,13 @@ class Simulator:
     def _enforce_session_close_and_guard(
         self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
     ) -> None:
-        """Cierre forzado proactivo de sesión (R23) + guard `SessionBoundaryError` (R24)."""
-        _open_utc, close_utc = session_window(self.symbol, bar.trading_day)
+        """Cierre forzado proactivo de sesión (R23) + guard `SessionBoundaryError` (R24).
+
+        El borde de sesión llega en la barra (`session_close_utc`, resuelto una vez por
+        `trading_day` en `iter_bars`): recalcularlo aquí duplicaba el cómputo por barra
+        (Change #46, R10).
+        """
+        close_utc = bar.session_close_utc
 
         if bar.timestamp_utc >= close_utc and bar.trading_day not in self._session_closed_days:
             if bar.trading_day.weekday() == _FRIDAY_WEEKDAY and not (
@@ -549,9 +561,10 @@ class Simulator:
             self._close_position(position, exit_fill)
 
     def _close_position(self, position: OpenPosition, fill: ResolvedFill) -> None:
-        direction_sign = 1.0 if position.direction is Direction.LONG else -1.0
-        pnl_points = (fill.price - position.entry_price) * direction_sign
-        pnl_gross = pnl_points * position.sizing_hint * self.figure.tick_value
+        # Mismo modelo monetario que el equity flotante, escrito una sola vez: si las dos
+        # fórmulas divergieran, los breaches (que miran el flotante) dejarían de cuadrar
+        # con el P&L realizado que va al ledger, y nada lo detectaría.
+        pnl_gross = self._floating_pnl(position, fill.price)
 
         commission = commission_for(position.sizing_hint, self.costs_config, stress=self.stress)
         days_held = (fill.timestamp_utc.date() - position.entry_time.date()).days
