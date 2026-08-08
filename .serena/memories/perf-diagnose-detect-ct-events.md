@@ -1,41 +1,47 @@
-# Cuello de botella del diagnóstico del Candidato A
+# Cuello de botella del diagnóstico del Candidato A — RESUELTO (Change #46, v0.1.15)
 
-Medición definitiva con **barras reales** (232.487 M1 de `US500.cash`, ficha FTMO,
-horizontes 5/15/30/60), vía `scripts/bench_diagnose.py --from-store US500.cash`:
+Estado al 2026-08-08: **resuelto y mergeado** (PR #50, `7de0f784`). Issues #38 y #46 cerrados.
 
-| Etapa | Tiempo | % |
+## Resultado, medido antes/después en la misma máquina
+
+US500.cash, 232.487 barras M1 reales, ficha FTMO, vía `scripts/bench_diagnose.py --from-store`:
+
+| Etapa | Antes | Después |
 |---|---|---|
-| `iter_bars` (capa 1) | 12,24 s | 0,8% |
-| **`detect_ct_events`** (capa 2) | **1.540,92 s** | **98,2%** |
-| `summarize_raw_edge` (capa 2) | 15,26 s | 1,0% |
-| TOTAL | ~26,1 min por símbolo | |
+| `detect_ct_events` | 2.070,89 s | **42,70 s** (48,5×) |
+| `iter_bars` | 12,81 s | 12,31 s (sin tocar) |
+| `summarize_raw_edge` | 16,75 s | 17,29 s (sin tocar) |
+| **TOTAL** | **35,0 min** | **1,2 min** (29×) |
+| Los 8 símbolos | 4,7 h | 9,6 min |
 
-**Es cuadrático**: al pasar de 78k a 232k barras (×2,98) el tiempo se multiplicó por **11,29**.
+**Eventos CT: 15.478 antes y después.** La salida no cambió.
 
-## Causa raíz
+## Los dos cambios, en orden
 
-`src/genesis/strategy/candidate_a/smc/liquidity.py` — `LiquidityMap` **nunca purga los
-niveles mitigados**. `apply_close` itera `list(self._levels.items())` completo y descarta por
-`timeframe`/`mitigated` *después* de haber iterado. Con ~20.700 swings acumulados, las 84.500
-llamadas recorren un diccionario que solo crece.
+1. **`liquidity.py`: mitigar es eliminar, no marcar.** `apply_close` hace `del self._levels[id]`
+   en vez de `replace(level, mitigated=True)`. Seguro porque `smc/engine.py:203-205` ya
+   descartaba los trackers cuyo nivel salió del mapa, y `get()` solo se invoca con ids que
+   están en `active_levels()`. El campo `mitigated` se conserva (forma pública) pero ya nunca
+   es `True` en el mapa.
 
-Palanca dominante verificada: recorrer solo los activos da **68×** con 20.000 niveles y 200
-activos. Purgar es seguro — `mitigated` no se usa fuera de `liquidity.py` y `LiquidityMap.get()`
-solo se llama con IDs presentes en `active_level_ids`.
+2. **`engine.py`: no reconstruir trackers idénticos.** `refreshed = tracker if tracker.level is
+   current_level else replace(...)`. Eran **44,8 M de llamadas** a `dataclasses.replace` (y 269 M
+   `getattr`) para rehacer objetos iguales.
 
-Palanca menor: sustituir `dataclasses.replace` por el constructor rinde solo **2,08×**
-(≈16,7 s de 199 s en la corrida de 78k, un 8%). No es la palanca principal.
+## La lección: el perfil se mueve cuando lo optimizas
 
-## Trampas metodológicas ya pagadas
+Esta memoria registraba antes que `replace` era "palanca menor, 2,08 %" y que la palanca
+dominante era purgar. **Ambas cosas eran ciertas solo en ese momento**: purgar bajó `apply_close`
+a 5,5 s de 350 s, y entonces `replace` pasó a ser **dos tercios** del tiempo restante. El
+re-perfilado posterior al primer fix es lo que reveló dónde estaba el tiempo de verdad.
 
-- La hipótesis intuitiva era `iter_bars` con `iterrows()`, por analogía con el #24 que vectorizó
-  `iter_ticks`. **Mide 0,8%.** Optimizarlo habría sido trabajo perdido: perfilar antes de asumir.
-- numba está **descartado** para esta iteración: el problema es algorítmico, y el bucle caliente
-  usa frozen dataclasses, `StrEnum` y `dict`, nada compilable en `nopython`.
-- El modo `--bars` sintético del bench está acotado a `_MAX_SYNTHETIC_BARS = 110_000` porque
-  genera timestamps naive contiguos: al cruzar la transición DST del 2026-03-29 la secuencia deja
-  de ser monótona en UTC y la capa 2 aborta con `LookaheadError` (correctamente — el dato de
-  entrada es inválido). Para medir a escala real hay que usar `--from-store`.
+Corolario práctico: **perfilar antes de optimizar, y otra vez después.** El segundo perfilado
+también evitó trabajo inútil — descartó indexar `add_swing` por `(timeframe, direction)` (la
+palanca 5 del issue #38), porque tras la purga `active_levels` + `get` + `apply_close` suman
+~6 % y el índice tocaba el orden de iteración que decide qué nivel absorbe un swing.
 
-Plan de optimización con las cinco palancas ordenadas por impacto: **issue #38**.
-Falta perfilar `estimate_roundtrip_cost` (capa 4, lee ticks), que el bench no ejercita.
+## Qué queda sin medir
+
+`estimate_roundtrip_cost` (capa 4, lee ticks) sigue fuera del alcance de `bench_diagnose.py`.
+
+Ver también `mem:perf-simulador-y-tickcache` y `mem:entorno-de-desarrollo`.
