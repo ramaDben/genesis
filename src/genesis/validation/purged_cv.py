@@ -18,14 +18,11 @@ from datetime import datetime, timedelta
 
 from genesis.backtest.ledger import FillRecord, Ledger
 from genesis.validation._returns import TradeReturn, extract_trade_returns
+from genesis.validation._shared import clip
 from genesis.validation.errors import PurgedCvConfigError
 
 _MIN_EMBARGO_DAYS = 1
 _MAX_EMBARGO_DAYS = 30
-
-
-def _clip(value: int, low: int, high: int) -> int:
-    return max(low, min(high, value))
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +99,7 @@ def _default_embargo_days(sorted_trades: Sequence[TradeReturn]) -> int:
         max(trade.exit_timestamp for trade in sorted_trades)
         - min(trade.entry_timestamp for trade in sorted_trades)
     ).days
-    return _clip(round(0.01 * span_days), _MIN_EMBARGO_DAYS, _MAX_EMBARGO_DAYS)
+    return clip(round(0.01 * span_days), _MIN_EMBARGO_DAYS, _MAX_EMBARGO_DAYS)
 
 
 def _contiguous_partition_bounds(n_items: int, n_parts: int) -> list[tuple[int, int]]:

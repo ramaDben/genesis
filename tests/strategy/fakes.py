@@ -1,7 +1,7 @@
 """Fakes deterministas reutilizables para la suite `tests/strategy/` (R38)."""
 
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from genesis.data.store import AnnotatedBar
 from genesis.strategy.contract import EntryIntent
@@ -42,8 +42,16 @@ def make_annotated_bar(
     tick_volume: int = 10,
     trading_day: date | None = None,
     in_session: bool = True,
+    session_open_utc: datetime | None = None,
+    session_close_utc: datetime | None = None,
 ) -> AnnotatedBar:
-    """Construye una `AnnotatedBar` determinista con defaults razonables para tests."""
+    """Construye una `AnnotatedBar` determinista con defaults razonables para tests.
+
+    Los bordes de sesión, si no se pasan, envuelven al timestamp con holgura de 12 h:
+    así la barra cae dentro de sesión y nunca dispara el cierre forzado por accidente.
+    Un test que pruebe el borde debe pasarlo explícitamente — es su premisa, no un
+    default.
+    """
     return AnnotatedBar(
         timestamp_utc=timestamp_utc,
         open=open_ if open_ is not None else close,
@@ -53,4 +61,14 @@ def make_annotated_bar(
         tick_volume=tick_volume,
         trading_day=trading_day if trading_day is not None else timestamp_utc.date(),
         in_session=in_session,
+        session_open_utc=(
+            session_open_utc
+            if session_open_utc is not None
+            else timestamp_utc - timedelta(hours=12)
+        ),
+        session_close_utc=(
+            session_close_utc
+            if session_close_utc is not None
+            else timestamp_utc + timedelta(hours=12)
+        ),
     )

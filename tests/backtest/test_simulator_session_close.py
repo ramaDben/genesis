@@ -77,7 +77,15 @@ def test_cierre_forzado_proactivo_al_cierre_de_sesion(
     simulator.account.open_positions.append(position)
 
     bar_at_close = make_annotated_bar(
-        close_utc, open_=100.0, high=101.0, low=99.0, close=100.5, trading_day=_TRADING_DAY_MONDAY
+        close_utc,
+        open_=100.0,
+        high=101.0,
+        low=99.0,
+        close=100.5,
+        trading_day=_TRADING_DAY_MONDAY,
+        # El borde de sesión ahora viaja en la barra (Change #46, R10): la premisa del
+        # test se declara aquí en vez de resolverse dentro del simulador.
+        session_close_utc=close_utc,
     )
 
     simulator._enforce_session_close_and_guard(bar_at_close, [], False)
@@ -104,7 +112,15 @@ def test_guard_lanza_session_boundary_error_si_posicion_viva_pese_al_cierre(
     )
     _open_utc, close_utc = session_window("US500", _TRADING_DAY_MONDAY)
     bar_at_close = make_annotated_bar(
-        close_utc, open_=100.0, high=101.0, low=99.0, close=100.5, trading_day=_TRADING_DAY_MONDAY
+        close_utc,
+        open_=100.0,
+        high=101.0,
+        low=99.0,
+        close=100.5,
+        trading_day=_TRADING_DAY_MONDAY,
+        # El borde de sesión ahora viaja en la barra (Change #46, R10): la premisa del
+        # test se declara aquí en vez de resolverse dentro del simulador.
+        session_close_utc=close_utc,
     )
     simulator._enforce_session_close_and_guard(bar_at_close, [], False)
 
@@ -113,7 +129,9 @@ def test_guard_lanza_session_boundary_error_si_posicion_viva_pese_al_cierre(
         _open_position(close_utc, stop_loss=50.0, take_profit=200.0)
     )
     bar_after_close = make_annotated_bar(
-        close_utc + timedelta(minutes=1), trading_day=_TRADING_DAY_MONDAY
+        close_utc + timedelta(minutes=1),
+        trading_day=_TRADING_DAY_MONDAY,
+        session_close_utc=close_utc,
     )
 
     with pytest.raises(SessionBoundaryError):
@@ -145,7 +163,13 @@ def test_breach_weekend_al_cerrar_sesion_del_viernes_sin_holding_permitido(
     simulator.account.open_positions.append(position)
 
     bar_at_close = make_annotated_bar(
-        close_utc, open_=100.0, high=101.0, low=99.0, close=100.5, trading_day=_TRADING_DAY_FRIDAY
+        close_utc,
+        open_=100.0,
+        high=101.0,
+        low=99.0,
+        close=100.5,
+        trading_day=_TRADING_DAY_FRIDAY,
+        session_close_utc=close_utc,
     )
     simulator._enforce_session_close_and_guard(bar_at_close, [], False)
 

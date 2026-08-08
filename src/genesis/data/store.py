@@ -26,7 +26,16 @@ class DayBoundaryError(GenesisDataError):
 
 @dataclass(frozen=True, slots=True)
 class AnnotatedBar:
-    """Barra M1 anotada: timestamp UTC, día de trading y marca de sesión."""
+    """Barra M1 anotada: timestamp UTC, día de trading y ventana de sesión.
+
+    `session_open_utc`/`session_close_utc` son la ventana de contado del `trading_day` de
+    la barra. Se propagan —en vez de quedarse solo con el booleano `in_session` derivado—
+    porque la capa 3 necesita el borde exacto para el cierre forzado de sesión, y
+    recalcularlo allí significaba invocar `session_window` dos veces por barra.
+
+    Ambos campos son obligatorios: un default `None` convertiría un error de construcción
+    en un fallo silencioso aguas abajo.
+    """
 
     timestamp_utc: datetime
     open: float
@@ -36,6 +45,8 @@ class AnnotatedBar:
     tick_volume: int
     trading_day: date
     in_session: bool
+    session_open_utc: datetime
+    session_close_utc: datetime
 
 
 def _to_utc(raw_timestamp: Any, server_tz: ZoneInfo) -> datetime:
@@ -78,12 +89,17 @@ def iter_bars(
     sin tabla duplicada, R31). Si el `trading_day` calculado retrocede respecto a la barra
     anterior (corte de día inconsistente, R41), lanza `DayBoundaryError` con contexto.
 
+    La ventana de sesión se resuelve **una vez por `trading_day`** y se propaga en la
+    barra: `session_window` es pura y su resultado solo depende del día, así que
+    invocarla por barra era recomputar lo mismo ~390 veces por sesión (Change #46, R8).
+
     Único punto de emisión: no expone acceso por índice absoluto ni un método para
     reposicionar el cursor de lectura (R32); la excepción de lookahead de la capa de
     estrategia no se implementa en este Change (R33, PA-4 = Issue C).
     """
     server_tz = ZoneInfo(profile.server_tz)
     previous_trading_day: date | None = None
+    session_bounds: tuple[datetime, datetime] | None = None
 
     for _, row in frame.iterrows():
         timestamp_utc = _to_utc(row["timestamp"], server_tz)
@@ -97,9 +113,12 @@ def iter_bars(
                 f"{profile.daily_reset_time!r} ({profile.daily_reset_tz})."
             )
             raise DayBoundaryError(message)
+
+        if trading_day != previous_trading_day or session_bounds is None:
+            session_bounds = session_window(symbol, trading_day)
         previous_trading_day = trading_day
 
-        open_utc, close_utc = session_window(symbol, trading_day)
+        open_utc, close_utc = session_bounds
         in_session = open_utc <= timestamp_utc <= close_utc
 
         yield AnnotatedBar(
@@ -111,4 +130,6 @@ def iter_bars(
             tick_volume=int(row["tick_volume"]),
             trading_day=trading_day,
             in_session=in_session,
+            session_open_utc=open_utc,
+            session_close_utc=close_utc,
         )

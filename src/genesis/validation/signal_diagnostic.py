@@ -23,6 +23,7 @@ from genesis.backtest.ticks import has_sufficient_tick_coverage, iter_ticks, tic
 from genesis.data.metadata import ArtifactMetadata, current_git_commit
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash, load_firm_profile
+from genesis.data.sessions import session_window
 from genesis.data.store import AnnotatedBar, iter_bars
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_a.config import (
@@ -75,12 +76,18 @@ class SignalDiagnosticReport:
 
 
 def _tick_lookup_bar(event: ConditionalReturnEvent) -> AnnotatedBar:
-    """`AnnotatedBar` mínima con `timestamp_utc`/`trading_day` reales del evento.
+    """`AnnotatedBar` con `timestamp_utc`/`trading_day`/ventana de sesión reales del evento.
 
-    `has_sufficient_tick_coverage`/`ticks_in_bar_window` (capa 3) solo leen esos dos
-    campos; el resto de campos OHLC/volumen/`in_session` son relleno inerte, ya que el
-    evento no conserva la vela M1 completa (solo su `entry_price`).
+    `has_sufficient_tick_coverage`/`ticks_in_bar_window` (capa 3) solo leen el timestamp y
+    el día; los campos OHLC/volumen son relleno inerte, porque el evento no conserva la
+    vela M1 completa (solo su `entry_price`).
+
+    Los bordes de sesión **no** son relleno: se resuelven con `session_window` real (R11).
+    Cuesta una llamada por evento —no por barra, fuera de cualquier camino caliente
+    medido— y evita que una barra con bordes inventados llegue a un consumidor que sí los
+    interprete.
     """
+    session_open_utc, session_close_utc = session_window(event.symbol, event.trading_day)
     return AnnotatedBar(
         timestamp_utc=event.event_time,
         open=event.entry_price,
@@ -90,6 +97,8 @@ def _tick_lookup_bar(event: ConditionalReturnEvent) -> AnnotatedBar:
         tick_volume=0,
         trading_day=event.trading_day,
         in_session=True,
+        session_open_utc=session_open_utc,
+        session_close_utc=session_close_utc,
     )
 
 

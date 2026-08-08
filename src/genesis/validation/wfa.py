@@ -26,6 +26,7 @@ from genesis.backtest.ledger import FillRecord, Ledger, LedgerEntry, RunProvenan
 from genesis.backtest.metrics import sharpe_pointwise
 from genesis.backtest.risk_profile import RiskProfile, risk_profile_hash
 from genesis.backtest.simulator import Simulator
+from genesis.backtest.ticks import TickCache
 from genesis.data.calendar import EconomicEvent
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash
@@ -221,8 +222,13 @@ def _run_execution_combo(
     tick_store: RawParquetStore | None,
     starting_balance: float,
     dataset_hash: str,
+    tick_cache: TickCache | None = None,
 ) -> Ledger:
-    """Instancia `CandidateB`/`Simulator` **nuevos** para `combo` y corre `frame` (R24)."""
+    """Instancia `CandidateB`/`Simulator` **nuevos** para `combo` y corre `frame` (R24).
+
+    El `tick_cache` es del orquestador de la ventana, no de esta llamada: los combos
+    comparten los mismos días y así no se relee el store por cada uno (Change #46, R30).
+    """
     n_minutes, atr_stop_frac, risk_pct = combo
     candidate = CandidateB(
         figure=figure,
@@ -243,6 +249,7 @@ def _run_execution_combo(
         tick_store=tick_store,
         starting_balance=starting_balance,
         dataset_hash=dataset_hash,
+        tick_cache=tick_cache,
     )
     return simulator.run(frame)
 
@@ -309,6 +316,9 @@ def _run_single_window(
     grid_config_hash: str,
 ) -> WindowResult:
     """Grid IS exhaustivo, selección DSR-IS, congelamiento y run OOS de una ventana (R24-R29)."""
+    # Un solo caché de ticks para toda la ventana: los combos y el run OOS recorren los
+    # mismos días, y cada `Simulator` nuevo volvería a leerlos del store (Change #46, R32).
+    tick_cache = TickCache()
     combo_by_signal: dict[tuple[int, float], list[tuple[tuple[int, float, float], Ledger]]] = {}
     for combo in grid_config.execution_combos():
         n_minutes, atr_stop_frac, _risk_pct = combo
@@ -325,6 +335,7 @@ def _run_single_window(
             tick_store=tick_store,
             starting_balance=starting_balance,
             dataset_hash=dataset_hash_is,
+            tick_cache=tick_cache,
         )
         signal_config = (n_minutes, atr_stop_frac)
         combo_by_signal.setdefault(signal_config, []).append((combo, ledger_is))
@@ -349,6 +360,7 @@ def _run_single_window(
         tick_store=tick_store,
         starting_balance=starting_balance,
         dataset_hash=dataset_hash_oos,
+        tick_cache=tick_cache,
     )
 
     identity_hash = window_identity_hash(

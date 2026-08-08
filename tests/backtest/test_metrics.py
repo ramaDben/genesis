@@ -16,6 +16,7 @@ from genesis.backtest.ledger import (
     RunProvenance,
 )
 from genesis.backtest.metrics import (
+    ledger_metrics_summary,
     max_concurrent_exposure,
     max_drawdown,
     min_distance_to_daily_limit,
@@ -242,3 +243,39 @@ def test_ninguna_funcion_muta_el_ledger_recibido() -> None:
     rejection_rate_by_reason(ledger)
 
     assert ledger == snapshot
+
+
+def test_ledger_metrics_summary_coincide_bit_a_bit_con_las_metricas_individuales() -> None:
+    """Una pasada y cuatro pasadas dan exactamente el mismo valor (R52 del Change #46).
+
+    Igualdad exacta, no `approx`: ambas rutas aplican la misma fórmula sobre la misma
+    secuencia en el mismo orden, así que ni el último bit puede moverse. Si esto pasara
+    a fallar por redondeo, sería porque alguien reordenó una acumulación de floats.
+    """
+    ledger = _build_ledger(
+        [
+            _fill(_T0, 100.0, is_exit=False, equity_after=99_999.0),
+            _fill(_T1, 102.0, is_exit=True, equity_after=100_199.0),
+            _fill(_T2, 100.0, is_exit=False, equity_after=100_198.0),
+            _fill(_T3, 99.0, is_exit=True, equity_after=100_098.0),
+        ]
+    )
+
+    summary = ledger_metrics_summary(ledger)
+
+    assert summary.profit_factor == profit_factor(ledger)
+    assert summary.sharpe_pointwise == sharpe_pointwise(ledger)
+    assert summary.max_drawdown == max_drawdown(ledger)
+    assert summary.win_rate == win_rate(ledger)
+
+
+def test_ledger_metrics_summary_sobre_ledger_vacio_no_revienta() -> None:
+    """Sin fills, las cuatro métricas caen a sus valores neutros, igual que las públicas."""
+    ledger = _build_ledger([])
+
+    summary = ledger_metrics_summary(ledger)
+
+    assert summary.profit_factor == profit_factor(ledger)
+    assert summary.sharpe_pointwise == sharpe_pointwise(ledger)
+    assert summary.max_drawdown == max_drawdown(ledger)
+    assert summary.win_rate == win_rate(ledger)

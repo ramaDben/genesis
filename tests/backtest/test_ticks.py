@@ -1,16 +1,21 @@
 """Tests del lector de ticks forward-only `iter_ticks` (R15–R19, ADR-G6/G8)."""
 
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from genesis.backtest.errors import BacktestConfigError
-from genesis.backtest.ticks import _day_window, has_sufficient_tick_coverage, iter_ticks
+from genesis.backtest.ticks import (
+    TickCache,
+    _day_window,
+    has_sufficient_tick_coverage,
+    iter_ticks,
+)
 from genesis.data.metadata import ArtifactMetadata
-from genesis.data.mt5_export import Granularity, RawParquetStore
+from genesis.data.mt5_export import ChunkWindow, Granularity, RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
 from tests.backtest.fakes import build_server_local_tick_chunk
 from tests.strategy.fakes import make_annotated_bar
@@ -213,3 +218,79 @@ def test_has_sufficient_tick_coverage_multi_chunk_or_solo_un_candidato_persistid
     bar = make_annotated_bar(datetime(2026, 6, 26, 20, 0, 30, tzinfo=UTC), trading_day=trading_day)
 
     assert has_sufficient_tick_coverage(store, _SYMBOL, bar, day_ticks, profile) is True
+
+
+def _single_tick_frame(moment: datetime) -> pd.DataFrame:
+    """Frame de un único tick en `moment`, suficiente para poblar un día del caché."""
+    return pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime([moment], utc=True),
+            "bid": [100.0],
+            "ask": [100.1],
+            "last": [100.05],
+        }
+    )
+
+
+def test_tick_cache_reutiliza_el_dia_ya_leido(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pedir dos veces el mismo día lee el store una sola vez (Change #46, R30)."""
+    store = RawParquetStore(tmp_path)
+    profile = _utc_profile()
+    moment = datetime(2024, 1, 2, 14, 0, tzinfo=UTC)
+    _write_tick_chunk(store, _SYMBOL, _TRADING_DAY, _single_tick_frame(moment))
+
+    lecturas = 0
+    original_read = store.read_chunk
+
+    def contar_lecturas(symbol: str, granularity: Granularity, window: ChunkWindow) -> pd.DataFrame:
+        nonlocal lecturas
+        lecturas += 1
+        return original_read(symbol, granularity, window)
+
+    monkeypatch.setattr(store, "read_chunk", contar_lecturas)
+
+    cache = TickCache()
+    primero = cache.ticks_for_day(store, _SYMBOL, _TRADING_DAY, profile)
+    segundo = cache.ticks_for_day(store, _SYMBOL, _TRADING_DAY, profile)
+
+    assert primero is segundo, "el caché debe devolver la misma lista, no una copia"
+    assert lecturas == 1
+
+
+def test_tick_cache_no_retiene_mas_dias_que_la_cota(tmp_path: Path) -> None:
+    """La cota es lo que impide el consumo que motivó el Change (R33): 4 GB medidos."""
+    store = RawParquetStore(tmp_path)
+    profile = _utc_profile()
+    cache = TickCache(max_days=2)
+
+    for offset in range(3):
+        day = _TRADING_DAY + timedelta(days=offset)
+        moment = datetime(2024, 1, 2, 14, 0, tzinfo=UTC) + timedelta(days=offset)
+        _write_tick_chunk(store, _SYMBOL, day, _single_tick_frame(moment))
+        cache.ticks_for_day(store, _SYMBOL, day, profile)
+
+    assert cache.cached_days() == 2
+
+
+def test_tick_cache_max_days_invalido_lanza_backtest_config_error() -> None:
+    """Cota inválida aborta al construir, con contexto: nunca degradación silenciosa."""
+    with pytest.raises(BacktestConfigError):
+        TickCache(max_days=0)
+
+
+def test_tick_cache_distingue_simbolos_con_el_mismo_dia(tmp_path: Path) -> None:
+    """La clave es `(símbolo, día)`: dos símbolos del mismo día no se pisan."""
+    store = RawParquetStore(tmp_path)
+    profile = _utc_profile()
+    moment = datetime(2024, 1, 2, 14, 0, tzinfo=UTC)
+    _write_tick_chunk(store, _SYMBOL, _TRADING_DAY, _single_tick_frame(moment))
+    _write_tick_chunk(store, "OTRO", _TRADING_DAY, _single_tick_frame(moment))
+
+    cache = TickCache(max_days=2)
+    ticks_uno = cache.ticks_for_day(store, _SYMBOL, _TRADING_DAY, profile)
+    ticks_otro = cache.ticks_for_day(store, "OTRO", _TRADING_DAY, profile)
+
+    assert cache.cached_days() == 2
+    assert ticks_uno is not ticks_otro

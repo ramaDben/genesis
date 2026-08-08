@@ -204,7 +204,13 @@ def update_smc_engine(state: SmcEngineState, bar: AnnotatedBar, sigma_t: float) 
         if level_id not in active_level_ids:
             continue  # el nivel salió del mapa de LiquidityMap: se descarta su tracker
         current_level = state._liquidity.get(level_id)
-        refreshed = replace(tracker, level=current_level)
+        # `replace` sobre un frozen dataclass recorre todos sus campos vía `getattr`; con
+        # ~193 trackers vivos por barra eso son millones de reconstrucciones idénticas por
+        # corrida. El nivel solo cambia cuando `add_swing` lo sustituye en el mapa, así que
+        # comparar identidad basta: si es el mismo objeto, el tracker ya está al día.
+        refreshed = (
+            tracker if tracker.level is current_level else replace(tracker, level=current_level)
+        )
         updated_trackers[level_id] = transition_sweep(refreshed, bar, atr_m1, config)
     state._sweep_trackers = updated_trackers
 

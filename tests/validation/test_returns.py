@@ -3,6 +3,7 @@
 import pytest
 
 from genesis.validation._returns import TradeReturn, extract_trade_returns
+from genesis.validation.montecarlo import _extract_exit_returns as mc_extract_exit_returns
 from genesis.validation.wfa import _extract_exit_returns as wfa_extract_exit_returns
 from tests.validation.fixtures.ledgers import (
     build_empty_ledger,
@@ -45,6 +46,30 @@ def test_extract_trade_returns_equivalencia_con_wfa() -> None:
     ledger = build_ledger([10.0, -5.0, 8.0, -3.0, 12.0])
     projected = [trade.pnl_delta for trade in extract_trade_returns(ledger)]
     assert projected == wfa_extract_exit_returns(ledger)
+
+
+def test_extract_exit_returns_de_wfa_y_montecarlo_no_divergen() -> None:
+    """Las dos copias deliberadas de `_extract_exit_returns` dan lo mismo (Change #46).
+
+    `wfa.py` y `montecarlo.py` mantienen cada uno su propia implementación para no
+    importar símbolos privados de un módulo cerrado (ADR-H5). La duplicación es una
+    decisión tomada, no un descuido; el problema es que nada impedía que una de las dos
+    se moviera y la otra no, y la divergencia habría sido silenciosa: dos números
+    distintos donde debería haber uno.
+
+    Este test no elimina la duplicación —eso exigiría reabrir un módulo cerrado por un
+    beneficio cosmético— pero la vuelve inofensiva.
+    """
+    ledger = build_ledger([10.0, -5.0, 8.0, -3.0, 12.0])
+
+    assert wfa_extract_exit_returns(ledger) == mc_extract_exit_returns(ledger)
+
+
+def test_extract_exit_returns_de_wfa_y_montecarlo_coinciden_en_ledger_vacio() -> None:
+    """El caso degenerado también: ambos devuelven la lista vacía, no `None` ni error."""
+    ledger = build_ledger([])
+
+    assert wfa_extract_exit_returns(ledger) == mc_extract_exit_returns(ledger) == []
 
 
 def test_extract_trade_returns_preserva_orden_de_aparicion() -> None:

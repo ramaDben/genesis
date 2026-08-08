@@ -21,6 +21,8 @@ def _bar(timestamp_utc: datetime, *, close: float = 100.0) -> AnnotatedBar:
         tick_volume=10,
         trading_day=timestamp_utc.date(),
         in_session=True,
+        session_open_utc=timestamp_utc,
+        session_close_utc=timestamp_utc,
     )
 
 

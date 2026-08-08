@@ -12,6 +12,7 @@ from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_b import candidate as candidate_b_module
 from genesis.strategy.inspector import InspectorFunnelConfig
+from genesis.validation import wfa as wfa_module
 from genesis.validation.errors import WfaConfigError
 from genesis.validation.wfa import WfaResult, run_wfa
 from genesis.validation.window_config import GridConfig, WfaWindowConfig
@@ -148,6 +149,52 @@ def test_run_wfa_cuenta_instancias_candidateb_por_ventana(
     )
     # 27 combos IS + 1 combo OOS congelado por ventana == 28.
     assert counts[0] == result.n_windows * 28
+
+
+def test_run_wfa_comparte_el_mismo_tick_cache_entre_los_combos_de_una_ventana(
+    firm_profile_fixture: FirmProfile,
+    risk_profile_fixture: RiskProfile,
+    symbol_figure_fixture: SymbolFigure,
+    funnel_config_fixture: InspectorFunnelConfig,
+    costs_config_fixture: CostsConfig,
+    tick_store_fixture: RawParquetStore,
+    reduced_window_config: WfaWindowConfig,
+    short_wfa_frame: pd.DataFrame,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R32 (Change #46): los 28 simuladores de una ventana comparten el **mismo** caché.
+
+    Que el contenido coincida no basta: si cada `Simulator` construyera el suyo, la
+    lectura del store se repetiría una vez por combo, que es exactamente el coste que el
+    caché compartido existe para evitar. Por eso la comprobación es de identidad de
+    objeto, no de igualdad.
+    """
+    caches: list[object] = []
+    original_init = wfa_module.Simulator.__init__
+
+    def _capturing_init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        caches.append(kwargs.get("tick_cache"))
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(wfa_module.Simulator, "__init__", _capturing_init)
+
+    result = _run(
+        short_wfa_frame,
+        firm_profile=firm_profile_fixture,
+        risk_profile=risk_profile_fixture,
+        symbol_figure=symbol_figure_fixture,
+        funnel_config=funnel_config_fixture,
+        costs_config=costs_config_fixture,
+        dataset_store=tick_store_fixture,
+        window_config=reduced_window_config,
+    )
+
+    assert caches, "ninguna instancia de Simulator fue construida"
+    assert all(cache is not None for cache in caches), (
+        "algún Simulator no recibió el caché de la ventana y leería el store por su cuenta"
+    )
+    # Un caché por ventana, compartido por sus 28 simuladores (27 combos IS + 1 OOS).
+    assert len({id(cache) for cache in caches}) == result.n_windows
 
 
 def test_run_wfa_ventana_inviable_lanza_wfa_config_error(
