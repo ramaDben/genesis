@@ -47,9 +47,12 @@ node_modules/
 !.env.example
 
 # Datos crudos y artefactos derivados de corridas (nunca versionados;
-# reproducibilidad vía config_version + dataset_hash en cada artefacto)
-data/
-out/
+# reproducibilidad vía config_version + dataset_hash en cada artefacto).
+# Anclados a la raíz con `/`: sin la barra inicial el patrón casa con CUALQUIER
+# directorio de ese nombre a cualquier profundidad — `data/` excluía también
+# `src/genesis/data/` (la capa 1 entera) del lint, de CI y del indexado LSP.
+/data/
+/out/
 
 # Scratch
 prompt.md
