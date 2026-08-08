@@ -7,6 +7,7 @@ puerta (R28, R43).
 """
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -111,11 +112,12 @@ def test_run_resuelve_la_ventana_de_sesion_una_vez_por_dia(
 
 
 def test_run_consulta_la_existencia_de_chunks_una_vez_por_dia(
-    tmp_path: pytest.TempPathFactory,
+    tmp_path: Path,
     firm_profile_fixture: FirmProfile,
     risk_profile_fixture: RiskProfile,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """R43: la consulta de chunks depende del día, no del número de barras.
 
@@ -129,7 +131,7 @@ def test_run_consulta_la_existencia_de_chunks_una_vez_por_dia(
     """
 
     def consultas_para(moments: list[datetime]) -> int:
-        store = RawParquetStore(tmp_path)  # type: ignore[arg-type]
+        store = RawParquetStore(tmp_path)
         registradas: list[tuple[str, ChunkWindow]] = []
         original_has_chunk = store.has_chunk
 
@@ -137,7 +139,7 @@ def test_run_consulta_la_existencia_de_chunks_una_vez_por_dia(
             registradas.append((symbol, window))
             return original_has_chunk(symbol, granularity, window)
 
-        store.has_chunk = espiar  # type: ignore[method-assign]
+        monkeypatch.setattr(store, "has_chunk", espiar)
 
         simulator = _build_simulator(
             firm_profile_fixture,
@@ -201,14 +203,15 @@ def _write_tick_chunk_for(
 
 
 def test_los_ticks_de_un_dia_se_leen_una_sola_vez_en_el_run(
-    tmp_path: pytest.TempPathFactory,
+    tmp_path: Path,
     firm_profile_fixture: FirmProfile,
     risk_profile_fixture: RiskProfile,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """El caché evita releer el mismo día, que era el motivo de compartirlo entre combos."""
-    store = RawParquetStore(tmp_path)  # type: ignore[arg-type]
+    store = RawParquetStore(tmp_path)
     _write_tick_chunk_for(store, _SYMBOL, date(2024, 3, 1), datetime(2024, 3, 1, 15, 0, tzinfo=UTC))
 
     lecturas: list[tuple[str, ChunkWindow]] = []
@@ -218,7 +221,7 @@ def test_los_ticks_de_un_dia_se_leen_una_sola_vez_en_el_run(
         lecturas.append((symbol, window))
         return original_read(symbol, granularity, window)
 
-    store.read_chunk = espiar  # type: ignore[method-assign]
+    monkeypatch.setattr(store, "read_chunk", espiar)
 
     simulator = _build_simulator(
         firm_profile_fixture,
