@@ -11,9 +11,11 @@ from hypothesis import strategies as st
 
 import genesis.validation.verdict as verdict_module
 from genesis.backtest.ledger import BreachEvent, BreachKind, FillRecord, Ledger, RunProvenance
+from genesis.backtest.metrics import IntentAuthorizationCounts
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
 from genesis.data.profile import FirmProfile
 from genesis.strategy.contract import Direction
+from genesis.strategy.inspector import RejectionReason
 from genesis.validation._dsr import deflated_sharpe_ratio as real_dsr
 from genesis.validation.dsr_pbo import CscvResult, DsrPboResult
 from genesis.validation.errors import VerdictConfigError
@@ -34,6 +36,7 @@ from genesis.validation.verdict import (
     _compute_t1,
     _compute_t2,
     _evaluate_p1_to_p5,
+    _is_sizing_evidence_insufficient,
     _pairwise_correlation,
     build_candidate_gate_summary,
     manifest_json_to_verdict_summary,
@@ -43,7 +46,11 @@ from genesis.validation.verdict import (
     write_verdict_artifacts,
 )
 from genesis.validation.wfa import WfaResult
-from tests.validation.fixtures.ledgers import build_ledger, build_ledger_with_daily_trades
+from tests.validation.fixtures.ledgers import (
+    build_ledger,
+    build_ledger_with_daily_trades,
+    build_ledger_with_rejections,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -483,6 +490,166 @@ def test_all_pass_es_and_de_g1_g9() -> None:
         _STARTING_BALANCE,
     )
     assert outcome_one_fail.all_pass is False
+
+
+# --- Change #51 (R2/R3/R4): señal de "evidencia de sizing ausente" ---
+
+
+def test_sizing_evidence_insufficient_true_en_rechazo_total() -> None:
+    """A2: rechazo total (24 `LOT_SIZE_OUT_OF_BOUNDS`, 0 fills) → señal activa."""
+    ledger = build_ledger_with_rejections(n_lot_size=24)
+    outcome = _build_symbol_gate_outcome(
+        "US500",
+        _wfa_result(ledger=ledger),
+        _dsr_pbo_result(),
+        _sensitivity_result(),
+        _mc_symbol_result(),
+        _risk_profile(),
+        _STARTING_BALANCE,
+    )
+    assert outcome.sizing_evidence_insufficient is True
+    assert outcome.g1_pass is False
+    assert outcome.trades_oos_total == 0
+    assert outcome.intents_total == 24
+    assert outcome.intents_authorized == 0
+    assert outcome.rejections_by_reason == {"lot_size_out_of_bounds": 24}
+
+
+def test_sizing_evidence_insufficient_false_sin_intents() -> None:
+    """A3: sin señal de entrada (0 rechazos, 0 fills) distinto de "sin evidencia por sizing"."""
+    ledger = build_ledger_with_rejections(n_lot_size=0)
+    outcome = _build_symbol_gate_outcome(
+        "US500",
+        _wfa_result(ledger=ledger),
+        _dsr_pbo_result(),
+        _sensitivity_result(),
+        _mc_symbol_result(),
+        _risk_profile(),
+        _STARTING_BALANCE,
+    )
+    assert outcome.sizing_evidence_insufficient is False
+    assert outcome.intents_total == 0
+
+
+def test_sizing_evidence_insufficient_false_en_rechazo_parcial() -> None:
+    """A4: rechazo parcial (20 rechazos, 4 fills) no dispara la señal: el umbral es total."""
+    ledger = build_ledger_with_rejections(n_lot_size=20, n_entry_fills=4)
+    outcome = _build_symbol_gate_outcome(
+        "US500",
+        _wfa_result(ledger=ledger),
+        _dsr_pbo_result(),
+        _sensitivity_result(),
+        _mc_symbol_result(),
+        _risk_profile(),
+        _STARTING_BALANCE,
+    )
+    assert outcome.sizing_evidence_insufficient is False
+
+
+def test_sizing_evidence_insufficient_false_si_motivo_dominante_no_es_lot_size() -> None:
+    """Rechazo total, pero el motivo dominante es otro: la señal no se dispara."""
+    ledger = build_ledger_with_rejections(
+        n_lot_size=5, n_other_reason=10, other_reason=RejectionReason.NEWS_WINDOW
+    )
+    outcome = _build_symbol_gate_outcome(
+        "US500",
+        _wfa_result(ledger=ledger),
+        _dsr_pbo_result(),
+        _sensitivity_result(),
+        _mc_symbol_result(),
+        _risk_profile(),
+        _STARTING_BALANCE,
+    )
+    assert outcome.sizing_evidence_insufficient is False
+
+
+@given(
+    n_lot_size=st.integers(min_value=0, max_value=200),
+    n_other=st.integers(min_value=0, max_value=200),
+    n_fills=st.integers(min_value=0, max_value=200),
+)
+def test_property_sizing_evidence_insufficient(n_lot_size: int, n_other: int, n_fills: int) -> None:
+    """A7: `sizing_evidence_insufficient` ssi `n_fills==0`, `n_lot_size>0` y motivo dominante."""
+    counts = IntentAuthorizationCounts(
+        intents_authorized=n_fills,
+        intents_total=n_fills + n_lot_size + n_other,
+        rejections_by_reason=(
+            {"lot_size_out_of_bounds": n_lot_size, "insufficient_rr": n_other}
+            if n_other > 0
+            else {"lot_size_out_of_bounds": n_lot_size}
+        )
+        if n_lot_size > 0
+        else ({"insufficient_rr": n_other} if n_other > 0 else {}),
+    )
+
+    result = _is_sizing_evidence_insufficient(counts)
+
+    expected = n_fills == 0 and n_lot_size > 0 and n_lot_size >= n_other
+    assert result is expected
+
+
+def test_symbols_with_insufficient_sizing_evidence_agrega_por_candidato() -> None:
+    """Eval propio de T3.1: un símbolo con rechazo total, otro normal."""
+    bundle = _bundle(
+        symbols=("US500", "NAS100"),
+        wfa_by_symbol={
+            "US500": _wfa_result(
+                symbol="US500", ledger=build_ledger_with_rejections(n_lot_size=24)
+            ),
+            "NAS100": _wfa_result(symbol="NAS100"),
+        },
+    )
+    summary_before_field = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
+
+    assert summary_before_field.symbols_with_insufficient_sizing_evidence == frozenset({"US500"})
+    assert summary_before_field.passes_g_c_p == (
+        summary_before_field.c1_pass
+        and summary_before_field.c2_pass
+        and summary_before_field.p1_pass
+        and summary_before_field.p2_pass
+        and summary_before_field.p3_pass
+        and summary_before_field.p4_pass
+        and summary_before_field.p5_pass
+        and summary_before_field.p6_pass
+    )
+
+
+def test_señal_sizing_en_tearsheet_y_manifest(
+    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+) -> None:
+    """A5 + A6: la señal llega a ambos artefactos y `VerdictKind` sigue con 4 miembros."""
+    bundle = _go_quality_bundle("A", seed=3)
+    degraded_bundle = _bundle(
+        candidate_id="A",
+        wfa_by_symbol={"US500": _wfa_result(ledger=build_ledger_with_rejections(n_lot_size=24))},
+        dsr_pbo_by_symbol=bundle.dsr_pbo_results_by_symbol,
+        sensitivity_by_symbol=bundle.sensitivity_results_by_symbol,
+        mc_symbol_by_symbol=bundle.mc_symbol_results_by_symbol,
+        prop_sim_result=bundle.prop_sim_result,
+    )
+    result = run_verdict(
+        {"A": degraded_bundle},
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        risk_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+
+    tearsheet = render_tearsheet(result)
+    manifest_raw = verdict_result_to_manifest_json(result, **_MANIFEST_KWARGS)
+    manifest = manifest_json_to_verdict_summary(manifest_raw)
+
+    assert "Símbolos sin evidencia de sizing" in tearsheet
+    assert "US500" in tearsheet
+    candidates_payload = cast("dict[str, Any]", manifest["candidates"])
+    assert candidates_payload["A"]["symbols_with_insufficient_sizing_evidence"] == ["US500"]
+    assert (
+        candidates_payload["A"]["symbol_gate_outcomes"]["US500"]["sizing_evidence_insufficient"]
+        is True
+    )
+    assert len(VerdictKind) == 4
+    assert {member.value for member in VerdictKind} == {"go", "go-ensemble", "go-parcial", "no-go"}
 
 
 # --- R62/R66: P6 sobre BreachEvent real ---

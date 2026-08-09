@@ -12,8 +12,9 @@ tests de purga por solapamiento de horizonte de `purged_cv.py` (López de Prado,
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
-from genesis.backtest.ledger import FillRecord, Ledger, RunProvenance
+from genesis.backtest.ledger import FillRecord, Ledger, RejectionRecord, RunProvenance
 from genesis.strategy.contract import Direction
+from genesis.strategy.inspector import InspectorVerdict, RejectionReason
 
 _TEST_PROVENANCE = RunProvenance(
     candidate_id="B",
@@ -141,6 +142,68 @@ def build_ledger_with_trade_intervals(
                 equity_after=equity,
             )
         )
+    return ledger
+
+
+def build_ledger_with_rejections(
+    *,
+    n_lot_size: int,
+    n_other_reason: int = 0,
+    other_reason: RejectionReason | None = None,
+    n_entry_fills: int = 0,
+    symbol: str = "US500",
+) -> Ledger:
+    """`Ledger` sintético con `RejectionRecord` (Q8) para tests de "evidencia de sizing".
+
+    Genera, en este orden, `n_lot_size` `RejectionRecord` con
+    `verdict.rejection_reason=LOT_SIZE_OUT_OF_BOUNDS`, luego `n_other_reason`
+    `RejectionRecord` con `other_reason` (por defecto `INSUFFICIENT_RR` si
+    `n_other_reason > 0` y `other_reason` no se especifica) y finalmente
+    `n_entry_fills` `FillRecord(is_exit=False)` — insumo de A1-A4 y A7 (Change #51).
+    Timestamps deterministas, secuenciales de 1 minuto desde 2024-01-02T14:30 UTC.
+    """
+    resolved_other_reason = (
+        other_reason if other_reason is not None else RejectionReason.INSUFFICIENT_RR
+    )
+    ledger = Ledger(provenance=_TEST_PROVENANCE, entries=[])
+    timestamp = datetime(2024, 1, 2, 14, 30, tzinfo=UTC)
+    equity = 100_000.0
+    for _ in range(n_lot_size):
+        ledger.append(
+            RejectionRecord(
+                candidate_id="B",
+                symbol=symbol,
+                intent_time=timestamp,
+                verdict=InspectorVerdict(
+                    authorized=False, rejection_reason=RejectionReason.LOT_SIZE_OUT_OF_BOUNDS
+                ),
+            )
+        )
+        timestamp += timedelta(minutes=1)
+    for _ in range(n_other_reason):
+        ledger.append(
+            RejectionRecord(
+                candidate_id="B",
+                symbol=symbol,
+                intent_time=timestamp,
+                verdict=InspectorVerdict(authorized=False, rejection_reason=resolved_other_reason),
+            )
+        )
+        timestamp += timedelta(minutes=1)
+    for _ in range(n_entry_fills):
+        ledger.append(
+            FillRecord(
+                candidate_id="B",
+                symbol=symbol,
+                timestamp_utc=timestamp,
+                price=100.0,
+                direction=Direction.LONG,
+                is_exit=False,
+                cost_applied=0.0,
+                equity_after=equity,
+            )
+        )
+        timestamp += timedelta(minutes=1)
     return ledger
 
 

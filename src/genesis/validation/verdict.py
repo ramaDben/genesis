@@ -22,10 +22,15 @@ from pathlib import Path
 import numpy as np
 
 from genesis.backtest.ledger import BreachEvent, BreachKind
-from genesis.backtest.metrics import profit_factor
+from genesis.backtest.metrics import (
+    IntentAuthorizationCounts,
+    intent_authorization_counts,
+    profit_factor,
+)
 from genesis.backtest.risk_profile import RiskProfile
 from genesis.data.metadata import current_git_commit
 from genesis.data.profile import FirmProfile
+from genesis.strategy.inspector import RejectionReason
 from genesis.validation._dsr import deflated_sharpe_ratio
 from genesis.validation._returns import extract_trade_returns
 from genesis.validation.dsr_pbo import DsrPboResult
@@ -134,6 +139,38 @@ class SymbolGateOutcome:
     pf_cost_stress_1_5x: float
     g9_pass: bool
     all_pass: bool
+    # --- Change #51 (R2/R3): señal de "evidencia de sizing ausente", no un gate. No
+    # participa de `all_pass` ni de ningún `gN_pass` (los gates no se relajan). ---
+    sizing_evidence_insufficient: bool
+    intents_total: int
+    intents_authorized: int
+    rejections_by_reason: Mapping[str, int]
+
+
+def _is_sizing_evidence_insufficient(counts: IntentAuthorizationCounts) -> bool:
+    """Predicado literal de R3 (Change #51), con el desempate aprobado por el gate humano (D1).
+
+    `True` si y solo si el rechazo fue **total** (`intents_total > 0` y
+    `intents_authorized == 0`) y el motivo `LOT_SIZE_OUT_OF_BOUNDS` es dominante:
+    `n_lot_size > 0` y `n_lot_size >= max(conteo de cualquier otro motivo)`. El
+    empate cuenta a favor de `LOT_SIZE_OUT_OF_BOUNDS` (criterio del eval A7 del
+    `spec.md`, adoptado por `design.md` Q3 y confirmado en la aprobación de diseño).
+    Si `intents_total == 0` (sin señal de entrada, no rechazo de sizing) es `False`.
+    """
+    if counts.intents_total == 0 or counts.intents_authorized != 0:
+        return False
+    n_lot_size = counts.rejections_by_reason.get(RejectionReason.LOT_SIZE_OUT_OF_BOUNDS.value, 0)
+    if n_lot_size == 0:
+        return False
+    n_max_other = max(
+        (
+            count
+            for reason, count in counts.rejections_by_reason.items()
+            if reason != RejectionReason.LOT_SIZE_OUT_OF_BOUNDS.value
+        ),
+        default=0,
+    )
+    return n_lot_size >= n_max_other
 
 
 def _build_symbol_gate_outcome(
@@ -203,6 +240,9 @@ def _build_symbol_gate_outcome(
         and g9_pass
     )
 
+    intent_counts = intent_authorization_counts(wfa_result.oos_ledger_cosido)
+    sizing_evidence_insufficient = _is_sizing_evidence_insufficient(intent_counts)
+
     return SymbolGateOutcome(
         trades_oos_total=trades_oos_total,
         g1_pass=g1_pass,
@@ -224,6 +264,10 @@ def _build_symbol_gate_outcome(
         pf_cost_stress_1_5x=pf_cost_stress_1_5x,
         g9_pass=g9_pass,
         all_pass=all_pass,
+        sizing_evidence_insufficient=sizing_evidence_insufficient,
+        intents_total=intent_counts.intents_total,
+        intents_authorized=intent_counts.intents_authorized,
+        rejections_by_reason=intent_counts.rejections_by_reason,
     )
 
 
@@ -245,6 +289,9 @@ class CandidateGateSummary:
     p6_pass: bool
     p6_violating_symbols: Mapping[str, tuple[BreachKind, ...]]
     passes_g_c_p: bool
+    # Change #51 (R4): símbolos con `sizing_evidence_insufficient=True`, agregados
+    # hacia arriba sin colapsar/promediar. No participa de `passes_g_c_p`.
+    symbols_with_insufficient_sizing_evidence: frozenset[str]
 
 
 def _evaluate_p1_to_p5(prop_sim_result: PropSimResult) -> tuple[bool, bool, bool, bool, bool]:
@@ -317,6 +364,12 @@ def build_candidate_gate_summary(
         c1_pass and c2_pass and p1_pass and p2_pass and p3_pass and p4_pass and p5_pass and p6_pass
     )
 
+    symbols_with_insufficient_sizing_evidence = frozenset(
+        symbol
+        for symbol, outcome in symbol_gate_outcomes.items()
+        if outcome.sizing_evidence_insufficient
+    )
+
     return CandidateGateSummary(
         candidate_id=bundle.candidate_id,
         symbol_gate_outcomes=symbol_gate_outcomes,
@@ -332,6 +385,7 @@ def build_candidate_gate_summary(
         p6_pass=p6_pass,
         p6_violating_symbols=p6_violating,
         passes_g_c_p=passes_g_c_p,
+        symbols_with_insufficient_sizing_evidence=symbols_with_insufficient_sizing_evidence,
     )
 
 
@@ -868,9 +922,16 @@ def _candidate_summary_payload(summary: CandidateGateSummary) -> dict:
                 "pf_cost_stress_1_5x": outcome.pf_cost_stress_1_5x,
                 "g9_pass": outcome.g9_pass,
                 "all_pass": outcome.all_pass,
+                "sizing_evidence_insufficient": outcome.sizing_evidence_insufficient,
+                "intents_total": outcome.intents_total,
+                "intents_authorized": outcome.intents_authorized,
+                "rejections_by_reason": dict(sorted(outcome.rejections_by_reason.items())),
             }
             for symbol, outcome in summary.symbol_gate_outcomes.items()
         },
+        "symbols_with_insufficient_sizing_evidence": sorted(
+            summary.symbols_with_insufficient_sizing_evidence
+        ),
     }
 
 
@@ -907,13 +968,20 @@ def render_tearsheet(result: VerdictResult) -> str:
             f"C2: {payload['c2_min_pf_non_passing']:.4f} (pass={payload['c2_pass']})"
         )
         lines.append("- P1..P6: " + ", ".join(f"P{i}={payload[f'p{i}_pass']}" for i in range(1, 7)))
+        symbols_sin_evidencia = payload["symbols_with_insufficient_sizing_evidence"]
+        lines.append(
+            "- Símbolos sin evidencia de sizing: "
+            + (", ".join(symbols_sin_evidencia) if symbols_sin_evidencia else "(ninguno)")
+        )
         lines.append("")
         lines.append(
             "| symbol | trades | g1 | wfe | g2 | pf | g3 | dsr | g4 | pbo | g5 | "
-            "maxdd/lim | g6 | breach% | g7 | cliff | degrad% | g8 | pf_stress | g9 | all |"
+            "maxdd/lim | g6 | breach% | g7 | cliff | degrad% | g8 | pf_stress | g9 | all | "
+            "sizing_insuf |"
         )
         lines.append(
             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+            "---|"
         )
         for symbol, outcome in payload["symbol_gate_outcomes"].items():
             lines.append(
@@ -926,7 +994,7 @@ def render_tearsheet(result: VerdictResult) -> str:
                 f"{outcome['sensitivity_has_cliff']} | "
                 f"{outcome['sensitivity_max_degradation_pct']:.3f} | {outcome['g8_pass']} | "
                 f"{outcome['pf_cost_stress_1_5x']:.3f} | {outcome['g9_pass']} | "
-                f"{outcome['all_pass']} |"
+                f"{outcome['all_pass']} | {outcome['sizing_evidence_insufficient']} |"
             )
         lines.append("")
 

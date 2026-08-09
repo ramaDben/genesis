@@ -10,6 +10,7 @@ al `FillRecord` inmediatamente anterior en el ledger (los `FillRecord` de entrad
 descuentan costos, nunca acreditan PnL de mercado).
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -199,3 +200,54 @@ def rejection_rate_by_reason(ledger: Ledger) -> dict[str, float]:
     if total == 0:
         return {}
     return {key: count / total for key, count in counts.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class IntentAuthorizationCounts:
+    """Conteo absoluto de intents de un `Ledger`, autorizados vs. rechazados por motivo (R1).
+
+    A diferencia de `rejection_rate_by_reason` (tasa normalizada sobre eventos de
+    riesgo, `RejectionRecord + BreachEvent`), este es un conteo absoluto sobre
+    intents propuestos por el candidato (`RejectionRecord + FillRecord` de
+    entrada); `BreachEvent` no participa, porque no es un intent propuesto.
+    """
+
+    intents_authorized: int
+    """`count(FillRecord con is_exit=False)`: intents que el embudo autorizó."""
+
+    intents_total: int
+    """`intents_authorized + count(RejectionRecord)`: todos los intents propuestos."""
+
+    rejections_by_reason: Mapping[str, int]
+    """Conteo de `RejectionRecord` por `RejectionReason.value`; `"unknown"` si `None`."""
+
+
+def intent_authorization_counts(ledger: Ledger) -> IntentAuthorizationCounts:
+    """Cuenta intents autorizados y rechazados por motivo de un `(candidate_id, symbol)` (R1).
+
+    Precondición: `ledger` corresponde a un único `(candidate_id, symbol)` (p. ej.
+    `wfa_result.oos_ledger_cosido`); esta función **no** filtra por esos campos, igual
+    que `extract_trade_returns`/`profit_factor` sobre el mismo ledger (Q2 de
+    `design.md`, Change #51). Un solo recorrido O(n), sin mutar `ledger` (R50).
+    `BreachEvent` no cuenta como intent. `"unknown"` para `RejectionRecord` con
+    `verdict.rejection_reason is None` (estado imposible por invariante de
+    `InspectorVerdict`; se contabiliza en vez de fallar, el fail-fast de ese
+    invariante es responsabilidad del Inspector).
+    """
+    intents_authorized = 0
+    rejections_by_reason: dict[str, int] = {}
+    for entry in ledger.entries:
+        payload = entry.payload
+        if isinstance(payload, FillRecord):
+            if not payload.is_exit:
+                intents_authorized += 1
+        elif isinstance(payload, RejectionRecord):
+            reason = payload.verdict.rejection_reason
+            key = reason.value if reason is not None else "unknown"
+            rejections_by_reason[key] = rejections_by_reason.get(key, 0) + 1
+    intents_total = intents_authorized + sum(rejections_by_reason.values())
+    return IntentAuthorizationCounts(
+        intents_authorized=intents_authorized,
+        intents_total=intents_total,
+        rejections_by_reason=rejections_by_reason,
+    )

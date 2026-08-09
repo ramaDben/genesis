@@ -16,6 +16,7 @@ from genesis.backtest.ledger import (
     RunProvenance,
 )
 from genesis.backtest.metrics import (
+    intent_authorization_counts,
     ledger_metrics_summary,
     max_concurrent_exposure,
     max_drawdown,
@@ -279,3 +280,85 @@ def test_ledger_metrics_summary_sobre_ledger_vacio_no_revienta() -> None:
     assert summary.sharpe_pointwise == sharpe_pointwise(ledger)
     assert summary.max_drawdown == max_drawdown(ledger)
     assert summary.win_rate == win_rate(ledger)
+
+
+def _rejection(timestamp: datetime, reason: RejectionReason) -> RejectionRecord:
+    return RejectionRecord(
+        candidate_id="B",
+        symbol="US500",
+        intent_time=timestamp,
+        verdict=InspectorVerdict(authorized=False, rejection_reason=reason),
+    )
+
+
+def test_intent_authorization_counts_rechazo_total() -> None:
+    """A1 (Change #51): 24 rechazos por sizing y 0 fills → todo lo rechazado es sizing."""
+    entries = [
+        LedgerEntry(
+            provenance=_PROVENANCE,
+            payload=_rejection(_T0, RejectionReason.LOT_SIZE_OUT_OF_BOUNDS),
+        )
+        for _ in range(24)
+    ]
+    ledger = Ledger(provenance=_PROVENANCE, entries=entries)
+
+    counts = intent_authorization_counts(ledger)
+
+    assert counts.intents_authorized == 0
+    assert counts.intents_total == 24
+    assert counts.rejections_by_reason == {"lot_size_out_of_bounds": 24}
+
+
+def test_intent_authorization_counts_ledger_vacio() -> None:
+    ledger = Ledger(provenance=_PROVENANCE, entries=[])
+
+    counts = intent_authorization_counts(ledger)
+
+    assert counts.intents_authorized == 0
+    assert counts.intents_total == 0
+    assert counts.rejections_by_reason == {}
+
+
+def test_intent_authorization_counts_breach_y_exit_no_cuentan_como_intents() -> None:
+    """`BreachEvent` no es un intent propuesto; `FillRecord(is_exit=True)` no es entrada."""
+    entries = [
+        LedgerEntry(
+            provenance=_PROVENANCE,
+            payload=BreachEvent(
+                kind=BreachKind.NEWS,
+                trading_day=_T0.date(),
+                timestamp_utc=_T0,
+                magnitude=60.0,
+                threshold=0.0,
+            ),
+        ),
+        LedgerEntry(
+            provenance=_PROVENANCE,
+            payload=_fill(_T1, 100.0, is_exit=True, equity_after=100_000.0),
+        ),
+    ]
+    ledger = Ledger(provenance=_PROVENANCE, entries=entries)
+
+    counts = intent_authorization_counts(ledger)
+
+    assert counts.intents_total == 0
+    assert counts.intents_authorized == 0
+    assert counts.rejections_by_reason == {}
+
+
+def test_intent_authorization_counts_rejection_reason_none_cuenta_como_unknown() -> None:
+    """`rejection_reason=None` (estado imposible por invariante) se cuenta como `unknown`."""
+    entries = [
+        LedgerEntry(
+            provenance=_PROVENANCE,
+            payload=RejectionRecord(
+                candidate_id="B", symbol="US500", intent_time=_T0, verdict=AUTHORIZED
+            ),
+        )
+    ]
+    ledger = Ledger(provenance=_PROVENANCE, entries=entries)
+
+    counts = intent_authorization_counts(ledger)
+
+    assert counts.intents_total == 1
+    assert counts.rejections_by_reason == {"unknown": 1}
