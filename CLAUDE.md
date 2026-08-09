@@ -4,6 +4,8 @@
 
 Pipeline de validación institucional para prop firms: un **torneo de candidatos de estrategia** (A: CT sweep-fade, B: ORB intradía en índices — prioridad, C: TSMOM — diferido) bajo gates mecánicos idénticos (G/C/P/T). **SSoT**: `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` — todo cambio de alcance se valida contra el spec, los gates nunca se relajan.
 
+**Visión de largo plazo** (contexto para decidir alcance, no alcance vigente): las 4 capas son agnósticas a la estrategia, así que genesis es un **evaluador de caja negra** — el torneo A/B/C es el primer caso de uso, no el techo. El destino es una búsqueda automatizada de candidatos, condicionada a un **ledger de ensayos persistente** ([#53](https://github.com/ramaDben/genesis/issues/53)) que alimente el `n_trials` del DSR: hoy solo cuenta la grilla interna de una corrida, y sin ese contador honesto G4 dejaría de proteger en silencio. El ledger va antes que el arquitecto. Ver el README para los dos invariantes ya decididos (genoma declarativo, señal de retorno sin OOS).
+
 ## Arquitectura (4 capas agnósticas a la estrategia, `src/genesis/`)
 
 | Capa | Paquete | Responsabilidad |

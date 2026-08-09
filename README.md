@@ -4,7 +4,22 @@ Pipeline de validación institucional para prop firms: un **torneo de candidatos
 
 > **Software propietario.** Todos los derechos reservados. El acceso a este repositorio no concede licencia de uso. Ver [`LICENSE`](LICENSE).
 
-El objetivo no es "hacer backtests bonitos": es producir un veredicto **GO / NO-GO** reproducible y no negociable sobre si una estrategia sobrevive la economía real de un challenge de prop firm, con los costos completos y las reglas de la firma aplicadas.
+## Misión
+
+Producir un veredicto **GO / NO-GO** reproducible y no negociable sobre si una estrategia sobrevive la economía real de un challenge de prop firm, con los costos completos y las reglas de la firma aplicadas. El objetivo no es "hacer backtests bonitos": es que un `GO` signifique algo, y que un `NO-GO` sea informativo sobre por qué.
+
+## Visión
+
+Las cuatro capas son agnósticas a la estrategia y la capa 2 define el contrato plugin `StrategyCandidate`. Eso hace de genesis un **evaluador de caja negra**: entra un candidato, salen gates y veredicto. El torneo de tres candidatos (A/B/C) es el primer caso de uso, no el techo.
+
+El destino es una **búsqueda automatizada de estrategias** — un arquitecto que proponga candidatos y aprenda del veredicto. Ahí aparece la condición que ordena todo el roadmap: hoy el DSR solo deflacta por los ensayos de la grilla interna de una corrida (`n_trials_signal_total`), así que una búsqueda que ocurra *entre* corridas es invisible para el denominador. Con 500 candidatos propuestos, cada corrida reportaría un DSR respetable calculado sobre 9 intentos cuando hubo 4.500, y **G4 dejaría de proteger sin emitir señal de que dejó de hacerlo**.
+
+Por eso el **ledger de ensayos persistente** ([#53](https://github.com/ramaDben/genesis/issues/53)) va **antes** que el arquitecto: construido al revés, produce resultados que se ven excelentes y no significan nada, sin forma de distinguirlos retroactivamente porque los ensayos descartados no quedaron registrados en ninguna parte. La maquinaria de deflación ya es la correcta —Bailey y López de Prado diseñaron el DSR precisamente para castigar la búsqueda múltiple—; lo que falta es conectarle un contador honesto.
+
+Dos invariantes de esa visión ya están decididos:
+
+- El arquitecto emitirá un **genoma declarativo** sobre una gramática cerrada de primitivas forward-only, materializado por un ejecutor fijo y auditado. Nunca un `on_bar` escrito por un modelo: `LookaheadError` protege el framework, no la lógica que le metan adentro.
+- Su señal de retorno **no incluirá OOS** — solo métricas IS, diagnóstico de señal y taxonomía de rechazos. Un buscador que ve el OOS y ajusta *se convierte* en el mecanismo de sobreajuste.
 
 ## Principios de diseño
 
@@ -15,7 +30,7 @@ El objetivo no es "hacer backtests bonitos": es producir un veredicto **GO / NO-
 
 ## Estado del proyecto
 
-Las cuatro capas están construidas y verificadas: **639 tests** en verde, más lint (`ruff`, `bandit`, `vulture`, `deptry`) y type-check (`ty`) limpios en CI.
+Las cuatro capas están construidas y verificadas: **666 tests** en verde, más lint (`ruff`, `bandit`, `vulture`, `deptry`) y type-check (`ty`) limpios en CI. Versión actual: `0.1.16`.
 
 | Capa | Paquete | Estado |
 |---|---|---|
@@ -32,11 +47,28 @@ Candidatos:
 | **B** | ORB intradía en índices | **Ejecutable.** Implementa `StrategyCandidate` y `RiskLevelsProvider`. |
 | **C** | TSMOM | Diferido, no implementado. |
 
-Limitación conocida de rendimiento: el diagnóstico del Candidato A tarda **~26 min por símbolo**
-sobre las 232.487 barras M1 reales de un índice, y **98,2%** de ese tiempo está en
-`detect_ct_events` — el coste crece de forma cuadrática porque `LiquidityMap` nunca purga los
-niveles mitigados. Medido con `scripts/bench_diagnose.py`; el plan de optimización está en el
-[issue #38](https://github.com/ramaDben/genesis/issues/38).
+### Ausencia de evidencia ≠ NO-GO
+
+El veredicto distingue un `NO-GO` por desempeño de un candidato que **nunca llegó a operar**
+porque el sizer produjo lotes inviables: `intent_authorization_counts` (capa 3) clasifica los
+intents propuestos, y la señal `sizing_evidence_insufficient` viaja por `SymbolGateOutcome` →
+`CandidateGateSummary` → manifest y tearsheet. Sin relajar ningún gate G/C/P/T y sin ampliar
+`VerdictKind` más allá de sus 4 miembros normativos (R91). Es también un prerrequisito de la
+búsqueda automatizada: un generador que recibe `NO_GO` en vez de "sin evidencia" aprende de
+ruido y descarta familias enteras que nunca se probaron.
+
+### Rendimiento
+
+El diagnóstico del Candidato A pasó de **35 min a 1,2 min por símbolo** (29×) sobre las 232.487
+barras M1 reales de un índice; los 8 símbolos bajaron de 4,7 h a 9,6 min. Los 15.478 eventos CT
+detectados son idénticos antes y después: la optimización no cambió la salida.
+
+El cuello estaba en `detect_ct_events`, cuadrático porque `LiquidityMap` nunca purgaba los
+niveles mitigados. Purgarlos reveló un segundo cuello que el primero ocultaba —44,8 M de
+`dataclasses.replace` reconstruyendo `SweepTracker` idénticos—, y evitarlo por comparación de
+identidad aportó dos tercios de la ganancia final. La lección quedó registrada en el
+[issue #38](https://github.com/ramaDben/genesis/issues/38): perfilar antes de optimizar, y
+volver a perfilar **después**. Medido con `scripts/bench_diagnose.py`.
 
 ## Requisitos
 
