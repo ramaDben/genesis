@@ -2432,3 +2432,226 @@ Porque el criterio no es «reducir líneas» sino «no cambiar resultados». Tre
 helpers restantes parecen duplicados y no lo son; unificarlos a ciegas habría alterado la
 salida numérica sin que ningún test lo delatara. La regla que gobierna este Change —equivalencia
 observacional bit a bit— manda sobre el impulso de deduplicar.
+
+<!-- change:51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un -->
+# Specification — señalizar "ausencia de evidencia" en rechazos totales de sizing
+
+Change #51 (Refs #46). Formaliza `idea.md` + `proposal.md` acotados a **Capa 1** (decisión
+humana registrada en `mem:change-51-scope-decision`): detectar y señalizar que un candidato
+quedó sin evidencia porque el embudo Inspector rechazó sus intents por
+`LOT_SIZE_OUT_OF_BOUNDS`, sin que esa causa sea indistinguible de un `NO_GO` por desempeño real.
+
+## Objetivo
+
+Que el veredicto de torneo (`run_verdict`) y sus artefactos serializados (manifest JSON,
+tearsheet) permitan distinguir, para cada `(candidate_id, symbol)`:
+
+- **G1 falla por desempeño**: hubo `trades_oos_total` insuficientes pero > 0, o 0 trades sin que
+  el sizing sea la causa dominante.
+- **G1 falla por ausencia de evidencia de sizing**: el candidato nunca llegó a operar ese símbolo
+  porque el sizer produjo lotes inviables antes de tocar el mercado.
+
+Sin relajar ningún gate G/C/P/T existente (SSoT `docs/SPEC_GENESIS_v1.4_...md`) y sin ampliar
+`VerdictKind` más allá de sus 4 miembros normativos (R91,
+`.pulse/specs/validation/spec.md:1977`).
+
+## Alcance
+
+### IN
+
+1. Contar, por `(candidate_id, symbol)`, los intents propuestos por el candidato y clasificarlos
+   en autorizados vs. rechazados por motivo, a partir del `Ledger` ya producido por el backtest
+   (`RejectionRecord` / `FillRecord`), sin cambiar el formato del ledger.
+2. Definir una señal booleana explícita de "evidencia de sizing ausente" a nivel símbolo
+   (`SymbolGateOutcome`), agregada a nivel candidato (`CandidateGateSummary`), calculada **antes**
+   de `run_verdict` — sin introducir un quinto `VerdictKind`.
+3. Exponer esa señal en el manifest JSON y en el tearsheet Markdown (misma fuente única de datos
+   que ya usan ambos, `_candidate_summary_payload`), de forma que un consumidor automatizado
+   (incl. un futuro arquitecto de estrategias) pueda leerla sin parsear prosa.
+4. Fijar un umbral concreto y no ambiguo para esta señal (ver R3), documentado como decisión de
+   este Change — no como parámetro configurable (eso es Capa 3, fuera de alcance).
+
+### OUT (YAGNI explícito — changes de seguimiento, no de este Change)
+
+- **Capa 2**: pre-flight algebraico de factibilidad de sizing (banda de `stop_distance` viable).
+  Depende de que cada `StrategyCandidate` exponga su fórmula de sizing como dato de primera
+  clase; solo verificada para `CandidateB`.
+- **Capa 3**: política de sizing configurable (`reject`/`clamp_to_min`/`exclude_symbol`), su
+  default, y el versionado/hash de esa configuración (`inspector_funnel_config_hash`).
+- Migrar `min_lot`/`max_lot` de `InspectorFunnelConfig` (global) a `SymbolFigure` (por
+  símbolo/bróker).
+- Cualquier modificación de `VerdictKind` (R91) o de la prioridad de `run_verdict` (R92): si el
+  diseño concluyera que hace falta un quinto veredicto, **debe** elevarse explícitamente al
+  humano como decisión de spec normativo (`.pulse/specs/validation/spec.md`), no asumirse en
+  `design`.
+- Un contador explícito de "intents vistos" en `_process_new_entries` (ver hallazgo H1 más abajo:
+  no es necesario para este Change, el conteo por inferencia del ledger es correcto y suficiente).
+
+## Hallazgo de verificación de código (resuelve la pregunta abierta 7 del proposal)
+
+**H1 — `_open_position`/`_resolve_entry_fill` NO puede perder el fill de un intent ya
+autorizado.** Verificado en `src/genesis/backtest/simulator.py`:
+
+- `_resolve_entry_fill` (líneas 169-185) tiene tipo de retorno `ResolvedFill` (no
+  `ResolvedFill | None`): si `coverage` es `True` y hay ticks en la ventana de la barra, usa el
+  primer tick; en **cualquier otro caso** (sin cobertura, o con cobertura pero sin ticks en la
+  ventana) cae al fallback `ResolvedFill(price=bar.open, timestamp_utc=bar.timestamp_utc)`
+  (línea 185). No hay ninguna rama que retorne `None` o that omita el registro.
+- `_open_position` (líneas 507-561) se invoca únicamente desde `_process_new_entries` (línea 505)
+  cuando `verdict.authorized is True`, y **siempre** — sin condicional — construye un
+  `OpenPosition` y hace `self.ledger.append(FillRecord(..., is_exit=False, ...))` (líneas
+  533-555) usando el resultado no-opcional de `_resolve_entry_fill`.
+- Conclusión: todo intent autorizado produce **exactamente un** `FillRecord(is_exit=False)` en el
+  ledger, sin excepción y sin dependencia de cobertura de ticks. La asunción del proposal
+  ("`n_intents_totales = n_rejections + n_fills_de_entrada`") es **correcta por construcción**,
+  no una inferencia post-hoc frágil. No hace falta agregar un contador explícito de "intents
+  vistos" en `_process_new_entries` para que el conteo de intents totales sea confiable.
+
+## Requisitos funcionales
+
+- **R1** (mapea idea.md §1/§2, proposal "Contexto observado"). Debe existir una función pura
+  (nueva, en `src/genesis/backtest/metrics.py` o módulo equivalente de la capa 3) que, dado un
+  `Ledger` de un `(candidate_id, symbol)`, retorne el conteo de intents autorizados
+  (`count(FillRecord donde is_exit=False)`) y el conteo de intents rechazados por motivo
+  (`count(RejectionRecord)` agrupado por `RejectionReason`), sin mutar el ledger ni depender de
+  estado del `Simulator` (forward-only, determinismo).
+- **R2** (mapea idea.md §3, proposal "SymbolGateOutcome"). `SymbolGateOutcome`
+  (`src/genesis/validation/verdict.py`) debe extenderse con un campo booleano
+  `sizing_evidence_insufficient: bool` y con el desglose de motivos de rechazo usado para
+  calcularlo, construido en `_build_symbol_gate_outcome` a partir de `wfa_result.oos_ledger_cosido`
+  (el `Ledger` ya disponible ahí, sin I/O adicional). No debe alterar `g1_pass` ni ningún otro
+  campo `gN_pass` existente: los gates no se relajan.
+- **R3** (mapea idea.md pregunta abierta 1, proposal "umbral"). El umbral que fija
+  `sizing_evidence_insufficient=True` para un símbolo es: **todos** los intents propuestos para
+  ese `(candidate_id, symbol)` fueron rechazados (`intents_autorizados == 0` y
+  `intents_totales > 0`) **y** el motivo de rechazo dominante (mayor conteo) es
+  `LOT_SIZE_OUT_OF_BOUNDS`. Es un umbral fijo de este Change, no configurable (Capa 3 queda
+  fuera). Si `intents_totales == 0` (el candidato nunca propuso ningún intent para ese símbolo,
+  p. ej. por señal de entrada inexistente), `sizing_evidence_insufficient` debe ser `False`: es un
+  caso distinto (ausencia de señal, no ausencia de evidencia por sizing) y no debe confundirse.
+- **R4** (mapea idea.md pregunta abierta 2, proposal "granularidad"). La señal es **por símbolo**
+  (`SymbolGateOutcome.sizing_evidence_insufficient`), consistente con la granularidad de G1-G9.
+  `CandidateGateSummary` debe agregar hacia arriba con un campo
+  `symbols_with_insufficient_sizing_evidence: frozenset[str]` (símbolos del candidato con la señal
+  activa), sin promediar ni colapsar la información por símbolo.
+- **R5** (mapea idea.md pregunta abierta 3, proposal "reemplaza/rodea R91"). La señal **no**
+  introduce un quinto `VerdictKind` ni modifica R91/R92: vive exclusivamente en
+  `SymbolGateOutcome`/`CandidateGateSummary`, evaluada antes de `run_verdict`. `VerdictKind`
+  sigue teniendo exactamente 4 miembros y `run_verdict` sigue la misma prioridad
+  GO_ENSEMBLE→GO→GO_PARCIAL→NO_GO sin ninguna rama nueva. Esta decisión queda fijada por este
+  Change; si `design` encontrara que es insuficiente, debe elevarlo al humano en vez de tocar R91
+  por su cuenta.
+- **R6** (mapea idea.md §4, proposal "manifest/tearsheet"). `_candidate_summary_payload` y
+  `render_tearsheet` (`src/genesis/validation/verdict.py`) deben serializar/renderizar
+  `sizing_evidence_insufficient` por símbolo y `symbols_with_insufficient_sizing_evidence` por
+  candidato, preservando la propiedad R97 existente (tearsheet y manifest comparten la misma
+  fuente de datos).
+- **R7** (mapea idea.md §3, proposal "nadie actúa sobre `rejection_rate_by_reason`"). El nuevo
+  cómputo (R1) reemplaza, para el propósito de esta señal, la dependencia en
+  `rejection_rate_by_reason` (que normaliza sobre eventos de riesgo, no sobre intents totales, y
+  no tiene consumidores productivos hoy). No es necesario modificar ni eliminar
+  `rejection_rate_by_reason`: queda como está, fuera de alcance.
+
+## Criterios de aceptación (evals ejecutables)
+
+- **A1**
+  ```
+  DADO  un Ledger sintético de un (candidate_id, symbol) con 24 RejectionRecord
+        (verdict.rejection_reason=LOT_SIZE_OUT_OF_BOUNDS) y 0 FillRecord(is_exit=False)
+  CUANDO se invoca la función de R1 sobre ese Ledger
+  ENTONCES retorna intents_autorizados=0, intents_totales=24,
+           conteo_por_motivo={"lot_size_out_of_bounds": 24}
+  ```
+  (test de pytest, `tests/backtest/test_metrics.py` o módulo nuevo equivalente,
+  `pytest.mark.unit`).
+
+- **A2**
+  ```
+  DADO  el Ledger sintético de A1 usado como wfa_result.oos_ledger_cosido de un símbolo
+  CUANDO se construye SymbolGateOutcome vía _build_symbol_gate_outcome
+  ENTONCES outcome.sizing_evidence_insufficient is True
+       Y   outcome.g1_pass is False (sin cambios respecto al comportamiento actual: 0 trades)
+       Y   outcome.trades_oos_total == 0
+  ```
+  (test de pytest, `tests/validation/test_verdict.py`, `pytest.mark.unit`).
+
+- **A3**
+  ```
+  DADO  un Ledger sintético con 0 RejectionRecord y 0 FillRecord para un símbolo
+        (candidato sin señal de entrada en ese símbolo, no un rechazo de sizing)
+  CUANDO se construye SymbolGateOutcome vía _build_symbol_gate_outcome
+  ENTONCES outcome.sizing_evidence_insufficient is False
+  ```
+  (test de pytest, `tests/validation/test_verdict.py`, `pytest.mark.unit`; distingue
+  explícitamente "sin evidencia por sizing" de "sin señal").
+
+- **A4**
+  ```
+  DADO  un Ledger sintético con 20 RejectionRecord LOT_SIZE_OUT_OF_BOUNDS y 4
+        FillRecord(is_exit=False) para el mismo símbolo (rechazo parcial, no total)
+  CUANDO se construye SymbolGateOutcome vía _build_symbol_gate_outcome
+  ENTONCES outcome.sizing_evidence_insufficient is False
+  ```
+  (test de pytest, `tests/validation/test_verdict.py`, `pytest.mark.unit`; confirma que el umbral
+  de R3 es "rechazo total", no cualquier concentración).
+
+- **A5**
+  ```
+  DADO  un VerdictResult con >=1 CandidateGateSummary cuyo símbolo tiene
+        sizing_evidence_insufficient=True
+  CUANDO se llama render_tearsheet(result) y verdict_result_to_manifest_json(result, ...)
+  ENTONCES ambas salidas incluyen la marca de sizing_evidence_insufficient para ese símbolo
+       Y   len(VerdictKind) == 4 (no se rompió R91: test de conteo existente sigue en verde)
+  ```
+  (test de pytest, `tests/validation/test_verdict.py`, `pytest.mark.unit` + `pytest.mark.golden`
+  si el repo usa ese marcador para snapshots de tearsheet/manifest — verificar convención
+  existente en `tests/validation/` antes de implementar).
+
+- **A6**
+  ```
+  DADO  el repositorio en el estado posterior a implementar R1-R7
+  CUANDO rg -n "class VerdictKind" -A 8 src/genesis/validation/verdict.py
+  ENTONCES el bloque sigue mostrando exactamente los 4 miembros GO, GO_ENSEMBLE, GO_PARCIAL,
+           NO_GO (ninguno agregado)
+  ```
+  (eval `rg`, verificación de no-regresión de R91/R5).
+
+- **A7** (propiedad, spec §9). Property test con `hypothesis`: para cualquier combinación de
+  conteos `(n_rejections_lot_size, n_rejections_otros_motivos, n_fills)` con
+  `n_rejections_lot_size + n_rejections_otros_motivos + n_fills >= 0`,
+  `sizing_evidence_insufficient` es `True` si y solo si `n_fills == 0` y
+  `n_rejections_lot_size > 0` y `n_rejections_lot_size >= n_rejections_otros_motivos` (motivo
+  dominante) y `(n_rejections_lot_size + n_rejections_otros_motivos) > 0`. Marcado
+  `pytest.mark.unit`.
+
+## Riesgos
+
+- **Riesgo 1**: si `design` decide construir la señal recorriendo `wfa_result.oos_ledger_cosido`
+  en cada llamada a `_build_symbol_gate_outcome`, el costo es O(n_entries) adicional por símbolo;
+  a la escala actual del torneo (candidatos × símbolos × ventanas WFA) es marginal, pero debe
+  perfilarse si `bench_diagnose.py` lo señala como regresión (no bloquea CI, spec de performance
+  en `mem:perf-simulador-y-tickcache`).
+- **Riesgo 2**: extender `_candidate_summary_payload` sin actualizar snapshots/golden tests
+  existentes de tearsheet/manifest puede romper tests de formato exacto si el repo los tiene
+  (verificar `tests/validation/` antes de implementar; no confirmado en esta fase si existen
+  golden tests literales del tearsheet completo).
+- **Riesgo 3**: el umbral fijo de R3 (100 % de rechazo, motivo dominante
+  `LOT_SIZE_OUT_OF_BOUNDS`) es deliberadamente conservador y puede no capturar casos de rechazo
+  parcial severo (p. ej. 95 % rechazado) que también constituyen "evidencia insuficiente" en la
+  práctica. Se acepta este límite en este Change (ver Preguntas abiertas P1) para no inventar un
+  umbral de dominio no pedido por el issue.
+
+## Preguntas abiertas (para el humano / para el Change de seguimiento)
+
+- **P1**: ¿el umbral fijo de "100 % de rechazo por sizing" (R3) es suficiente, o el negocio
+  quiere una banda de tolerancia (p. ej. ">=95 %") para capturar casi-rechazos totales? Este
+  Change fija 100 % por ser el caso literal reportado en el issue y evitar inventar un valor de
+  dominio no especificado; requiere confirmación humana si se quiere ampliar.
+- **P2**: si en un Change de seguimiento se retoma Capa 2/Capa 3, ¿el campo
+  `sizing_evidence_insufficient` de este Change debe reutilizarse como entrada de esas capas, o
+  quedará obsoleto una vez exista el pre-flight algebraico (que evitaría el escenario por
+  completo)? No se resuelve aquí — es diseño del Change de seguimiento.
+- **P3**: heredada de `proposal.md` — fórmula de sizing de `CandidateA` no verificada; irrelevante
+  para este Change (Capa 1 no depende de la fórmula de sizing de ningún candidato, solo del
+  resultado ya rechazado/autorizado en el ledger), pero condiciona el alcance de un futuro Change
+  de Capa 2.

@@ -22,3 +22,11 @@
 **Contexto:** Cierre del Change #14 (dominio validation); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-07-10T02:25:26.510778+00:00; tests_passed_at=2026-07-10T23:51:31.345784+00:00; artefactos: /work/.pulse/changes/14-j-feat-validation-prop-sim-verdict-con-gates-t-tearsheet-manifes/idea.md, /work/.pulse/changes/14-j-feat-validation-prop-sim-verdict-con-gates-t-tearsheet-manifes/proposal.md, /work/.pulse/changes/14-j-feat-validation-prop-sim-verdict-con-gates-t-tearsheet-manifes/design.md, /work/.pulse/changes/14-j-feat-validation-prop-sim-verdict-con-gates-t-tearsheet-manifes/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de validation.
+### Heurística: cierre Change #51 validation [#51 · validation · 2026-08-09]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un
+**Contexto:** Cierre del Change #51 (dominio validation); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-08-09T15:19:51.716173+00:00; tests_passed_at=2026-08-09T16:03:51.832352+00:00; artefactos: /work/.pulse/changes/51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un/idea.md, /work/.pulse/changes/51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un/proposal.md, /work/.pulse/changes/51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un/design.md, /work/.pulse/changes/51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de validation.
