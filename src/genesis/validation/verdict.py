@@ -34,7 +34,7 @@ from genesis.strategy.inspector import RejectionReason
 from genesis.validation._dsr import deflated_sharpe_ratio
 from genesis.validation._returns import extract_trade_returns
 from genesis.validation.dsr_pbo import DsrPboResult
-from genesis.validation.errors import VerdictConfigError
+from genesis.validation.errors import TrialLedgerConfigError, VerdictConfigError
 from genesis.validation.montecarlo import McPortfolioResult, McSymbolResult
 from genesis.validation.prop_sim import (
     _DEFAULT_PROFILE_HASH,
@@ -47,6 +47,7 @@ from genesis.validation.prop_sim import (
 )
 from genesis.validation.purged_cv import PurgedCvResult
 from genesis.validation.sensitivity import SensitivityResult
+from genesis.validation.trial_ledger import TrialLedger, TrialLedgerSummary, TrialOutcomeKind
 from genesis.validation.wfa import WfaResult
 
 CONFIG_VERSION: str = "genesis-validation-j/1"
@@ -95,6 +96,11 @@ class CandidateValidationBundle:
     mc_portfolio_result: McPortfolioResult
     prop_sim_result: PropSimResult
     purged_cv_results_by_symbol: Mapping[str, PurgedCvResult] | None = None
+    # Change #53 (Q5): configuración completa del candidato evaluado, identidad de
+    # "lo que se evaluó" para el ledger de ensayos. Opcional al final: ningún llamador
+    # ni test existente se rompe (R21). `__post_init__` no lo valida (un bundle sin
+    # config sigue siendo legítimo cuando no hay ledger).
+    candidate_config: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         """Valida que los símbolos coincidan exactamente entre los 4 mapas (R58)."""
@@ -145,6 +151,11 @@ class SymbolGateOutcome:
     intents_total: int
     intents_authorized: int
     rejections_by_reason: Mapping[str, int]
+    # --- Change #53 (Q6): composición del ledger de ensayos sobre G4. `dsr` (arriba) es
+    # el DSR *efectivo* que gatea; los 3 campos siguientes documentan de dónde sale. ---
+    dsr_pre_ledger_deflation: float
+    n_trials_g4_effective: int
+    ledger_extra_trials: int
 
 
 def _is_sizing_evidence_insufficient(counts: IntentAuthorizationCounts) -> bool:
@@ -181,11 +192,21 @@ def _build_symbol_gate_outcome(
     mc_symbol_result: McSymbolResult,
     risk_profile: RiskProfile,
     starting_balance: float,
+    *,
+    ledger_extra_trials: int,
 ) -> SymbolGateOutcome:
-    """Construye `SymbolGateOutcome` para `symbol` comparando insumos ya producidos (R60/R61)."""
+    """Construye `SymbolGateOutcome` para `symbol` comparando insumos ya producidos (R60/R61).
+
+    `ledger_extra_trials` (Change #53, Q1/PR-1/PR-3) es el N acumulado del ledger de
+    ensayos que se suma a `wfa_result.n_trials_signal_total` para el DSR *efectivo* que
+    gatea G4. Cortocircuito: `ledger_extra_trials == 0` reutiliza
+    `dsr_pbo_result.dsr` verbatim, sin recomputar nada (byte-identidad con el
+    comportamiento pre-Change, A3/A7). `dsr_pbo.py` no se toca.
+    """
     del symbol  # solo para contexto de mensajes futuros (auditoría), no usado en el cómputo
 
-    trades_oos_total = len(extract_trade_returns(wfa_result.oos_ledger_cosido))
+    trade_returns = extract_trade_returns(wfa_result.oos_ledger_cosido)
+    trades_oos_total = len(trade_returns)
     g1_pass = trades_oos_total >= _G1_MIN_TRADES_OOS
 
     wfe = wfa_result.wfe
@@ -194,7 +215,15 @@ def _build_symbol_gate_outcome(
     pf = profit_factor(wfa_result.oos_ledger_cosido)
     g3_pass = pf >= _G3_MIN_PROFIT_FACTOR
 
-    dsr = dsr_pbo_result.dsr
+    dsr_pre_ledger_deflation = dsr_pbo_result.dsr
+    n_trials_g4_effective = wfa_result.n_trials_signal_total + ledger_extra_trials
+    dsr = (
+        dsr_pbo_result.dsr
+        if ledger_extra_trials == 0
+        else deflated_sharpe_ratio(
+            [trade.pnl_delta for trade in trade_returns], n_trials=n_trials_g4_effective
+        )
+    )
     g4_pass = dsr >= _G4_MIN_DSR
 
     pbo = dsr_pbo_result.pbo
@@ -268,6 +297,9 @@ def _build_symbol_gate_outcome(
         intents_total=intent_counts.intents_total,
         intents_authorized=intent_counts.intents_authorized,
         rejections_by_reason=intent_counts.rejections_by_reason,
+        dsr_pre_ledger_deflation=dsr_pre_ledger_deflation,
+        n_trials_g4_effective=n_trials_g4_effective,
+        ledger_extra_trials=ledger_extra_trials,
     )
 
 
@@ -329,8 +361,14 @@ def build_candidate_gate_summary(
     bundle: CandidateValidationBundle,
     risk_profile: RiskProfile,
     starting_balance: float,
+    *,
+    ledger_extra_trials: int = 0,
 ) -> CandidateGateSummary:
-    """Construye `CandidateGateSummary` de `bundle`: gates G por símbolo + C1/C2 + P1-P6."""
+    """Construye `CandidateGateSummary` de `bundle`: gates G por símbolo + C1/C2 + P1-P6.
+
+    `ledger_extra_trials` (Change #53) default `0`: con ledger ausente, comportamiento
+    bit a bit idéntico al pre-Change (R12/R21).
+    """
     symbol_gate_outcomes = {
         symbol: _build_symbol_gate_outcome(
             symbol,
@@ -340,6 +378,7 @@ def build_candidate_gate_summary(
             bundle.mc_symbol_results_by_symbol[symbol],
             risk_profile,
             starting_balance,
+            ledger_extra_trials=ledger_extra_trials,
         )
         for symbol in bundle.wfa_results_by_symbol
     }
@@ -454,6 +493,7 @@ def _compute_t1(
     candidates: Mapping[str, CandidateValidationBundle],
     *,
     no_go_iteration_used: bool = False,
+    ledger_extra_trials: int,
 ) -> TournamentDeflationOutcome:
     """T1: deflación de torneo sobre la canasta diaria combinada del ganador (R71-R78).
 
@@ -470,7 +510,9 @@ def _compute_t1(
         wfa_result.n_trials_signal_total
         for wfa_result in winner_bundle.wfa_results_by_symbol.values()
     )
-    n_trials_deflactado = n_trials_signal_total_ganador + (n_candidatos_torneo - 1)
+    n_trials_deflactado = (
+        n_trials_signal_total_ganador + (n_candidatos_torneo - 1) + ledger_extra_trials
+    )
     if no_go_iteration_used:
         n_trials_deflactado += 1
 
@@ -712,6 +754,11 @@ class VerdictResult:
     ensemble: EnsembleResult | None
     economics_confirmed: bool
     no_go_iteration_used: bool = False
+    # Change #53 (Q8): estado del ledger de ensayos CONSUMIDO por esta invocación de
+    # `run_verdict` (snapshot único, R94). `None` si `ledger=None` (comportamiento
+    # pre-Change, R12).
+    trial_ledger_snapshot: TrialLedgerSummary | None = None
+    ledger_extra_trials: int = 0
 
 
 def _find_go_parcial_candidate(
@@ -719,6 +766,7 @@ def _find_go_parcial_candidate(
     candidate_summaries: Mapping[str, CandidateGateSummary],
     *,
     no_go_iteration_used: bool,
+    ledger_extra_trials: int,
 ) -> tuple[str | None, TournamentDeflationOutcome | None]:
     """Candidato de rama `GO_PARCIAL` (R92c): subconjunto de símbolos válido.
 
@@ -760,11 +808,64 @@ def _find_go_parcial_candidate(
         )
         if 0.0 < summary.c1_fraction_passing < _C1_MIN_FRACTION and p_gates_pass:
             t1_candidate = _compute_t1(
-                candidate_id, candidates, no_go_iteration_used=no_go_iteration_used
+                candidate_id,
+                candidates,
+                no_go_iteration_used=no_go_iteration_used,
+                ledger_extra_trials=ledger_extra_trials,
             )
             if t1_candidate.t1_pass:
                 return candidate_id, t1_candidate
     return None, None
+
+
+def _require_candidate_config(bundle: CandidateValidationBundle) -> Mapping[str, object]:
+    """`bundle.candidate_config`, fail-fast si es `None` (Q5, D2: nunca omisión silenciosa)."""
+    if bundle.candidate_config is None:
+        message = (
+            f"_require_candidate_config(candidate_id={bundle.candidate_id!r}): "
+            "candidate_config es None; con un ledger de ensayos no-None, cada bundle "
+            "evaluado debe traer su configuración completa (Q5)."
+        )
+        raise TrialLedgerConfigError(message)
+    return bundle.candidate_config
+
+
+def _trial_id_for_bundle(ledger: TrialLedger, bundle: CandidateValidationBundle) -> str:
+    """`trial_id` de `bundle` vía `ledger.trial_id_for_config` (PR-2): única derivación
+    sancionada, nunca calculada ni pasada a mano por el llamador.
+    """
+    return ledger.trial_id_for_config(_require_candidate_config(bundle))
+
+
+def record_trial_completions(
+    ledger: TrialLedger,
+    candidates: Mapping[str, CandidateValidationBundle],
+    *,
+    recorded_at_utc: str | None = None,
+) -> tuple[str, ...]:
+    """Borde de escritura (R15 enmendado, Q10): registra un `TrialRecord` `WFA_COMPLETADO`
+    por cada `(candidate_id, symbol)` de `candidates`, usando las claves de identidad
+    institucional del `TrialIdentityContext` de `ledger`. `run_verdict` no invoca esta
+    función: se llama en el borde del llamador, junto a `write_verdict_artifacts` (Q8).
+
+    Devuelve los `trial_id` registrados en orden canónico de `candidate_id` (determinismo,
+    R94). Idempotente por construcción (`TrialLedger.record` delega en `append_trial`, R8).
+    """
+    trial_ids: list[str] = []
+    for candidate_id in sorted(candidates):
+        bundle = candidates[candidate_id]
+        candidate_config = _require_candidate_config(bundle)
+        for symbol in sorted(bundle.wfa_results_by_symbol):
+            record = ledger.build_record(
+                candidate_id,
+                symbol,
+                candidate_config,
+                TrialOutcomeKind.WFA_COMPLETADO,
+                recorded_at_utc=recorded_at_utc,
+            )
+            ledger.record(record)
+            trial_ids.append(record.trial_id)
+    return tuple(trial_ids)
 
 
 def run_verdict(
@@ -776,6 +877,7 @@ def run_verdict(
     ensemble_prop_sim_config: PropSimConfig,
     *,
     no_go_iteration_used: bool = False,
+    ledger: TrialLedger | None = None,
 ) -> VerdictResult:
     """Veredicto de torneo completo (R91-R95bis).
 
@@ -803,8 +905,19 @@ def run_verdict(
         message = f"run_verdict: starting_balance={starting_balance!r} debe ser > 0 (R2c)."
         raise VerdictConfigError(message)
 
+    # Change #53 (Q4/Q8): un único snapshot de lectura, sin efectos secundarios (Q10).
+    # `ledger=None` -> extra=0, comportamiento bit a bit idéntico al pre-Change (R12).
+    trial_ledger_snapshot: TrialLedgerSummary | None = None
+    ledger_extra_trials = 0
+    if ledger is not None:
+        trial_ledger_snapshot = ledger.read_summary()
+        own_trial_ids = {_trial_id_for_bundle(ledger, bundle) for bundle in candidates.values()}
+        ledger_extra_trials = len(trial_ledger_snapshot.trial_ids - own_trial_ids)
+
     candidate_summaries = {
-        candidate_id: build_candidate_gate_summary(bundle, risk_profile, starting_balance)
+        candidate_id: build_candidate_gate_summary(
+            bundle, risk_profile, starting_balance, ledger_extra_trials=ledger_extra_trials
+        )
         for candidate_id, bundle in candidates.items()
     }
     n_candidatos_torneo = len(candidates)
@@ -816,7 +929,10 @@ def run_verdict(
     t1: TournamentDeflationOutcome | None = None
     if winning_candidate_id is not None:
         t1 = _compute_t1(
-            winning_candidate_id, candidates, no_go_iteration_used=no_go_iteration_used
+            winning_candidate_id,
+            candidates,
+            no_go_iteration_used=no_go_iteration_used,
+            ledger_extra_trials=ledger_extra_trials,
         )
 
     ensemble = _compute_t2(
@@ -840,7 +956,10 @@ def run_verdict(
         verdict = VerdictKind.GO
     else:
         partial_candidate_id, partial_t1 = _find_go_parcial_candidate(
-            candidates, candidate_summaries, no_go_iteration_used=no_go_iteration_used
+            candidates,
+            candidate_summaries,
+            no_go_iteration_used=no_go_iteration_used,
+            ledger_extra_trials=ledger_extra_trials,
         )
         if partial_candidate_id is not None:
             verdict = VerdictKind.GO_PARCIAL
@@ -860,6 +979,8 @@ def run_verdict(
         ensemble=ensemble,
         economics_confirmed=economics_confirmed,
         no_go_iteration_used=no_go_iteration_used,
+        trial_ledger_snapshot=trial_ledger_snapshot,
+        ledger_extra_trials=ledger_extra_trials,
     )
 
 
@@ -875,6 +996,24 @@ _ECONOMICS_WARNING = (
     "confirmados contra los términos vigentes de The5ers. Un veredicto GO no debe leerse como "
     "decisión de negocio definitiva hasta confirmar ambos valores."
 )
+
+
+def _trial_ledger_payload(snapshot: TrialLedgerSummary, ledger_extra_trials: int) -> dict:
+    """Payload serializable de `snapshot` (Q2), compartido por el manifest y el tearsheet.
+
+    Única fuente de las cifras del ledger: paridad por construcción, mismo patrón que
+    `_candidate_summary_payload`.
+    """
+    return {
+        "n_trials_total": snapshot.n_trials_total,
+        "n_rows": snapshot.n_rows,
+        "n_duplicate_trial_ids": snapshot.n_duplicate_trial_ids,
+        "content_hash": snapshot.content_hash,
+        "n_extra_trials_applied": ledger_extra_trials,
+        "n_trials_by_symbol": dict(snapshot.n_trials_by_symbol),
+        "n_trials_by_candidate_family": dict(snapshot.n_trials_by_candidate_family),
+        "n_trials_by_firm_profile_hash": dict(snapshot.n_trials_by_firm_profile_hash),
+    }
 
 
 def _candidate_summary_payload(summary: CandidateGateSummary) -> dict:
@@ -1007,6 +1146,18 @@ def render_tearsheet(result: VerdictResult) -> str:
         lines.append("- No evaluado (ningún candidato pasó G+C+P).")
     lines.append("")
 
+    if result.trial_ledger_snapshot is not None:
+        ledger_payload = _trial_ledger_payload(
+            result.trial_ledger_snapshot, result.ledger_extra_trials
+        )
+        lines.append("## Ledger de ensayos")
+        lines.append(
+            f"- n_trials_total: {ledger_payload['n_trials_total']}, "
+            f"n_extra_trials_applied: {ledger_payload['n_extra_trials_applied']}, "
+            f"content_hash: {ledger_payload['content_hash']}"
+        )
+        lines.append("")
+
     lines.append("## T2 (ensemble)")
     if result.ensemble is not None:
         ensemble = result.ensemble
@@ -1090,6 +1241,12 @@ def verdict_result_to_manifest_json(
     }
     if purged_cv_results_by_candidate is not None:
         payload["purged_cv_summary"] = _purged_cv_summary_payload(purged_cv_results_by_candidate)
+    if result.trial_ledger_snapshot is not None:
+        # Change #53 (R16/Q2): única clave nueva de primer nivel, emitida siempre que el
+        # snapshot no sea None (incluso vacío); ausente con ledger=None (A13).
+        payload["trial_ledger"] = _trial_ledger_payload(
+            result.trial_ledger_snapshot, result.ledger_extra_trials
+        )
 
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 

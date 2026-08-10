@@ -68,6 +68,15 @@ _EXPECTED_ALL = {
     "render_signal_diagnostic_markdown",
     "run_signal_diagnostic",
     "write_signal_diagnostic_artifacts",
+    # Issue #53 (Q9): ledger de ensayos persistente entre corridas.
+    "TrialIdentityContext",
+    "TrialLedger",
+    "TrialLedgerConfigError",
+    "TrialLedgerSummary",
+    "TrialOutcomeKind",
+    "TrialRecord",
+    "compute_trial_id",
+    "record_trial_completions",
 }
 
 
@@ -193,3 +202,25 @@ def test_detalles_internos_de_issue_d_no_se_reexportan() -> None:
     assert "decide_verdict" not in validation_pkg.__all__
     assert "signal_diagnostic_report_to_json" not in validation_pkg.__all__
     assert not hasattr(validation_pkg, "estimate_roundtrip_cost")
+
+
+def test_importa_la_superficie_publica_del_ledger_de_ensayos_sin_error() -> None:
+    """Issue #53 (Q9): superficie normativa de `trial_ledger.py` importa sin error."""
+    from genesis.validation import (  # noqa: F401
+        TrialIdentityContext,
+        TrialLedger,
+        TrialLedgerConfigError,
+        TrialLedgerSummary,
+        TrialOutcomeKind,
+        TrialRecord,
+        compute_trial_id,
+        record_trial_completions,
+    )
+
+
+def test_detalles_internos_del_ledger_de_ensayos_no_se_reexportan() -> None:
+    """Q9: `append_trial`/`read_trial_summary` son detalle de composición interno."""
+    assert "append_trial" not in validation_pkg.__all__
+    assert "read_trial_summary" not in validation_pkg.__all__
+    assert not hasattr(validation_pkg, "append_trial")
+    assert not hasattr(validation_pkg, "read_trial_summary")

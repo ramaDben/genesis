@@ -13,6 +13,7 @@ from genesis.validation.errors import (
     PurgedCvConfigError,
     SensitivityConfigError,
     SignalDiagnosticConfigError,
+    TrialLedgerConfigError,
     VerdictConfigError,
     WfaConfigError,
 )
@@ -121,4 +122,19 @@ def test_signal_diagnostic_config_error_hereda_de_genesis_validation_error() -> 
 def test_mensaje_con_contexto_se_conserva_en_str_signal_diagnostic() -> None:
     contexto = "candidate_id=A symbol=XAUUSD allow_placeholder_figures=False"
     err = SignalDiagnosticConfigError(f"Configuración inválida: {contexto}")
+    assert contexto in str(err)
+
+
+def test_trial_ledger_config_error_hereda_de_genesis_validation_error() -> None:
+    assert issubclass(TrialLedgerConfigError, GenesisValidationError) is True
+
+
+def test_trial_ledger_config_error_no_hereda_de_excepciones_de_otras_capas() -> None:
+    assert not issubclass(TrialLedgerConfigError, GenesisBacktestError)
+    assert not issubclass(TrialLedgerConfigError, GenesisDataError)
+
+
+def test_mensaje_con_contexto_se_conserva_en_str_trial_ledger() -> None:
+    contexto = "candidate_id=A symbol=US500 trial_id=deadbeef"
+    err = TrialLedgerConfigError(f"Configuración inválida: {contexto}")
     assert contexto in str(err)
