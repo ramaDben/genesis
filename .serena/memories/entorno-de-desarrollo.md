@@ -44,6 +44,20 @@ por credenciales de Claude for Work — ese es el único bloqueo.
 **Diagnóstico rápido** de si el workspace es el correcto:
 `docker inspect <contenedor> --format '{{json .Mounts}}'` — si aparece `/mnt/c/...`, está mal.
 
+## TRAMPA: un subagente que reporta "MCP no disponible" puede estar equivocado (2026-08-09)
+
+Los subagentes de las fases propose, specify y design del change #51 reportaron los tres, de
+forma consecutiva, que `pulse-engine` (y en design también `serena` y `memory`) **no estaba
+disponible**, y por eso ninguno ejecutó su `request_sdd_transition`. Verificado desde la sesión
+principal inmediatamente después: `view_project_dashboard` y `request_sdd_transition`
+respondieron normalmente al primer intento. El síntoma real es del arranque de los servers MCP
+(quedan en estado *connecting* mientras el subagente ya está corriendo), no del engine.
+
+Regla operativa: **no dar por buena la afirmación "el MCP no está disponible" de un subagente**.
+Verificarlo desde la sesión principal cargando la tool con `ToolSearch` y llamándola; si
+responde, ejecutar ahí la transición pendiente. Vale la pena confirmar que los servers están
+conectados (`/mcp`) **antes** de lanzar un subagente de fase.
+
 ## Desde una sesión de Claude Code que corre en Windows
 
 - Leer/editar archivos del repo de WSL por UNC: `\\wsl$\Ubuntu\home\bbenja11\genesis\...`
@@ -63,4 +77,5 @@ Dependencias siempre por `uv`. Python 3.14. Búsquedas con `rg`/`fd`/`ast-grep`.
 
 Estado al 2026-08-01: **639 tests** en verde, `main` en `feb6515`.
 
-Ver también `mem:datos-ftmo-y-respaldos` y `mem:perf-diagnose-detect-ct-events`.
+Ver también `mem:datos-ftmo-y-respaldos`, `mem:perf-diagnose-detect-ct-events` y
+`mem:change-51-scope-decision`.
