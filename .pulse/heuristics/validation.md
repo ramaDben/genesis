@@ -30,3 +30,11 @@
 **Contexto:** Cierre del Change #51 (dominio validation); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-08-09T15:19:51.716173+00:00; tests_passed_at=2026-08-09T16:03:51.832352+00:00; artefactos: /work/.pulse/changes/51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un/idea.md, /work/.pulse/changes/51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un/proposal.md, /work/.pulse/changes/51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un/design.md, /work/.pulse/changes/51-fix-validation-un-rechazo-total-de-intents-por-sizing-produce-un/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de validation.
+### Heurística: cierre Change #53 validation [#53 · validation · 2026-08-11]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre
+**Contexto:** Cierre del Change #53 (dominio validation); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-08-10T16:54:51.320721+00:00; tests_passed_at=2026-08-10T19:50:03.251181+00:00; artefactos: /work/.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/idea.md, /work/.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/proposal.md, /work/.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/design.md, /work/.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de validation.

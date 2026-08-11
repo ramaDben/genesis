@@ -2655,3 +2655,350 @@ autorizado.** Verificado en `src/genesis/backtest/simulator.py`:
   para este Change (Capa 1 no depende de la fórmula de sizing de ningún candidato, solo del
   resultado ya rechazado/autorizado en el ledger), pero condiciona el alcance de un futuro Change
   de Capa 2.
+
+<!-- change:53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre -->
+# Specification: ledger de ensayos persistente entre corridas (Issue #53)
+
+> Formaliza `idea.md` (exploración) y `proposal.md` (alcance + decisiones D1-D5 ya
+> aprobadas por el humano el 2026-08-09) en requisitos verificables. No introduce
+> decisiones de diseño nuevas más allá de las ya resueltas en `proposal.md`; el
+> **Punto que sigue requiriendo aprobación humana en `design`** (Riesgo 1 de
+> `proposal.md`: cómo exactamente compone el N del ledger sobre G4 sin romper
+> R19/R23/Rg-1) se traslada explícitamente a la sección "Preguntas abiertas".
+
+## Objetivo
+
+Dar a G4 (DSR de gate, por candidato aislado) y a T1 (deflación de torneo) visibilidad
+sobre los ensayos evaluados **entre procesos** (búsquedas sucesivas, futuro arquitecto de
+estrategias), mediante un ledger de ensayos persistente y versionado en git, de forma que
+ningún veredicto pueda reportar un denominador de trials menor a los ensayos realmente
+ejecutados — incluidos los descartados antes de completar un WFA.
+
+Evidencia verificada contra el código actual (no contra `idea.md`, que documenta la
+exploración inicial):
+
+- `n_trials` de G4 proviene exclusivamente de `wfa_result.n_trials_signal_total` dentro de
+  `deflated_sharpe_ratio_gate` (`src/genesis/validation/dsr_pbo.py:59-71`), invocada desde
+  `run_dsr_pbo` (`dsr_pbo.py:368-399`) y consumida en `_build_symbol_gate_outcome`
+  (`src/genesis/validation/verdict.py:187-188`, `dsr = dsr_pbo_result.dsr; g4_pass = dsr >=
+  _G4_MIN_DSR`).
+- T1 ya suma entre candidatos, pero solo dentro de la misma invocación de `run_verdict`:
+  `n_trials_deflactado = n_trials_signal_total_ganador + (n_candidatos_torneo - 1)` (+1 si
+  `no_go_iteration_used=True`), `verdict.py:452-495` (`_compute_t1`).
+  `n_candidatos_torneo = len(candidates)` (`verdict.py:461`) es un `Mapping` construido en
+  memoria por el llamador de `run_verdict` — no hay lectura de estado persistido entre
+  invocaciones.
+- Precedente directo de "conteo puro sobre un artefacto ya producido, expuesto como campo
+  nuevo sin tocar `VerdictKind`": `intent_authorization_counts` (Change #51,
+  `src/genesis/backtest/metrics.py:225-253`), `sizing_evidence_insufficient`
+  (`verdict.py:144-171`, `_is_sizing_evidence_insufficient`), ambos consumidos en
+  `_build_symbol_gate_outcome`/`build_candidate_gate_summary` sin participar de ningún
+  `gN_pass` ni de `all_pass`.
+- `VerdictKind` tiene exactamente 4 miembros hoy (`verdict.py:692-698`: `GO`,
+  `GO_ENSEMBLE`, `GO_PARCIAL`, `NO_GO`, R91) y no debe crecer.
+- `.gitignore` ignora `/data/` y `/out/` anclado a raíz (`.gitignore:54-55`) — ninguno de
+  los dos sirve como fuente de verdad entre procesos con seguimiento de git.
+  `.gitattributes:5` (`* text=auto eol=lf`) ya normaliza finales de línea globalmente; no
+  hace falta una regla nueva para `ledger/trials.jsonl` (D4), solo confirmar que la ruta no
+  cae bajo ninguna excepción `binary` posterior del archivo (no la hay: las únicas son
+  `uv.lock`, `.coverage`, `.pulse/assets/*`, `.pulse/state.sqlite*`,
+  `.pulse/audit.jsonl`).
+- Ningún runner de producción invoca `run_verdict` hoy: solo se ejercita desde
+  `tests/validation/test_verdict.py` — confirma que el criterio de aceptación de "descarte
+  sin `WfaResult`" debe satisfacerse con un harness de test, no con un CLI real (fuera de
+  alcance, ver abajo).
+
+## Alcance IN
+
+1. **Esquema de un ensayo (`TrialRecord`)**: dataclass congelada (`@dataclass(frozen=True,
+   slots=True)`, mismo patrón que `WfaResult`/`DsrPboResult`) en un módulo nuevo
+   `src/genesis/validation/trial_ledger.py`, con outcome `WFA_COMPLETADO` o `DESCARTADO`
+   (razón obligatoria en este segundo caso) y las claves de identidad institucional ya
+   existentes (`config_version`, `dataset_hash_by_symbol`, `firm_profile_hash`,
+   `risk_profile_hash`, `git_commit`) — mismo vocabulario que
+   `verdict_result_to_manifest_json` (`verdict.py:1047-1091`).
+2. **`trial_id` determinista (D2)**: derivado por hash de la serialización canónica
+   completa de la configuración del candidato (sin lista blanca de campos) + las claves de
+   identidad institucional del punto 1. Falla rápido (excepción propia, nunca omisión
+   silenciosa) si algún campo no es serializable.
+3. **Almacenamiento append-only versionado en git (D4)**: `ledger/trials.jsonl`, JSON Lines,
+   una fila por ensayo, claves ordenadas (`sort_keys=True`) y separadores compactos
+   (`git diff` de un ensayo nuevo = exactamente una línea nueva).
+4. **Escritura idempotente**: registrar un `trial_id` ya presente en el archivo no agrega
+   una fila nueva (protege contra re-ejecuciones de depuración/CI, único escritor a la vez;
+   la concurrencia entre escritores queda fuera de alcance, ver "Riesgos").
+5. **Lectura pura**: función de conteo/lectura sobre el archivo ya escrito, sin mutarlo, que
+   devuelve el N acumulado (agregación **global**, D3) más, como campos adicionales del
+   esquema (sin usarse aún para gatear), el desglose por `symbol`, familia de candidato
+   (prefijo de `candidate_id`) y `firm_profile_hash` — para soportar una política de
+   partición futura sin rediseñar el esquema.
+6. **`TrialLedger` como punto de inyección (D1)**: un objeto ligero (wrapper sobre la ruta
+   del archivo) que `run_verdict` recibe como `ledger: TrialLedger | None = None`. Ausente
+   → comportamiento bit-a-bit idéntico al actual (N=0, sin I/O). Presente → lee el N
+   acumulado global y lo compone sobre G4 y T1.
+   > **Enmendado en `design` el 2026-08-10 (autorización humana explícita, `design.md` §2 Q10).**
+   > El registro de los `TrialRecord` **ya no ocurre dentro de `run_verdict`**: se muda al borde
+   > de escritura (`record_trial_completions`, invocado junto a `write_verdict_artifacts`), para
+   > que `run_verdict` siga siendo una función de cómputo sin efectos secundarios sobre el
+   > repositorio — mismo criterio que R100-R102 ("única I/O de escritura del Change").
+   > Redacción original: "*adicionalmente registra en el ledger, para cada `(candidate_id,
+   > symbol)` evaluado en esa invocación de `run_verdict`, un `TrialRecord` con outcome
+   > `WFA_COMPLETADO`*".
+7. **Composición sobre T1**: el N leído se suma directamente al entero
+   `n_trials_deflactado` ya calculado en `_compute_t1` (`verdict.py:473-475`), en el mismo
+   punto donde ya se suma `(n_candidatos_torneo - 1)` y el `+1` de
+   `no_go_iteration_used` — sin tocar la fórmula de `deflated_sharpe_ratio`.
+8. **Composición sobre G4**: el N leído se suma al `n_trials` efectivo usado para comparar
+   contra `_G4_MIN_DSR` en el veredicto por símbolo, sin alterar la fórmula interna de
+   `deflated_sharpe_ratio_gate` en `dsr_pbo.py` (R19/R23/Rg-1 se preservan literalmente:
+   `deflated_sharpe_ratio_gate` sigue usando únicamente
+   `wfa_result.n_trials_signal_total` como única fuente dentro de su propio cuerpo). El
+   mecanismo exacto de composición en el punto de llamada (`verdict.py`) es una decisión de
+   `design`, no de este documento — ver "Preguntas abiertas", P1.
+9. **Serialización en manifest**: el N acumulado consumido, su desglose (símbolo/familia/
+   firma) y una referencia reproducible al estado del ledger en el momento de la corrida
+   (número de filas leídas o hash de contenido) se agregan como campos nuevos en
+   `verdict_result_to_manifest_json` (`verdict.py:1047-1091`), sin remover ningún campo
+   existente.
+10. **`VerdictKind` no cambia**: sigue con exactamente 4 miembros (R91).
+11. **Harness sintético reutilizable (D5)**: `tests/validation/fakes.py`, siguiendo el
+    patrón de `tests/strategy/fakes.py` (clases/funciones fábrica deterministas e
+    inyectables, sin lógica de trading real), con al menos un fabricante de `TrialRecord`
+    `DESCARTADO` sin `WfaResult` asociado.
+12. **Regla normativa explícita del usuario**: todo candidato evaluado suma a `n_trials`,
+    incluidos los descartados antes de completar un WFA; ninguna corrida puede reportar DSR
+    con un denominador menor a los ensayos realmente ejecutados. Verificable con el
+    criterio de aceptación A1.
+
+## Alcance OUT (explícito, YAGNI)
+
+- El arquitecto de estrategias en sí (generador de candidatos, gramática de primitivas
+  declarativas, ejecutor de genoma fijo, señal de retorno sin OOS). Decisión ya fijada
+  (`README.md:11-22`, "Visión").
+- Un runner/CLI de producción que orqueste candidatos reales del arquitecto contra el
+  ledger. El criterio de aceptación de "descarte sin `WfaResult`" se satisface con el
+  harness sintético de `tests/validation/fakes.py` (punto 11), no con un consumidor real.
+- Locking/coordinación de escritores concurrentes sobre `ledger/trials.jsonl`. Se documenta
+  como restricción conocida: un solo escritor a la vez, coordinado externamente al proceso
+  (Change de infraestructura de ejecución paralela futuro si llega a ser necesario, cf.
+  `mem:perf-simulador-y-tickcache`).
+- Rotación/compactación del archivo del ledger ante crecimiento no acotado. Aceptable para
+  el volumen esperado a corto plazo (cientos-miles de filas); Change de seguimiento si el
+  volumen de un arquitecto real lo justifica.
+- Cambiar cualquier umbral de gate (`_G4_MIN_DSR`, `_G5_MAX_PBO`, `_T1_MIN_DSR`, etc.). Los
+  gates no se relajan; solo cambia el denominador que ya se compara contra ellos.
+- Resolver una política de partición del N distinta de "global" (D3). El esquema conserva
+  las dimensiones necesarias (símbolo, familia, firma) para un refinamiento futuro, pero
+  ese refinamiento no es responsabilidad de este Change.
+- Cualquier hash/compuesto único de proyecto (`config_version` global). El módulo nuevo
+  declara su propio `CONFIG_VERSION` local (mismo patrón que `dsr_pbo.py`/`verdict.py`/
+  `sensitivity.py`), sin componer nada nuevo a nivel de proyecto.
+
+## Requisitos funcionales
+
+| Id | Requisito | Origen (idea/proposal) |
+|---|---|---|
+| R1 | `trial_ledger.py` DEBE definir `TrialOutcomeKind` (`StrEnum`) con exactamente 2 miembros: `WFA_COMPLETADO`, `DESCARTADO`. | Alcance IN.1 |
+| R2 | `trial_ledger.py` DEBE definir `TrialRecord` (`@dataclass(frozen=True, slots=True)`) con, como mínimo: `trial_id: str`, `candidate_id: str`, `symbol: str`, `outcome: TrialOutcomeKind`, `discard_reason: str \| None` (obligatorio si `outcome == DESCARTADO`, `None` si `WFA_COMPLETADO`), `config_version: str`, `dataset_hash_by_symbol: Mapping[str, str]`, `firm_profile_hash: str`, `risk_profile_hash: str`, `git_commit: str`, `recorded_at_utc: str` (ISO 8601 UTC). | Alcance IN.1 |
+| R3 | `TrialRecord.__post_init__` (o validador equivalente) DEBE fallar (`TrialLedgerConfigError`) si `outcome == DESCARTADO and discard_reason is None`, o si `outcome == WFA_COMPLETADO and discard_reason is not None`. | Alcance IN.1 |
+| R4 | `trial_ledger.py` DEBE exponer `compute_trial_id(candidate_config: Mapping, dataset_hash_by_symbol: Mapping[str, str], firm_profile_hash: str, risk_profile_hash: str) -> str`, determinista: misma entrada (incluido el orden de inserción de `candidate_config`, normalizado por `sort_keys=True`) produce siempre el mismo `trial_id`. | Proposal, Opción recomendada 1; D2 |
+| R5 | `compute_trial_id` DEBE derivar el hash de la **serialización canónica completa** de `candidate_config` (vía `json.dumps(..., sort_keys=True, ensure_ascii=False)` + `hashlib.sha256`), nunca de una lista blanca de campos seleccionados a mano. | D2 |
+| R6 | Si `candidate_config` contiene un valor no serializable a JSON, `compute_trial_id` DEBE propagar una excepción (`TrialLedgerConfigError` envolviendo el `TypeError` original) — nunca omitir el campo en silencio. | D2 |
+| R7 | `trial_ledger.py` DEBE exponer `append_trial(ledger_path: Path, record: TrialRecord) -> None`: escribe una línea JSON (claves ordenadas, separadores compactos) al final del archivo si y solo si `record.trial_id` no está ya presente en ninguna línea existente del archivo; si el archivo no existe, lo crea. | Alcance IN.3-4 |
+| R8 | `append_trial` invocado dos veces con el mismo `trial_id` (mismo contenido o no) DEBE dejar el archivo con exactamente una fila para ese `trial_id` (idempotencia por identidad, no por contenido íntegro de la fila). | Alcance IN.4; Criterio de aceptación proposal #2 |
+| R9 | `trial_ledger.py` DEBE exponer `read_trial_summary(ledger_path: Path) -> TrialLedgerSummary` (dataclass congelada con, como mínimo, `n_trials_total: int`, `n_trials_by_symbol: Mapping[str, int]`, `n_trials_by_candidate_family: Mapping[str, int]`, `n_trials_by_firm_profile_hash: Mapping[str, int]`, `content_hash: str`), función pura (sin mutar el archivo), un solo recorrido secuencial. | Alcance IN.5 |
+| R10 | Si `ledger_path` no existe, `read_trial_summary` DEBE devolver `TrialLedgerSummary` con `n_trials_total=0` y los desgloses vacíos, sin lanzar excepción. | D1 (ausencia ⇒ N=0) |
+| R11 | `trial_ledger.py` DEBE exponer `TrialLedger`, un objeto ligero inyectable que envuelve `ledger_path` y expone al menos un método de lectura del resumen acumulado (equivalente a R9) y un método de registro de un `TrialRecord` (equivalente a R7). | D1 |
+| R12 | `run_verdict` (`verdict.py`) DEBE aceptar un parámetro `ledger: TrialLedger \| None = None`. Con `ledger=None`, el comportamiento de `run_verdict` (incluidos `VerdictResult`, `manifest.json`, `tearsheet.md`) DEBE ser bit-a-bit idéntico al comportamiento anterior a este Change. | D1; Criterio de aceptación proposal #3 |
+| R13 | Con `ledger` presente y no vacío, el N acumulado global (`n_trials_total` de R9) DEBE sumarse al `n_trials_deflactado` que ya calcula `_compute_t1` (`verdict.py:473-475`), en el mismo punto donde se suma `(n_candidatos_torneo - 1)` y el `+1` de `no_go_iteration_used`, sin modificar la fórmula de `deflated_sharpe_ratio`. | Alcance IN.7 |
+| R14 | Con `ledger` presente y no vacío, el N acumulado global DEBE sumarse al `n_trials` efectivo usado para el veredicto de G4 por `(candidate_id, symbol)`, sin modificar la fórmula interna de `deflated_sharpe_ratio_gate` en `dsr_pbo.py` (R19/R23/Rg-1 de Issue I se preservan: la función sigue usando únicamente `wfa_result.n_trials_signal_total` como única fuente dentro de su propio cuerpo). El punto de composición exacto en `verdict.py` (recomputar `deflated_sharpe_ratio` en el punto de llamada vs. extender la firma de `deflated_sharpe_ratio_gate` con un parámetro opcional `extra_trials: int = 0`) es una decisión de `design`, no de este documento. | Alcance IN.8; Pregunta abierta P1 |
+| R15 | **[Enmendado en `design` el 2026-08-10, autorización humana explícita — `design.md` §2 Q10]** El borde de escritura de `verdict.py` DEBE exponer `record_trial_completions(...)` que registre (vía `append_trial`/`TrialLedger`) un `TrialRecord` con `outcome=WFA_COMPLETADO` para cada `(candidate_id, symbol)` evaluado, usando las claves de identidad institucional del `TrialIdentityContext` del ledger (las mismas que hoy recibe `verdict_result_to_manifest_json`). `run_verdict` **NO** escribe en el ledger: solo lo lee. *Redacción original: "Con `ledger` presente, `run_verdict` DEBE registrar (...) en esa invocación".* Motivo: `run_verdict` es una función de cómputo sin efectos secundarios y toda la I/O de escritura del Change está concentrada en el borde (R100-R102). | Alcance IN.6 (enmendado) |
+| R16 | `verdict_result_to_manifest_json` (`verdict.py:1047-1091`) DEBE, cuando se invoque con un ledger no vacío, incluir en el JSON producido al menos una clave nueva con el N acumulado consumido y una referencia reproducible al estado del ledger (número de filas o `content_hash` de R9). Ninguna clave existente se elimina. | Alcance IN.9; Criterio de aceptación proposal #6 |
+| R17 | `class VerdictKind` en `verdict.py` DEBE seguir teniendo exactamente 4 miembros (`GO`, `GO_ENSEMBLE`, `GO_PARCIAL`, `NO_GO`) tras este Change. | R91 (Issue J); Alcance IN.10 |
+| R18 | `ledger/trials.jsonl` DEBE quedar fuera de cualquier patrón de `.gitignore` existente (no debe caer bajo `/data/`, `/out/`, ni ningún otro patrón de `.gitignore`). | Alcance IN.3 |
+| R19 | Cada línea de `ledger/trials.jsonl` DEBE ser JSON válido, UTF-8, con claves ordenadas (`sort_keys=True`) y sin espacios extra entre separadores (`separators=(",", ":")` o equivalente), de forma que `git diff` de un ensayo nuevo sea exactamente una línea añadida. | D4 |
+| R20 | `tests/validation/fakes.py` DEBE existir y exponer, como mínimo, un fabricante de `TrialRecord` con `outcome=DESCARTADO` (sin ningún `WfaResult` asociado), siguiendo el patrón de `tests/strategy/fakes.py` (funciones/clases fábrica deterministas, parametrizables, sin lógica de trading real). | Alcance IN.11; D5 |
+| R21 | Ningún test existente en `tests/validation/` que fije un valor exacto de `n_trials_signal_total`, `n_trials_deflactado` o `n_candidatos_torneo` (p. ej. `test_wfa_grid.py`, `test_verdict.py`) DEBE romperse al ejecutarse contra `ledger=None` o un ledger vacío. | Alcance IN.6; Criterio de aceptación proposal #7 |
+
+## Criterios de aceptación (evals ejecutables)
+
+**A1 — regla normativa del usuario: todo candidato evaluado suma, incluidos los
+descartados sin `WfaResult`.**
+```
+DADO   un ledger vacío en una ruta temporal y N=5 TrialRecord sintéticos (vía
+       tests/validation/fakes.py), de los cuales K=2 tienen outcome=DESCARTADO
+       sin ningún WfaResult asociado
+CUANDO se registra cada uno con append_trial y luego se invoca read_trial_summary
+       sobre la misma ruta
+ENTONCES read_trial_summary(...).n_trials_total >= 5
+```
+
+**A2 — idempotencia.**
+```
+DADO   un TrialRecord con un trial_id fijo
+CUANDO se invoca append_trial dos veces con ese mismo registro sobre el mismo
+       ledger_path
+ENTONCES read_trial_summary(ledger_path).n_trials_total no crece en más de 1
+       respecto de una sola invocación de append_trial
+```
+
+**A3 — caso base, no-regresión bit-a-bit con ledger ausente/vacío.**
+```
+DADO   un VerdictResult calculado dos veces sobre el mismo CandidateValidationBundle:
+       una vez con run_verdict(..., ledger=None) (comportamiento pre-Change) y otra
+       con run_verdict(..., ledger=<TrialLedger apuntando a un archivo vacío o
+       inexistente>)
+CUANDO se comparan ambos VerdictResult campo a campo
+ENTONCES son idénticos en verdict, winning_candidate_id, t1_dsr, t1_dsr_pre_deflation,
+       n_trials_deflactado y todos los gN_pass de candidate_summaries
+```
+
+**A4 — `VerdictKind` no crece.**
+```
+DADO   src/genesis/validation/verdict.py tras este Change
+CUANDO rg -n "class VerdictKind" -A 6 src/genesis/validation/verdict.py
+ENTONCES el bloque reporta exactamente 4 miembros: GO, GO_ENSEMBLE, GO_PARCIAL, NO_GO
+```
+
+**A5 — el ledger queda fuera de `.gitignore`.**
+```
+DADO   un ledger escrito con al menos un TrialRecord en ledger/trials.jsonl
+CUANDO git check-ignore ledger/trials.jsonl
+ENTONCES el comando retorna código de salida 1 (no ignorado) y el archivo es
+       legible como texto plano (no binario)
+```
+
+**A6 — serialización en manifest.**
+```
+DADO   un VerdictResult producido con un ledger no vacío
+CUANDO se invoca verdict_result_to_manifest_json(...) y se parsea el JSON resultante
+ENTONCES el payload contiene una clave nueva con el N acumulado del ledger (además de
+       todas las claves ya existentes de R98/Issue J, sin eliminar ninguna)
+```
+
+**A7 — no-regresión de tests existentes con ledger vacío.**
+```
+DADO   la suite actual de tests/validation/ (test_wfa_grid.py, test_verdict.py,
+       test_dsr_pbo.py)
+CUANDO uv run pytest tests/validation/test_wfa_grid.py tests/validation/test_verdict.py
+       tests/validation/test_dsr_pbo.py
+ENTONCES todos los tests pasan sin modificar sus aserciones existentes de
+       n_trials_signal_total/n_trials_deflactado/n_candidatos_torneo
+```
+
+**A8 — módulo nuevo respeta el patrón "núcleo puro + I/O aislada".**
+```
+DADO   src/genesis/validation/trial_ledger.py
+CUANDO rg -n "^import scipy|^import statsmodels|^import sqlite3" src/genesis/validation/trial_ledger.py
+ENTONCES 0 coincidencias (sin dependencias nuevas; el módulo usa solo stdlib + tipos ya
+       existentes del proyecto)
+```
+
+## Invariantes de diseño afectados
+
+- **Determinismo/reproducibilidad (CLAUDE.md, spec §9)**: `trial_id` es una función pura y
+  determinista de sus entradas (R4); `read_trial_summary` no muta el archivo (R9); el
+  formato JSON Lines con `sort_keys=True` garantiza que dos corridas contra el mismo
+  contenido de ledger produzcan el mismo `content_hash` (reproducibilidad byte a byte,
+  mismo criterio que `manifest.json` con `sort_keys=True`, `verdict.py:1091`).
+- **Forward-only / anti-lookahead**: no aplica de forma directa — el ledger no procesa
+  barras ni toca `on_bar`/`iter_bars`; es un artefacto de auditoría entre corridas, no un
+  componente del simulador. Se documenta explícitamente para descartar la invariante, no
+  por omisión.
+- **Dependencia unidireccional entre capas (CLAUDE.md, tabla de arquitectura genesis)**: el
+  módulo nuevo vive en la capa 4 (`genesis/validation/`) y solo depende de `stdlib` +
+  tipos ya existentes de la propia capa 4 y, para el harness de test, de `genesis/strategy/`
+  (mismo patrón que `tests/strategy/fakes.py`, que no es código de producción). No introduce
+  ninguna dependencia nueva de capas 1-3 hacia la 4, ni al revés.
+- **Nota sobre invariantes hexagonales de `src/pulse/`**: este Change no toca el engine de
+  Pulse (`src/pulse/`); las invariantes de `domain/`→`application/`→`infrastructure/` de
+  `src/pulse/CLAUDE.md` no aplican a `src/genesis/validation/`. La invariante arquitectónica
+  relevante para este Change es la propia del proyecto genesis (tabla de 4 capas de
+  `CLAUDE.md` raíz), verificada arriba.
+- **R19/R23/Rg-1 (Issue I, "reversión de una línea")**: preservado literalmente en
+  `dsr_pbo.py` — `deflated_sharpe_ratio_gate` no cambia su cuerpo. La superficie de
+  `verdict.py` sí crece con una fuente de datos externa (el ledger) que participa en un
+  cálculo que gatea (Riesgo 1 de `proposal.md`); **requiere aprobación humana explícita en
+  `design`**, no queda resuelto por este documento.
+
+## Estrategia de testing (spec §9)
+
+- **Unit + property (`hypothesis`)**: `compute_trial_id` (determinismo, R4-R6, sensibilidad
+  a cualquier cambio de campo — property test que verifica que mutar cualquier valor de
+  `candidate_config` cambia el `trial_id`); `append_trial`/`read_trial_summary`
+  (idempotencia, R8, con `hypothesis` generando listas de `TrialRecord` con
+  `trial_id` repetidos).
+- **Golden/no-regresión**: A3, A7 (comparación bit-a-bit contra el comportamiento
+  pre-Change con ledger ausente).
+- **Integración**: A1, A6 — un `run_verdict` completo con `TrialLedger` real sobre un
+  directorio temporal (`tmp_path`), usando el harness de `tests/validation/fakes.py` (R20).
+- **Estático (evals `rg`/`fd`)**: A4, A5, A8.
+- Ningún test requiere `scipy`/`statsmodels`/`sqlite3` (A8); ninguna corrida necesita el
+  marcador `slow` adicional (volumen acotado a N sintético pequeño).
+
+## Riesgos
+
+1. **Riesgo normativo (R19/R23/Rg-1)** — ver "Invariantes de diseño afectados". No resuelto
+   por este documento; requiere decisión humana explícita en `design` (P1 más abajo).
+2. **Riesgo de doble conteo** si el hash de `trial_id` (R5) omite un campo relevante del
+   `candidate_config` por un bug de serialización no capturado por R6. Mitigado por el
+   fail-fast de R6, pero la cobertura de property-based testing sobre `compute_trial_id`
+   es la defensa real.
+3. **Riesgo de alcance difuso con el arquitecto**: el harness sintético (R20) valida la
+   interfaz sin un consumidor de producción real. Aceptado explícitamente como fuera de
+   alcance.
+4. **Riesgo de concurrencia/E/S**: un solo escritor asumido (fuera de alcance del locking).
+   Si en el futuro las corridas se paralelizan, `append_trial` sobre un archivo compartido
+   puede ser un cuello de contención — documentado, no bloqueante para este Change (cf.
+   `mem:perf-simulador-y-tickcache`).
+5. **Riesgo de crecimiento no acotado**: lectura secuencial completa de `ledger/trials.jsonl`
+   en cada corrida (R9) escala linealmente con el histórico. Aceptable al volumen esperado
+   a corto plazo; Change de seguimiento si un arquitecto real produce decenas de miles de
+   ensayos.
+
+## Preguntas abiertas (para `design`)
+
+> **Estado 2026-08-10: las tres quedaron resueltas en `design.md` §2** — P1 → Q1 (alternativa (a),
+> composición en el punto de llamada, `dsr_pbo.py` intacto); P2 → Q2 (clave anidada `trial_ledger`
+> en el manifest, con los tres desgloses); P3 → Q3 (`sha256` hexdigest del archivo completo, leído
+> en binario, en la misma pasada). `design.md` añade además Q4-Q10, de las que Q4 (semántica del N
+> con auto-exclusión) y Q10 (enmienda de R15) son normativas y fueron autorizadas por el humano.
+
+- **P1 (bloqueante para el gate humano `design`, Riesgo 1)**: ¿cómo compone exactamente
+  R14 el N del ledger sobre G4 en el punto de llamada de `verdict.py`? Dos alternativas
+  identificadas, ninguna decidida aquí:
+  - (a) `verdict.py` recomputa `deflated_sharpe_ratio` en el punto de llamada, reutilizando
+    `extract_trade_returns(wfa_result.oos_ledger_cosido)` (ya disponible) con
+    `n_trials=wfa_result.n_trials_signal_total + ledger_n`, sin tocar `dsr_pbo.py`.
+  - (b) `deflated_sharpe_ratio_gate` (`dsr_pbo.py`) gana un parámetro opcional
+    `extra_trials: int = 0` que se suma internamente a `n_trials_signal_total` — cambio de
+    una línea en el cuerpo de la función, pero extiende la firma de un módulo cerrado de
+    Issue I.
+  Ambas preservan R19/R23/Rg-1 en el sentido de "revertir es trivial" (quitar el sumando o
+  el parámetro), pero difieren en dónde vive la lógica y qué módulo cerrado se reabre.
+- **P2**: ¿el desglose por `firm_profile_hash`/familia de `n_trials_by_*` (R9) debe
+  persistirse también en el manifest (R16), o basta con el total global? `proposal.md`
+  (D3) solo exige conservar las dimensiones en el esquema, no necesariamente exponerlas
+  todas en el manifest.
+- **P3**: formato exacto de `content_hash` de `TrialLedgerSummary` (R9) — hash SHA-256 del
+  contenido completo del archivo vs. hash incremental por línea. No afecta ningún criterio
+  de aceptación de este documento, pero condiciona el rendimiento de A6/A1 para ledgers
+  grandes.
+
+## Referencias
+
+- `.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/idea.md`
+- `.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/proposal.md`
+  (decisiones D1-D5, resueltas por el humano el 2026-08-09)
+- `src/genesis/validation/dsr_pbo.py:59-71,368-399` (`deflated_sharpe_ratio_gate`,
+  `run_dsr_pbo`, `DsrPboResult`)
+- `src/genesis/validation/verdict.py:144-171,187-267,452-495,692-714,1047-1091`
+  (`_is_sizing_evidence_insufficient`, `_build_symbol_gate_outcome`, `_compute_t1`,
+  `VerdictKind`, `VerdictResult`, `verdict_result_to_manifest_json`)
+- `src/genesis/backtest/metrics.py:225-253` (`intent_authorization_counts`, patrón
+  replicable)
+- `tests/strategy/fakes.py` (patrón de harness de test reutilizable, precedente de D5)
+- `.gitignore:23-28,54-55`; `.gitattributes:1-5` (verificado: sin excepción `binary` que
+  afecte a `ledger/trials.jsonl`)
+- `.pulse/specs/validation/spec.md:815,1977-2008` (Issue I decisión 1 §3, R19/R23/Rg-1;
+  R91-R95bis, `VerdictKind`, `no_go_iteration_used`)

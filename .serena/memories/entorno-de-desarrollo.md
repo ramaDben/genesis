@@ -58,6 +58,30 @@ Verificarlo desde la sesión principal cargando la tool con `ToolSearch` y llam�
 responde, ejecutar ahí la transición pendiente. Vale la pena confirmar que los servers están
 conectados (`/mcp`) **antes** de lanzar un subagente de fase.
 
+## TRAMPA: `close_change` exige `current_phase="review"`, pero la skill review pide transicionar a `close` primero (2026-08-10)
+
+La skill `pulse:review` instruye textualmente, cuando ambos gates son ✅, llamar
+`request_sdd_transition(target_phase="close", evidence_artifacts=[...])`. Eso deja
+`state.yaml` con `current_phase: "close"` (fase terminal del FSM). Pero `close_change(slug)` —
+la tool que hace el trabajo real de cierre (version bump, promoción de dominio, archivado,
+`closed_at`) — **rechaza el Change si no está en fase `"review"`**: `"close_change requiere un
+Change en fase review"`. Como `close` es terminal, `request_sdd_transition(target_phase=
+"review")` para revertir también falla (`"close solo puede avanzar a la fase siguiente"`) → no
+hay tool de pulse-engine para deshacer la transición.
+
+Ocurrió en Issue #53 (2026-08-10): seguí la skill al pie de la letra, quedó
+`current_phase=close` con `closed_at=null` (estado huérfano, ni terminal de verdad ni
+reabrible). Única salida encontrada: editar a mano **solo** el campo `current_phase` en
+`.pulse/changes/<slug>/state.yaml` de vuelta a `"review"` (excepción puntual a la regla de
+"nunca editar `state.yaml` a mano", autorizada explícitamente por el humano; no se tocó ningún
+otro campo) y recién ahí llamar `close_change(slug)`, que sí completó el cierre real
+(`closed_at`, `version_bumped_to`, archivado).
+
+Regla operativa: en la fase review, **no** llamar `request_sdd_transition(target_phase=
+"close")` cuando ambos gates son ✅ — llamar directamente `close_change(slug)` desde fase
+`review` (sin pasar por `request_sdd_transition`). Ese texto de la skill `pulse:review` parece
+un bug/desactualización pendiente de reportar al mantenedor del plugin.
+
 ## Desde una sesión de Claude Code que corre en Windows
 
 - Leer/editar archivos del repo de WSL por UNC: `\\wsl$\Ubuntu\home\bbenja11\genesis\...`
