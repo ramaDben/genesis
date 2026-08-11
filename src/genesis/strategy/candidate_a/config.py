@@ -134,8 +134,10 @@ def load_placeholder_symbol_figures(path: Path | None = None) -> dict[str, Symbo
     señal vs. fichas de contrato). Los valores retornados son placeholders plausibles de
     un broker MT5 estándar, **no confirmados** contra la cuenta demo real de The5ers
     (spec §3.2); cualquier decisión de negocio real sobre oro/majors exige esa
-    confirmación previa (Issue B/F). Lanza `CandidateAConfigError` si el bloque
-    `symbol_figures_placeholder` falta o algún campo de `SymbolFigure` es inválido.
+    confirmación previa (Issue B/F). `tick_size=1.0` en los 4 símbolos preserva
+    `value_per_point == tick_value` (Change #55, D6): sigue sin confirmar contra el bróker.
+    Lanza `CandidateAConfigError` si el bloque `symbol_figures_placeholder` falta o algún
+    campo de `SymbolFigure` es inválido.
     """
     raw_text, source = _read_resource(path)
     try:
@@ -145,6 +147,7 @@ def load_placeholder_symbol_figures(path: Path | None = None) -> dict[str, Symbo
             symbol: SymbolFigure(
                 symbol=str(figure_raw["symbol"]),
                 tick_value=float(figure_raw["tick_value"]),
+                tick_size=float(figure_raw["tick_size"]),
                 volume_step=float(figure_raw["volume_step"]),
                 stops_level=int(figure_raw["stops_level"]),
                 freeze_level=int(figure_raw["freeze_level"]),

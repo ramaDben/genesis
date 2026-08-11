@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from hypothesis import given
@@ -15,6 +16,7 @@ from genesis.data.mt5_export import (
     ChunkWindow,
     Granularity,
     Mt5Terminal,
+    _coerce_symbol_figure,
     backoff_delay,
     plan_chunks,
     resolve_symbol_alias,
@@ -148,3 +150,23 @@ def test_resolve_symbol_alias_unknown_conventional_symbol_fails_noisily() -> Non
     table = _nas100_aliases()
     with pytest.raises(GenesisDataError):
         resolve_symbol_alias("XAUUSD", ["XAUUSD"], table)
+
+
+def test_coerce_symbol_figure_lee_trade_tick_size() -> None:
+    """A3 (H6): `_coerce_symbol_figure` lee `trade_tick_size` del SDK, no solo
+    `trade_tick_value`."""
+    raw = SimpleNamespace(
+        trade_tick_value=0.0115435,
+        trade_tick_size=0.01,
+        volume_step=0.01,
+        trade_stops_level=10,
+        trade_freeze_level=5,
+        digits=2,
+        swap_long=-0.5,
+        swap_short=-0.3,
+        swap_rollover3days=2,
+    )
+    figure = _coerce_symbol_figure("GER40", raw)
+    assert figure.tick_value == 0.0115435
+    assert figure.tick_size == 0.01
+    assert figure.value_per_point == pytest.approx(1.15435)

@@ -132,6 +132,7 @@ def test_indice_con_figure_json_produce_informe_no_placeholder(tmp_path: Path) -
             {
                 "symbol": figure.symbol,
                 "tick_value": figure.tick_value,
+                "tick_size": figure.tick_size,
                 "volume_step": figure.volume_step,
                 "stops_level": figure.stops_level,
                 "freeze_level": figure.freeze_level,

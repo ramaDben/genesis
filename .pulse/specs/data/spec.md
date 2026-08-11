@@ -141,8 +141,11 @@ de módulo.
   `available_symbols`, DEBE probar la lista de alias documentada; si ninguno coincide, DEBE fallar
   ruidosamente (lanzar excepción con contexto), nunca adivinar o devolver un símbolo no verificado.
 - **R10** (DEBE). Cada export DEBE capturar y persistir la ficha extendida del símbolo
-  (`tick_value`, `volume_step`, `stops_level`, `freeze_level`, `digits`, `swap_long`,
-  `swap_short`, `swap_rollover_day`) como metadata adjunta al Parquet.
+  (`tick_value`, `tick_size`, `volume_step`, `stops_level`, `freeze_level`, `digits`,
+  `swap_long`, `swap_short`, `swap_rollover_day`) como metadata adjunta al Parquet. `tick_value` y
+  `tick_size` se persisten **crudos** tal como los reporta el terminal (`trade_tick_value`,
+  `trade_tick_size`); la conversión punto→dinero (`$/punto = tick_value / tick_size`) es derivada y
+  NO DEBE aplicarse antes de persistir (Change #55).
 - **R11** (DEBERÍA). La ejecución preferente DEBERÍA poder programarse en fin de semana u horas de
   baja actividad (parámetro de configuración, no bloqueante para el resto de requisitos).
 

@@ -26,6 +26,7 @@
           "XAUUSD": {
             "symbol": "XAUUSD",
             "tick_value": 1.0,
+            "tick_size": 1.0,
             "volume_step": 0.01,
             "stops_level": 100,
             "freeze_level": 0,
@@ -37,6 +38,7 @@
           "EURUSD": {
             "symbol": "EURUSD",
             "tick_value": 1.0,
+            "tick_size": 1.0,
             "volume_step": 0.01,
             "stops_level": 0,
             "freeze_level": 0,
@@ -48,6 +50,7 @@
           "GBPUSD": {
             "symbol": "GBPUSD",
             "tick_value": 1.0,
+            "tick_size": 1.0,
             "volume_step": 0.01,
             "stops_level": 0,
             "freeze_level": 0,
@@ -59,6 +62,7 @@
           "USDJPY": {
             "symbol": "USDJPY",
             "tick_value": 0.91,
+            "tick_size": 1.0,
             "volume_step": 0.01,
             "stops_level": 0,
             "freeze_level": 0,

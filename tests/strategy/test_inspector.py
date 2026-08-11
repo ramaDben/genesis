@@ -29,6 +29,7 @@ def _figure(volume_step: float = 0.01) -> SymbolFigure:
     return SymbolFigure(
         symbol=_SYMBOL,
         tick_value=1.0,
+        tick_size=1.0,
         volume_step=volume_step,
         stops_level=10,
         freeze_level=5,

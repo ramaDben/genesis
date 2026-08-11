@@ -217,7 +217,7 @@ class CandidateB:
         )
 
         sizing = (self._risk_pct * self._reference_balance) / (
-            stop_distance * self._figure.tick_value
+            stop_distance * self._figure.value_per_point
         )
         return (stop, take_profit, sizing)
 

@@ -865,19 +865,23 @@ rama bloquearía silenciosamente 2/3 del espacio de búsqueda de stop).
 - **R69** (DEBE). El `sizing_hint` del `EntryIntent` (que el `Simulator` usa directamente como
   **lotes**, no como fracción — `Simulator._floating_pnl`,
   `src/genesis/backtest/simulator.py:332-336`: `points * position.sizing_hint *
-  figure.tick_value`) DEBE calcularse en el momento de la ruptura como:
+  figure.value_per_point`) DEBE calcularse en el momento de la ruptura como:
 
   ```
-  sizing_hint = (risk_pct * reference_balance) / (distancia_stop * figure.tick_value)
+  sizing_hint = (risk_pct * reference_balance) / (distancia_stop * figure.value_per_point)
   ```
+
+  `figure.value_per_point == figure.tick_value / figure.tick_size` (dinero por punto de precio y
+  por lote). Hasta el Change #55, esta fórmula usaba `figure.tick_value` crudo, lo que
+  sobre-estimaba el lote ~100× en los 4 índices reales (Issue #55).
 
   usando el `figure`/`reference_balance` fijos del constructor (R53) — **nunca** el balance real
   evolutivo de `Simulator.account.balance` (Decisión 5 de `proposal.md`, resuelve el riesgo 2 de
   `idea.md`: sizing estático por diseño, no vol-targeting dinámico intra-run, coherente con la
   fórmula normativa del spec §2.3 que no menciona reajuste por trade).
   - **Ejemplo numérico** (`risk_pct=0.00375`, `reference_balance=100000.0`, `distancia_stop=8.2`,
-    `figure.tick_value=1.0`): `sizing_hint = (0.00375 * 100000.0) / (8.2 * 1.0) = 375.0 / 8.2 ≈
-    45.7317...` (float sin redondear).
+    `figure.tick_value=1.0, figure.tick_size=1.0`): `sizing_hint = (0.00375 * 100000.0) /
+    (8.2 * 1.0) = 375.0 / 8.2 ≈ 45.7317...` (float sin redondear).
 - **R70** (NO DEBE). `CandidateB` NO DEBE redondear `sizing_hint` a `figure.volume_step` ni
   clampear contra `min_lot`/`max_lot`: esa validación es responsabilidad exclusiva del Inspector
   (`InspectorFunnelConfig`, `RejectionReason.LOT_SIZE_OUT_OF_BOUNDS`,
@@ -1104,7 +1108,7 @@ ENTONCES _atr_value tras la 14.ª es 10.0 (media simple) y tras la 15.ª es 11.0
 
 ```
 DADO   Direction.LONG, entry_reference=4506.2, stop_loss=4498.0, atr_stop_frac=None,
-       risk_pct=0.00375, reference_balance=100000.0, figure.tick_value=1.0
+       risk_pct=0.00375, reference_balance=100000.0, figure.tick_value=1.0, figure.tick_size=1.0
 CUANDO se invoca risk_levels(intent) tras el on_bar que emitió intent
 ENTONCES intent.sizing_hint == (0.00375 * 100000.0) / (8.2 * 1.0) (R69, sin redondear a volume_step, R70)
 ```

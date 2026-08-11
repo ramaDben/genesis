@@ -390,14 +390,16 @@ def _coerce_symbol_figure(symbol: str, raw: Any) -> SymbolFigure:
 
     `raw` puede ser ya un `SymbolFigure` (fakes de test) o el objeto `SymbolInfo` del SDK
     real `MetaTrader5` (sin stubs de tipos, de ahí `Any`): en ese caso se leen sus
-    atributos documentados (`trade_tick_value`, `volume_step`, `trade_stops_level`,
-    `trade_freeze_level`, `digits`, `swap_long`, `swap_short`, `swap_rollover3days`).
+    atributos documentados (`trade_tick_value`, `trade_tick_size`, `volume_step`,
+    `trade_stops_level`, `trade_freeze_level`, `digits`, `swap_long`, `swap_short`,
+    `swap_rollover3days`).
     """
     if isinstance(raw, SymbolFigure):
         return raw
     return SymbolFigure(
         symbol=symbol,
         tick_value=float(raw.trade_tick_value),
+        tick_size=float(raw.trade_tick_size),
         volume_step=float(raw.volume_step),
         stops_level=int(raw.trade_stops_level),
         freeze_level=int(raw.trade_freeze_level),
