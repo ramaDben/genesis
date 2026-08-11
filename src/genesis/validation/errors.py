@@ -101,3 +101,17 @@ class VerdictConfigError(GenesisValidationError):
     candidatos para T2 con menos de 2 días; `(e)` desviación estándar `std_i == 0`
     de la canasta de un candidato en los pesos vol-inversa del ensemble.
     """
+
+
+class TrialLedgerConfigError(GenesisValidationError):
+    """Configuración o registro inválido del ledger de ensayos, `trial_ledger.py` (Issue #53).
+
+    Disparadores normativos: `(a)` `candidate_config` con un valor no serializable a
+    JSON en `compute_trial_id` (R6); `(b)` `TrialRecord.outcome`/`discard_reason`
+    incoherentes: `DESCARTADO` sin razón, o `WFA_COMPLETADO` con una razón presente
+    (R3); `(c)` una línea de `ledger/trials.jsonl` malformada (JSON inválido, claves
+    obligatorias ausentes, u `outcome` fuera de `TrialOutcomeKind`) al leerla con
+    `read_trial_summary` (Q7 del diseño); `(d)` un `CandidateValidationBundle` con
+    `candidate_config is None` cuando `run_verdict` recibe un `ledger` no `None`
+    (Q5 del diseño, fail-fast, nunca omisión silenciosa del candidato en el conteo).
+    """

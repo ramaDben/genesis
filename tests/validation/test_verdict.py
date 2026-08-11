@@ -257,6 +257,7 @@ def test_g1_umbral_300_trades() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
         "US500",
@@ -266,6 +267,7 @@ def test_g1_umbral_300_trades() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g1_pass is True
     assert outcome_fail.g1_pass is False
@@ -280,6 +282,7 @@ def test_g2_umbral_wfe_0_5() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
         "US500",
@@ -289,6 +292,7 @@ def test_g2_umbral_wfe_0_5() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g2_pass is True
     assert outcome_fail.g2_pass is False
@@ -305,6 +309,7 @@ def test_g3_umbral_profit_factor_1_3() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
         "US500",
@@ -314,6 +319,7 @@ def test_g3_umbral_profit_factor_1_3() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g3_pass is True
     assert outcome_fail.g3_pass is False
@@ -328,6 +334,7 @@ def test_g4_umbral_dsr_0_95() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
         "US500",
@@ -337,6 +344,7 @@ def test_g4_umbral_dsr_0_95() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g4_pass is True
     assert outcome_fail.g4_pass is False
@@ -351,6 +359,7 @@ def test_g5_umbral_pbo_0_25() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
         "US500",
@@ -360,6 +369,7 @@ def test_g5_umbral_pbo_0_25() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g5_pass is True
     assert outcome_fail.g5_pass is False
@@ -375,6 +385,7 @@ def test_g6_umbral_maxdd_p95() -> None:
         _mc_symbol_result(max_drawdown_p95=5_000.0),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
         "US500",
@@ -384,6 +395,7 @@ def test_g6_umbral_maxdd_p95() -> None:
         _mc_symbol_result(max_drawdown_p95=5_000.01),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g6_pass is True
     assert outcome_fail.g6_pass is False
@@ -398,6 +410,7 @@ def test_g7_umbral_breach_probability_0_05() -> None:
         _mc_symbol_result(breach_probability=0.0499),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
         "US500",
@@ -407,6 +420,7 @@ def test_g7_umbral_breach_probability_0_05() -> None:
         _mc_symbol_result(breach_probability=0.05),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g7_pass is True
     assert outcome_fail.g7_pass is False
@@ -421,6 +435,7 @@ def test_g8_umbral_degradacion_030_y_cliff() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail_drop = _build_symbol_gate_outcome(
         "US500",
@@ -430,6 +445,7 @@ def test_g8_umbral_degradacion_030_y_cliff() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail_cliff = _build_symbol_gate_outcome(
         "US500",
@@ -439,6 +455,7 @@ def test_g8_umbral_degradacion_030_y_cliff() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g8_pass is True
     assert outcome_fail_drop.g8_pass is False
@@ -454,6 +471,7 @@ def test_g9_umbral_pf_stress_1_15() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
         "US500",
@@ -463,6 +481,7 @@ def test_g9_umbral_pf_stress_1_15() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_pass.g9_pass is True
     assert outcome_fail.g9_pass is False
@@ -477,6 +496,7 @@ def test_all_pass_es_and_de_g1_g9() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome.all_pass is True
 
@@ -488,6 +508,7 @@ def test_all_pass_es_and_de_g1_g9() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome_one_fail.all_pass is False
 
@@ -506,6 +527,7 @@ def test_sizing_evidence_insufficient_true_en_rechazo_total() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome.sizing_evidence_insufficient is True
     assert outcome.g1_pass is False
@@ -526,6 +548,7 @@ def test_sizing_evidence_insufficient_false_sin_intents() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome.sizing_evidence_insufficient is False
     assert outcome.intents_total == 0
@@ -542,6 +565,7 @@ def test_sizing_evidence_insufficient_false_en_rechazo_parcial() -> None:
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome.sizing_evidence_insufficient is False
 
@@ -559,6 +583,7 @@ def test_sizing_evidence_insufficient_false_si_motivo_dominante_no_es_lot_size()
         _mc_symbol_result(),
         _risk_profile(),
         _STARTING_BALANCE,
+        ledger_extra_trials=0,
     )
     assert outcome.sizing_evidence_insufficient is False
 
@@ -784,7 +809,7 @@ def test_t1_n_trials() -> None:
         "C": _bundle(candidate_id="C"),
     }
 
-    t1 = _compute_t1("A", candidates)
+    t1 = _compute_t1("A", candidates, ledger_extra_trials=0)
 
     assert t1.n_trials_signal_total_ganador == 72
     assert t1.n_candidatos_torneo == 3
@@ -805,7 +830,7 @@ def test_t1_dsr_invoca_dsr_con_n_trials_deflactado(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(verdict_module, "deflated_sharpe_ratio", _spy)
 
-    t1 = _compute_t1("A", candidates)
+    t1 = _compute_t1("A", candidates, ledger_extra_trials=0)
 
     assert t1.n_trials_deflactado in calls
     assert 1 in calls  # t1_dsr_pre_deflation invoca con n_trials=1
