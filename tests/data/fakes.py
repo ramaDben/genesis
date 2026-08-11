@@ -37,10 +37,13 @@ class FakeEconomicCalendarSource:
         return list(self._events)
 
 
-def _default_symbol_figure(symbol: str) -> SymbolFigure:
+def _default_symbol_figure(
+    symbol: str, *, tick_value: float = 1.0, tick_size: float = 1.0
+) -> SymbolFigure:
     return SymbolFigure(
         symbol=symbol,
-        tick_value=1.0,
+        tick_value=tick_value,
+        tick_size=tick_size,
         volume_step=0.01,
         stops_level=10,
         freeze_level=5,

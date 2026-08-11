@@ -19,7 +19,8 @@ BASE_TIME: datetime = datetime(2024, 1, 2, 14, 30, tzinfo=UTC)
 
 @pytest.fixture
 def us500_figure() -> SymbolFigure:
-    """`SymbolFigure("US500")` determinista: `digits=2` -> `epsilon=0.005`, `tick_value=1.0`."""
+    """`SymbolFigure("US500")` determinista: `digits=2` -> `epsilon=0.005`,
+    `tick_value=1.0`, `tick_size=1.0` -> `value_per_point=1.0`."""
     return _default_symbol_figure("US500")
 
 

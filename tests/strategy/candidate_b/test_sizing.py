@@ -137,3 +137,39 @@ def test_distancia_stop_no_positiva_lanza_candidate_b_state_error(
 
     with pytest.raises(CandidateBStateError):
         candidate.on_bar(_breakout_bar(_N_MINUTES, close=4506.2))
+
+
+def _figure_with(tick_value: float, tick_size: float) -> SymbolFigure:
+    return SymbolFigure(
+        symbol="US500",
+        tick_value=tick_value,
+        tick_size=tick_size,
+        volume_step=0.01,
+        stops_level=10,
+        freeze_level=5,
+        digits=2,
+        swap_long=-1.0,
+        swap_short=-1.0,
+        swap_rollover_day=3,
+    )
+
+
+def test_sizing_depende_del_cociente_no_del_tick_value_crudo() -> None:
+    """A4: mismo `value_per_point` (cociente) -> mismo `sizing_hint`, aunque el `tick_value`
+    crudo difiera 100x entre las dos fichas."""
+    figure_a = _figure_with(tick_value=0.01, tick_size=0.01)
+    figure_b = _figure_with(tick_value=1.0, tick_size=1.0)
+    candidate_a = _formed_candidate(figure_a)
+    candidate_b = _formed_candidate(figure_b)
+    intent_a = candidate_a.on_bar(_breakout_bar(_N_MINUTES, close=4506.2))[0]
+    intent_b = candidate_b.on_bar(_breakout_bar(_N_MINUTES, close=4506.2))[0]
+    assert intent_a.sizing_hint == pytest.approx(intent_b.sizing_hint)
+
+
+def test_sizing_con_ger40_usa_el_cociente_115435() -> None:
+    """A5: discrimina el bug (usar `tick_value` crudo) del fix (usar `value_per_point`)."""
+    figure = _figure_with(tick_value=0.0115435, tick_size=0.01)
+    candidate = _formed_candidate(figure, risk_pct=0.00375, reference_balance=100_000.0)
+    intent = candidate.on_bar(_breakout_bar(_N_MINUTES, close=4506.2))[0]
+    assert intent.sizing_hint == pytest.approx(375.0 / (8.2 * 1.15435))
+    assert intent.sizing_hint != pytest.approx(375.0 / (8.2 * 0.0115435))

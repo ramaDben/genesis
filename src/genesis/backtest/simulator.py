@@ -9,9 +9,10 @@ silencioso (R21).
 
 Modelo de costos monetario (decisión de implementación, sin R-número específico que
 fije la fórmula exacta de P&L): el P&L en puntos de precio se convierte a dinero vía
-`figure.tick_value`; comisión y swap se cobran como cargos explícitos (`cost_applied`)
-separados del precio de ejecución, que permanece geométricamente puro (bar.open/nivel
-SL-TP/precio de tick) para no contaminar la tabla golden de fills (R32–R36).
+`figure.value_per_point` (`tick_value / tick_size`, R10 + Change #55); comisión y swap
+se cobran como cargos explícitos (`cost_applied`) separados del precio de ejecución,
+que permanece geométricamente puro (bar.open/nivel SL-TP/precio de tick) para no
+contaminar la tabla golden de fills (R32–R36).
 """
 
 from collections.abc import Sequence
@@ -342,7 +343,7 @@ class Simulator:
         """P&L no realizado de `position` a `price` (bruto, sin costos), en dinero."""
         direction_sign = 1.0 if position.direction is Direction.LONG else -1.0
         points = (price - position.entry_price) * direction_sign
-        return points * position.sizing_hint * self.figure.tick_value
+        return points * position.sizing_hint * self.figure.value_per_point
 
     def _floating_equity(self, bar: AnnotatedBar) -> float:
         """Equity flotante intradía: balance realizado + P&L no realizado a `bar.close`."""
@@ -526,7 +527,7 @@ class Simulator:
         slippage_points = slippage_for(self.figure, self.costs_config, stress=self.stress)
         commission = commission_for(intent.sizing_hint, self.costs_config, stress=self.stress)
         points_total = spread_points + slippage_points
-        cost_points = points_total * intent.sizing_hint * self.figure.tick_value
+        cost_points = points_total * intent.sizing_hint * self.figure.value_per_point
         entry_cost = commission + cost_points
         self.account.balance -= entry_cost
 

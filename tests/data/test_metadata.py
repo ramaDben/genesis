@@ -47,6 +47,7 @@ def _build_metadata() -> ArtifactMetadata:
         symbol_figure=SymbolFigure(
             symbol="US500",
             tick_value=1.0,
+            tick_size=1.0,
             volume_step=0.01,
             stops_level=10,
             freeze_level=5,

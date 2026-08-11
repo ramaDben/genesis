@@ -89,6 +89,15 @@ def test_load_placeholder_symbol_figures_default_empaquetado() -> None:
         assert figure.symbol == symbol
 
 
+def test_load_placeholder_symbol_figures_value_per_point_preserva_el_tick_value_de_hoy() -> None:
+    """D6: `tick_size=1.0` en los 4 placeholders preserva `value_per_point == tick_value`."""
+    figures = load_placeholder_symbol_figures()
+    assert figures["XAUUSD"].value_per_point == pytest.approx(1.0)
+    assert figures["EURUSD"].value_per_point == pytest.approx(1.0)
+    assert figures["GBPUSD"].value_per_point == pytest.approx(1.0)
+    assert figures["USDJPY"].value_per_point == pytest.approx(0.91)
+
+
 def test_load_placeholder_symbol_figures_bloque_faltante_lanza_error(tmp_path: Path) -> None:
     payload = {
         "candidates": {

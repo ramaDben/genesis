@@ -415,7 +415,7 @@ Principios rectores (sin cambios de fondo respecto a v1.0):
 
 | Componente | Responsabilidad |
 |---|---|
-| `mt5_export.py` | CLI sobre el paquete oficial `MetaTrader5`: (a) M1 OHLCV + `tick_volume`; (b) **ticks** (`copy_ticks_range`) donde el terminal los provea — insumo del modelo de spread, de los fills intrabar y del diagnóstico §2.2.1; (c) ficha del símbolo extendida: `tick_value`, `volume_step`, `stops_level`, `freeze_level`, `digits`, `swap_long`, `swap_short`, `swap_rollover_day`. Parquet crudo + metadata. |
+| `mt5_export.py` | CLI sobre el paquete oficial `MetaTrader5`: (a) M1 OHLCV + `tick_volume`; (b) **ticks** (`copy_ticks_range`) donde el terminal los provea — insumo del modelo de spread, de los fills intrabar y del diagnóstico §2.2.1; (c) ficha del símbolo extendida: `tick_value`, `tick_size`, `volume_step`, `stops_level`, `freeze_level`, `digits`, `swap_long`, `swap_short`, `swap_rollover_day`. Parquet crudo + metadata. |
 | `calendar.py` | Calendario económico (noticias de alto impacto por divisa/índice) → ventanas por símbolo. Insumo de cumplimiento (P6) y de stress de costos. |
 | `sessions.py` | **Horarios de sesión de contado por índice** (apertura/cierre, con DST del mercado subyacente) — insumo del rango de apertura del Candidato B y del filtro de sesión del A. |
 | `quality.py` | Contrato de calidad: gaps anómalos, duplicados, velas corruptas, cobertura, **suficiencia de historia** (un símbolo sin historia para G1 se excluye; nunca se relajan gates). Falla ruidosamente. |
