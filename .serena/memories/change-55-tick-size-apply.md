@@ -1,70 +1,71 @@
-# Change #55 — apply completado (2026-08-11), `SymbolFigure.tick_size` + `value_per_point`
+*(Actualizado 2026-08-11 — cierre)*
 
-Observación fechada de la fase `apply` del Change
-`55-fix-data-symbolfigure-no-captura-tick-size-el-sizing-costos-asum` (branch
-`fix/55-symbolfigure-tick-size`, `design_approved_at=2026-08-11T16:33:26Z` por `bbenja11`).
-Verificar contra el código si esta memoria envejece.
+# Change #55 — cerrado en los hechos (PR mergeado), pulse-engine atascado
 
-## Contexto de la sesión
+## Resultado final
 
-Esta pasada de `apply` retomó un intento anterior interrumpido por un reinicio del equipo: el
-working tree ya tenía, sin commitear, la implementación **completa** de T1-T10 de `design.md`
-§6 (el `tasks.md` real del Change quedó como plantilla vacía — nunca se formalizó en
-`break-to-tasks`; se reconstruyó desde `design.md` §6 en esta pasada y se dejó escrito en
-`.pulse/changes/55-.../tasks.md`, gitignored). Se verificó **archivo por archivo** el diff
-preexistente contra el plan técnico de `design.md` §5-§6 antes de conservarlo: coincide
-exactamente, sin nada fuera de alcance. `ledger/README.md` y `.claude/settings.json`, mencionados
-en la tarea como posiblemente contaminados por el Change #53, en realidad **no tenían diff** al
-verificar (`git status` los mostraba en el enunciado de la tarea pero el working tree real ya no
-los tenía modificados).
+- **PR #56 mergeado** (squash) a `main`: commit `d7906a9e7e73fd270f6255b0a9e6fe3b55db2280`. CI y CodeRabbit verdes. Ramas
+  remota y local (`fix/55-symbolfigure-tick-size`) eliminadas. `main` local en WSL actualizado (fast-forward).
+- El trabajo de código de #55 (`SymbolFigure.tick_size` + `value_per_point`) está **completo y en `main`**.
+- El **issue #55 sigue abierto en GitHub** — no se cerró manualmente (decisión del usuario: dejar la
+  inconsistencia documentada en vez de forzar cierre a mano o version bump).
 
-## Qué se corrigió en esta pasada (encima del trabajo heredado)
+## Bug/inconsistencia confirmada en `pulse-engine`: Change atascado en fase `close` sin `close_change`
 
-1. `tests/data/test_mt5_export_pure.py:156` — línea >100 columnas (ruff E501), envuelta.
-2. `tests/backtest/test_simulator_money_conversion.py` — no estaba formateado con `ruff format`.
-3. `tests/data/test_symbols.py:57` — comentario de supresión de tipo con sintaxis `mypy`
-   (`# type: ignore[arg-type]`) en vez de `# ty: ignore[invalid-argument-type]` (trampa ya
-   registrada en `mem:ledger-de-ensayos-decisiones-de-diseno`, se repitió en este Change).
+`list_active_changes` / `get_current_phase` muestran `current_phase: "close"` para el slug
+`55-fix-data-symbolfigure-no-captura-tick-size-el-sizing-costos-asum`, con `closed_at: null`,
+`version_bumped_to: null`. Es decir: **la FSM ya avanzó a la fase terminal `close` sin que
+`close_change` se haya ejecutado nunca** (no hay `closed_at`, no hay bump de versión, no hubo
+promoción de delta/archivado).
 
-## Resultado de la toolchain (esta pasada)
+`close_change(slug)` — la única tool que hace el bump de versión + promoción de delta + archivado —
+**rechaza la llamada**: `"close_change requiere un Change en fase review."`. Es decir, exige
+`current_phase == "review"` como precondición, pero el estado real ya es `"close"`.
 
-`ruff check` verde, `ruff format --check` verde, `ty check` verde, `pytest` **729 passed / 1
-skipped** (baseline pre-Change en `main`: 720 → +9... no, +12 tests nuevos netos según diseño,
-verificado con `git stash` + recollect: 720 tests en `main`/HEAD sin el diff). `deptry` reporta
-1 hallazgo preexistente no relacionado (`DEP004` en `.agents/hooks/_lib/pulse_hooks_lib/schema.py`,
-pydantic declarado como dev dependency — nada que ver con este Change). `bandit` y `vulture`
-sin hallazgos.
+Intenté recuperarlo con `request_sdd_transition(target_phase="review", ...)` para volver a fase
+`review` y reintentar `close_change` desde ahí — **rechazado también**:
+`"ACCESO DENEGADO (SpecGate): Transición inválida para Change activo: close solo puede avanzar a
+la fase siguiente."` La FSM no permite retroceder desde `close`, que es fase terminal.
 
-## Trampa operativa nueva (2026-08-11): `git stash` durante `apply` con `.pulse/changes/` gitignored
+**Conclusión**: el Change quedó en un estado sin salida con las tools actuales — no hay forma de
+ejecutar `close_change` (exige fase `review`) ni de retroceder a `review` (la FSM lo prohíbe desde
+`close`). Ninguna otra tool de `pulse-engine` hace el bump de versión/archivado (`create_change_from_issue`,
+`approve_design`, `mark_tests_passed`, `request_sdd_transition`, `view_project_dashboard`,
+`list_active_changes` son las únicas además de `close_change`).
 
-Al intentar medir el conteo de tests baseline con `git stash && pytest --co && git stash pop`,
-el `stash pop` falló silenciosamente por un conflicto con `uv.lock` (binario, modificado en
-ambos lados) **y** con el archivo nuevo `tests/backtest/test_simulator_money_conversion.py`
-(untracked, presente en ambos lados del stash) — el pop dejó el mensaje "no changes added" pero
-en realidad **no aplicó los cambios tracked**, dejando el working tree en un estado a medio
-camino (huérfano) hasta que se detectó vía `git status`/`git stash list` y se resolvió: `git
-checkout -- uv.lock` (descartar el cambio local trivial de versión) + mover aparte el archivo
-untracked conflictivo + `git stash pop stash@{0}` explícito (no `git stash pop` a ciegas) + mover
-de vuelta el archivo. **Lección**: nunca usar `git stash`/`pop` para "medir algo rápido" en medio
-de una sesión de `apply` con cambios sin commitear reales — usar `git worktree add` o clonar a un
-directorio aparte para comparar contra otra rama/commit sin tocar el working tree activo.
-`tasks.md` (y en general todo bajo `.pulse/changes/`) **no participa** de `git stash` porque está
-en `.gitignore`; sobrevivió intacto al episodio.
+**Hipótesis de causa raíz**: algo (una sesión anterior, posiblemente el `review-agent` al emitir
+ambos gates `si/si`, o un `request_sdd_transition(target_phase="close")` manual) avanzó la fase a
+`close` sin pasar por `close_change` — probablemente `close_change` debería ser la tool que hace
+*ambas* cosas (transición review→close + archivado), y alguien llamó solo a la transición FSM sin
+la tool de cierre real.
 
-## Trampa confirmada de nuevo: subagente de `apply` sin `pulse-engine`/`serena`(parcial) al lanzarse
+## Trampa operativa para la próxima vez
 
-`ToolSearch` no encontró ningún tool `mcp__pulse*` en esta sesión de subagente (probado con
-queries `"pulse"`, `"mark_tests_passed"`, `"request_sdd_transition"`, `"view_project_dashboard"`,
-`"change dashboard sdd approve"` — todas sin resultados), pese a que `serena` y `github` sí
-respondieron. Coincide con la trampa ya registrada arriba ("un subagente que reporta 'MCP no
-disponible' puede estar equivocado", 2026-08-09): el subagente no debe declarar el engine
-inexistente de forma definitiva, sino reportarlo al hilo principal para que lo verifique/ejecute
-él mismo la transición pendiente (`mark_tests_passed` + `request_sdd_transition(target_phase=
-"review", ...)` para este Change).
+Si un Change llega a `/pulse:close` y `list_active_changes` ya muestra `current_phase: "close"`
+con `closed_at: null`, **no asumir que solo falta invocar `close_change`** — probablemente está en
+este mismo estado atascado. Verificar con `get_current_phase` + intentar `close_change` primero;
+si falla con "requiere fase review", es este bug, no un error de uso. No intentar
+`request_sdd_transition` hacia atrás (confirmado que la FSM lo bloquea). Reportar al usuario en vez
+de forzar workarounds (edición manual de `state.yaml` está prohibida — es ledger read-only del
+engine).
 
-## Estado dejado
+## Pendiente
 
-Working tree con T1-T10 implementados y verificados, `tasks.md` reescrito con el desglose real
-(T1-T11 marcadas `[x]`, T12/T13 `[ ]` no bloqueantes por diseño explícito, G7). Nada commiteado
-en esta pasada (no se pidió). Pendiente para el hilo principal: verificar `pulse-engine`
-disponible y ejecutar `mark_tests_passed` + `request_sdd_transition(target_phase="review")`.
+- Reportar el bug de `pulse-engine` (close_change/FSM inconsistente) — no se abrió issue para esto
+  todavía, evaluar si corresponde a este repo o al repo del engine (`ghcr.io/bajmein/pulse`).
+  Ver `mem:datos-ftmo-y-respaldos` y CLAUDE.md sobre `mise run docker:pull` — la imagen `:latest`
+  del engine ya tiene un problema conocido similar en `promote_delta` (no construir desde ahí,
+  usar `main`).
+- Issue #55 en GitHub sigue **abierto** — decisión explícita del usuario de no cerrarlo a mano.
+- Version bump (`v0.1.17 -> v0.1.18` esperado, label `bug` sin `type:` explícito → fallback patch)
+  **no se ejecutó**. `pyproject.toml`/changelog siguen en `v0.1.17`.
+- Archivo de `.pulse/changes/55-.../` no se archivó/limpió (queda como Change activo en el ledger
+  del engine, aunque el código ya está en `main`).
+
+## Referencia — trabajo de la fase apply (histórico, sin cambios)
+
+T1-T10 implementados y verificados en su momento; toolchain verde (ruff, ty, pytest 729 passed/1
+skipped, bandit/vulture sin hallazgos, deptry con 1 hallazgo preexistente no relacionado). T12/T13
+no bloqueantes por diseño explícito (G7). Detalles de las trampas de `git stash` y de subagentes
+sin `pulse-engine` disponible: ver historial de este mismo archivo en git (`git log -p -- 
+.serena/memories/change-55-tick-size-apply.md`) si se necesita el detalle completo.
