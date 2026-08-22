@@ -14,7 +14,9 @@ Las cuatro capas son agnósticas a la estrategia y la capa 2 define el contrato 
 
 El destino es una **búsqueda automatizada de estrategias** — un arquitecto que proponga candidatos y aprenda del veredicto. Ahí aparece la condición que ordena todo el roadmap: hoy el DSR solo deflacta por los ensayos de la grilla interna de una corrida (`n_trials_signal_total`), así que una búsqueda que ocurra *entre* corridas es invisible para el denominador. Con 500 candidatos propuestos, cada corrida reportaría un DSR respetable calculado sobre 9 intentos cuando hubo 4.500, y **G4 dejaría de proteger sin emitir señal de que dejó de hacerlo**.
 
-Por eso el **ledger de ensayos persistente** ([#53](https://github.com/ramaDben/genesis/issues/53)) va **antes** que el arquitecto: construido al revés, produce resultados que se ven excelentes y no significan nada, sin forma de distinguirlos retroactivamente porque los ensayos descartados no quedaron registrados en ninguna parte. La maquinaria de deflación ya es la correcta —Bailey y López de Prado diseñaron el DSR precisamente para castigar la búsqueda múltiple—; lo que falta es conectarle un contador honesto.
+Por eso el **ledger de ensayos persistente** ([#53](https://github.com/ramaDben/genesis/issues/53)) iba **antes** que el arquitecto: construido al revés, produce resultados que se ven excelentes y no significan nada, sin forma de distinguirlos retroactivamente porque los ensayos descartados no quedaron registrados en ninguna parte. La maquinaria de deflación ya era la correcta —Bailey y López de Prado diseñaron el DSR precisamente para castigar la búsqueda múltiple—; lo que faltaba era conectarle un contador honesto.
+
+**Ese contador ya existe.** `genesis.validation.trial_ledger` persiste un ensayo por `(candidato, símbolo)` en `ledger/trials.jsonl`, con un `trial_id` determinista derivado de la configuración del candidato y de los hashes institucionales de la corrida. `run_verdict` lo consume de solo lectura en G4 y T1, bajo un invariante verificado con property test: **el ledger solo puede endurecer un gate, nunca relajarlo**. Lo que sigue abierto es *qué cuenta como un ensayo* cuando la búsqueda se automatice — la propuesta completa está en [`docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md`](docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md).
 
 Dos invariantes de esa visión ya están decididos:
 
@@ -30,7 +32,7 @@ Dos invariantes de esa visión ya están decididos:
 
 ## Estado del proyecto
 
-Las cuatro capas están construidas y verificadas: **666 tests** en verde, más lint (`ruff`, `bandit`, `vulture`, `deptry`) y type-check (`ty`) limpios en CI. Versión actual: `0.1.16`.
+Las cuatro capas están construidas y verificadas: **729 tests** en verde, más lint (`ruff`, `bandit`, `vulture`, `deptry`) y type-check (`ty`) limpios en CI. Versión actual: `0.1.17`.
 
 | Capa | Paquete | Estado |
 |---|---|---|
@@ -165,6 +167,7 @@ export nuevo antes de comparar resultados entre datasets.
 
 - **SSoT vigente**: [`docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`](docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md) — arquitectura, umbrales go/no-go definitivos, manejo de errores, estrategia de testing y gobernanza.
 - Las versiones v1.1 a v1.3 se conservan en `docs/` solo como historial. **No las uses como referencia.**
+- Investigación en curso (RFC, **no** normativo): [`docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md`](docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md) — propuesta para convertir el torneo en un laboratorio de estrategias publicadas, con la semántica de conteo de ensayos que el arquitecto necesita.
 - Todo cambio de alcance se valida contra el spec; los gates no se relajan.
 - Convenciones de trabajo: [`CLAUDE.md`](CLAUDE.md) · flujo SDD: [`AGENTS.md`](AGENTS.md) · reglas detalladas en `.agents/rules/`.
 
