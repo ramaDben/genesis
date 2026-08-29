@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El RFC del Laboratorio, explicado</title>
+<meta name="description" content="Lectura guiada del RFC del Laboratorio de Estrategias: para qué existe, por qué su orden no es negociable, cómo una idea publicada llega a ser un candidato evaluable, y qué falta decidir.">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --color-paper:        #f5f5f5;
+  --color-paper-2:      #ececec;
+  --color-ink:          #2d3142;
+  --color-muted:        #4f5d75;
+  --color-soft:         #7a8399;
+  --color-rule:         rgba(45,49,66,0.12);
+  --color-accent:       #eb6c36;
+  --color-accent-tint:  rgba(235,108,54,0.08);
+  --color-node:         #ffffff;
+  --color-store:        rgba(45,49,66,0.05);
+  --color-input:        rgba(79,93,117,0.10);
+  --color-opt:          rgba(45,49,66,0.02);
+  --color-opt-stroke:   rgba(45,49,66,0.20);
+  --color-zone:         rgba(45,49,66,0.02);
+  --color-zone-stroke:  rgba(45,49,66,0.10);
+  --color-card:         #ffffff;
+  --font-sans:  'Geist', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Instrument Serif', 'Times New Roman', serif;
+  --font-mono:  'Geist Mono', ui-monospace, Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-paper:       #2d3142;
+    --color-paper-2:     #393e53;
+    --color-ink:         #f5f5f5;
+    --color-muted:       #bfc0c0;
+    --color-soft:        #8e98ac;
+    --color-rule:        rgba(245,245,245,0.12);
+    --color-accent:      #f08a59;
+    --color-accent-tint: rgba(240,138,89,0.10);
+    --color-node:        #393e53;
+    --color-store:       rgba(245,245,245,0.06);
+    --color-input:       rgba(191,192,192,0.10);
+    --color-opt:         rgba(245,245,245,0.03);
+    --color-opt-stroke:  rgba(245,245,245,0.20);
+    --color-zone:        rgba(245,245,245,0.03);
+    --color-zone-stroke: rgba(245,245,245,0.10);
+    --color-card:        #393e53;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-paper:       #2d3142;
+  --color-paper-2:     #393e53;
+  --color-ink:         #f5f5f5;
+  --color-muted:       #bfc0c0;
+  --color-soft:        #8e98ac;
+  --color-rule:        rgba(245,245,245,0.12);
+  --color-accent:      #f08a59;
+  --color-accent-tint: rgba(240,138,89,0.10);
+  --color-node:        #393e53;
+  --color-store:       rgba(245,245,245,0.06);
+  --color-input:       rgba(191,192,192,0.10);
+  --color-opt:         rgba(245,245,245,0.03);
+  --color-opt-stroke:  rgba(245,245,245,0.20);
+  --color-zone:        rgba(245,245,245,0.03);
+  --color-zone-stroke: rgba(245,245,245,0.10);
+  --color-card:        #393e53;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.container { max-width: 1040px; margin: 0 auto; padding: 3rem 2rem 5rem; }
+.col { max-width: 66ch; }
+
+.header { margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-rule); }
+.header-eyebrow {
+  font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--color-muted); margin-bottom: 0.75rem;
+}
+h1 {
+  font-family: var(--font-serif); font-size: clamp(2rem, 4vw + 1rem, 2.9rem);
+  font-weight: 400; letter-spacing: -0.02em; line-height: 1.08;
+  text-wrap: balance; margin-bottom: 0.75rem;
+}
+.subtitle { font-size: 1.05rem; line-height: 1.55; color: var(--color-muted); max-width: 56ch; }
+.subtitle strong { color: var(--color-ink); font-weight: 600; }
+
+section { padding: 2.5rem 0; border-bottom: 1px solid var(--color-rule); }
+section:last-of-type { border-bottom: 0; }
+.sec-eyebrow {
+  font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--color-accent); margin-bottom: 0.6rem;
+}
+h2 {
+  font-family: var(--font-serif); font-size: clamp(1.55rem, 3vw, 2rem);
+  font-weight: 400; letter-spacing: -0.015em; line-height: 1.15;
+  text-wrap: balance; max-width: 26ch; margin-bottom: 1.2rem;
+}
+h3 { font-size: 1.02rem; font-weight: 600; margin: 2rem 0 0.7rem; }
+p { margin-bottom: 1.1rem; }
+p:last-child { margin-bottom: 0; }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--color-paper-2); padding: 0.1em 0.34em; border-radius: 4px; }
+ul { margin: 0 0 1.1rem 1.3rem; }
+li { margin-bottom: 0.45rem; }
+li::marker { color: var(--color-soft); }
+
+.aside {
+  font-family: var(--font-serif); font-style: italic;
+  font-size: 1.18rem; line-height: 1.5;
+  border-left: 2px solid var(--color-accent);
+  padding-left: 1.2rem; margin: 1.8rem 0; max-width: 56ch;
+}
+
+figure { margin: 2.2rem 0; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 700px; }
+figcaption {
+  font-size: 0.86rem; line-height: 1.5; color: var(--color-muted);
+  border-top: 1px solid var(--color-rule);
+  padding-top: 0.8rem; margin-top: 0.9rem; max-width: 74ch;
+}
+
+.d-mask    { fill: var(--color-paper); }
+.d-node    { fill: var(--color-node); stroke: var(--color-ink); stroke-width: 1; }
+.d-store   { fill: var(--color-store); stroke: var(--color-muted); stroke-width: 1; }
+.d-input   { fill: var(--color-input); stroke: var(--color-soft); stroke-width: 1; }
+.d-focal   { fill: var(--color-accent-tint); stroke: var(--color-accent); stroke-width: 1.2; }
+.d-opt     { fill: var(--color-opt); stroke: var(--color-opt-stroke); stroke-width: 1; stroke-dasharray: 4 3; }
+.d-zone    { fill: var(--color-zone); stroke: var(--color-zone-stroke); stroke-width: 0.8; }
+.d-conn    { fill: none; stroke: var(--color-muted); stroke-width: 1.2; }
+.d-conn-a  { fill: none; stroke: var(--color-accent); stroke-width: 1.2; }
+.d-hair    { stroke: var(--color-rule); stroke-width: 0.8; }
+.d-name    { font-family: var(--font-sans); font-size: 12px; font-weight: 600; fill: var(--color-ink); }
+.d-name-a  { font-family: var(--font-sans); font-size: 12px; font-weight: 600; fill: var(--color-accent); }
+.d-sub     { font-family: var(--font-mono); font-size: 9px; fill: var(--color-muted); }
+.d-sub-a   { font-family: var(--font-mono); font-size: 9px; fill: var(--color-accent); }
+.d-eyebrow { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.18em; fill: var(--color-soft); }
+.d-arrow   { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--color-soft); }
+.m-muted   { fill: var(--color-muted); }
+.m-accent  { fill: var(--color-accent); }
+
+.tablewrap { overflow-x: auto; margin: 1.7rem 0; border: 1px solid var(--color-rule); border-radius: 6px; background: var(--color-card); }
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 540px; }
+th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--color-rule); vertical-align: top; }
+thead th {
+  font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-soft); background: var(--color-paper-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+td.id { font-family: var(--font-mono); font-weight: 600; white-space: nowrap; width: 1%; }
+.mark { font-family: var(--font-mono); font-size: 0.7rem; white-space: nowrap; }
+.mark.hecho { color: var(--color-muted); }
+.mark.tuya  { color: var(--color-accent); }
+
+.cards { display: grid; gap: 1rem; margin: 1.7rem 0; }
+.cards.duo  { grid-template-columns: 1.1fr 0.9fr; }
+.cards.trio { grid-template-columns: 1.1fr 1fr 0.9fr; }
+@media (max-width: 760px) { .cards.duo, .cards.trio { grid-template-columns: 1fr; } }
+.card { background: var(--color-card); border: 1px solid var(--color-rule); border-radius: 6px; padding: 1.2rem; }
+.card-eyebrow {
+  font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-soft); margin-bottom: 0.6rem;
+}
+.card-header { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--color-rule); }
+.card-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.card-dot.ink { background: var(--color-ink); }
+.card-dot.muted { background: var(--color-muted); }
+.card-dot.coral { background: var(--color-accent); }
+.card h3 { font-size: 0.95rem; font-weight: 600; margin: 0; }
+.card p { font-size: 0.88rem; line-height: 1.55; color: var(--color-muted); margin-bottom: 0; }
+
+footer {
+  border-top: 1px solid var(--color-rule); margin-top: 3rem; padding-top: 1.5rem;
+  font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.7; color: var(--color-soft);
+}
+footer p { max-width: 76ch; }
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<header class="header">
+  <p class="header-eyebrow">Lectura guiada · docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md</p>
+  <h1>El RFC del Laboratorio, explicado</h1>
+  <p class="subtitle">
+    <strong>En una frase:</strong> genesis puede validar estrategias con rigor institucional,
+    pero casi no tiene estrategias que validar. El RFC es el plan para fabricarlas sin arruinar
+    la estadística que las juzga.
+  </p>
+</header>
+
+<!-- ══════ 01 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">01 — Para qué existe</p>
+    <h2>La asimetría que lo justifica todo</h2>
+
+    <p>
+      genesis tiene cuatro capas construidas, sesenta módulos, dieciocho gates y 740 tests en
+      verde. Tiene maquinaria para correr un <em>torneo</em>: el gate T1 deflacta el DSR del
+      ganador por el número de competidores, y el T2 valida un ensemble si dos candidatos pasan
+      con correlación baja.
+    </p>
+
+    <p>
+      Y tiene <strong>un solo candidato ejecutable</strong>. El A existe a medias y no está
+      registrado; el C nunca se implementó. Toda la maquinaria de comparación está construida y
+      no tiene nada real que comparar.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 340" role="img" aria-labelledby="asim-title asim-desc">
+      <title id="asim-title">La asimetría entre validación y suministro</title>
+      <desc id="asim-desc">La maquinaria de validación de genesis está completa, incluida la comparación de torneo, mientras que de los tres candidatos previstos solo uno es ejecutable, de modo que los gates que comparan candidatos no tienen nada que comparar.</desc>
+
+      <defs>
+        <marker id="as-arrow-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-accent" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <rect class="d-zone" x="32" y="56" width="432" height="240" rx="8"/>
+      <rect class="d-mask" x="48" y="60" width="132" height="12" rx="2"/>
+      <text class="d-eyebrow" x="52" y="69">LA MÁQUINA · EXISTE</text>
+
+      <rect class="d-zone" x="560" y="56" width="368" height="240" rx="8"/>
+      <rect class="d-mask" x="576" y="60" width="148" height="12" rx="2"/>
+      <text class="d-eyebrow" x="580" y="69">QUÉ HAY PARA JUZGAR</text>
+
+      <path class="d-conn-a" d="M 432,256 H 504 Q 512,256 512,248 V 200 Q 512,192 520,192 H 592" marker-end="url(#as-arrow-a)"/>
+      <rect class="d-mask" x="520" y="216" width="56" height="12" rx="2"/>
+      <text class="d-arrow" x="548" y="225" text-anchor="middle">SOLO UNO</text>
+
+      <rect class="d-mask" x="64" y="104" width="368" height="48" rx="6"/>
+      <rect class="d-node" x="64" y="104" width="368" height="48" rx="6"/>
+      <text class="d-name" x="88" y="126">Cuatro capas · 60 módulos · 740 tests</text>
+      <text class="d-sub" x="88" y="142">datos · estrategia · backtest · validación</text>
+
+      <rect class="d-mask" x="64" y="168" width="368" height="48" rx="6"/>
+      <rect class="d-node" x="64" y="168" width="368" height="48" rx="6"/>
+      <text class="d-name" x="88" y="190">18 gates mecánicos</text>
+      <text class="d-sub" x="88" y="206">G1–G9 · C1–C2 · P1–P5 · T1–T2</text>
+
+      <rect class="d-mask" x="64" y="232" width="368" height="48" rx="6"/>
+      <rect class="d-focal" x="64" y="232" width="368" height="48" rx="6"/>
+      <text class="d-name-a" x="88" y="254">Comparación de torneo · T1 y T2</text>
+      <text class="d-sub-a" x="88" y="270">construida, y sin nada que comparar</text>
+
+      <rect class="d-mask" x="592" y="104" width="304" height="48" rx="6"/>
+      <rect class="d-opt" x="592" y="104" width="304" height="48" rx="6"/>
+      <text class="d-name" x="616" y="126">Candidato A — CT sweep-fade</text>
+      <text class="d-sub" x="616" y="142">parcial · no registrado · no ejecutable</text>
+
+      <rect class="d-mask" x="592" y="168" width="304" height="48" rx="6"/>
+      <rect class="d-node" x="592" y="168" width="304" height="48" rx="6"/>
+      <text class="d-name" x="616" y="190">Candidato B — ORB intradía</text>
+      <text class="d-sub" x="616" y="206">ejecutable · veredicto real: no-go</text>
+
+      <rect class="d-mask" x="592" y="232" width="304" height="48" rx="6"/>
+      <rect class="d-opt" x="592" y="232" width="304" height="48" rx="6"/>
+      <text class="d-name" x="616" y="254">Candidato C — TSMOM</text>
+      <text class="d-sub" x="616" y="270">diferido · el issue nunca se creó</text>
+
+      <line class="d-hair" x1="32" y1="312" x2="928" y2="312"/>
+      <text class="d-sub" x="32" y="332">El cuello de botella de genesis no es validar hipótesis. Es tenerlas.</text>
+    </svg>
+    <figcaption>
+      Esta es toda la justificación del RFC en una imagen: se construyó una máquina de comparar
+      y hay un solo espécimen. El laboratorio es la respuesta al lado vacío, no al lleno.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════ 02 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">02 — El orden</p>
+    <h2>Por qué no se puede empezar por la parte divertida</h2>
+
+    <p>
+      La parte divertida es el <strong>arquitecto</strong>: un generador que propone estrategias
+      solo y aprende del veredicto. El RFC insiste en que va último, y la razón es la misma que
+      atraviesa todo el proyecto.
+    </p>
+
+    <p>
+      El DSR castiga el Sharpe según cuántos ensayos hicieron falta. Si un generador propone 500
+      candidatos <em>entre</em> corridas, y cada corrida solo cuenta los 9 de su grilla interna,
+      el DSR se calcula sobre 9 cuando hubo 4.500. El gate seguiría diciendo «pasa» y ya no
+      estaría midiendo nada.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 260" role="img" aria-labelledby="orden-title orden-desc">
+      <title id="orden-title">El orden forzoso del roadmap</title>
+      <desc id="orden-desc">El ledger de ensayos habilita el laboratorio y el laboratorio habilita al arquitecto; invertir ese orden produce resultados que parecen excelentes y no significan nada, porque los ensayos descartados no quedan registrados.</desc>
+
+      <defs>
+        <marker id="or-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <path class="d-conn" d="M 288,132 H 360" marker-end="url(#or-arrow)"/>
+      <path class="d-conn" d="M 600,132 H 672" marker-end="url(#or-arrow)"/>
+      <rect class="d-mask" x="296" y="108" width="56" height="12" rx="2"/>
+      <text class="d-arrow" x="324" y="117" text-anchor="middle">HABILITA</text>
+      <rect class="d-mask" x="608" y="108" width="56" height="12" rx="2"/>
+      <text class="d-arrow" x="636" y="117" text-anchor="middle">HABILITA</text>
+
+      <rect class="d-mask" x="48" y="96" width="240" height="72" rx="6"/>
+      <rect class="d-store" x="48" y="96" width="240" height="72" rx="6"/>
+      <rect class="d-mask" x="60" y="104" width="44" height="12" rx="2"/>
+      <text class="d-eyebrow" x="64" y="113">HECHO</text>
+      <text class="d-name" x="168" y="140" text-anchor="middle">Ledger de ensayos</text>
+      <text class="d-sub" x="168" y="156" text-anchor="middle">issue #53 · el contador honesto</text>
+
+      <rect class="d-mask" x="360" y="96" width="240" height="72" rx="6"/>
+      <rect class="d-focal" x="360" y="96" width="240" height="72" rx="6"/>
+      <rect class="d-mask" x="372" y="104" width="72" height="12" rx="2"/>
+      <text class="d-eyebrow" x="376" y="113">ESTE RFC</text>
+      <text class="d-name-a" x="480" y="140" text-anchor="middle">El laboratorio</text>
+      <text class="d-sub-a" x="480" y="156" text-anchor="middle">fabrica candidatos trazables</text>
+
+      <rect class="d-mask" x="672" y="96" width="240" height="72" rx="6"/>
+      <rect class="d-opt" x="672" y="96" width="240" height="72" rx="6"/>
+      <rect class="d-mask" x="684" y="104" width="56" height="12" rx="2"/>
+      <text class="d-eyebrow" x="688" y="113">DESPUÉS</text>
+      <text class="d-name" x="792" y="140" text-anchor="middle">El arquitecto</text>
+      <text class="d-sub" x="792" y="156" text-anchor="middle">propone genomas y aprende</text>
+
+      <line class="d-hair" x1="48" y1="200" x2="912" y2="200"/>
+      <text class="d-eyebrow" x="48" y="220">POR QUÉ EL ORDEN NO ES NEGOCIABLE</text>
+      <text class="d-sub" x="48" y="240">Construido al revés produce resultados que se ven excelentes y no significan nada — y no hay forma de distinguirlos</text>
+      <text class="d-sub" x="48" y="256">después, porque los ensayos descartados no quedaron registrados en ninguna parte.</text>
+    </svg>
+    <figcaption>
+      El ledger ya está construido, así que el timing del laboratorio es correcto. Lo que sigue
+      abierto no es el mecanismo: es qué cuenta como un ensayo.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════ 03 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">03 — El mecanismo</p>
+    <h2>De una idea publicada a un candidato evaluable</h2>
+
+    <p>
+      El RFC insiste en no mezclar tres cosas que suelen confundirse. Un <strong>autor</strong>
+      es una escuela —Bollinger, Appel, Elder—. Una <strong>hipótesis</strong> es una afirmación
+      económica falsable: «los extremos de volatilidad revierten». Una <strong>estrategia</strong>
+      es una implementación concreta de esa hipótesis.
+    </p>
+
+    <p>
+      Confundirlos produce conclusiones inútiles del tipo «Bollinger funciona», cuando la pregunta
+      correcta es qué regla tiene expectativa positiva bajo qué régimen, activo y estructura de
+      costos.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 400" role="img" aria-labelledby="cadena-title cadena-desc">
+      <title id="cadena-title">La cadena de fabricación de candidatos</title>
+      <desc id="cadena-desc">Un autor aporta hipótesis, cada hipótesis genera estrategias, y cada estrategia se declara como un genoma que un compilador convierte en un StrategyCandidate, la interfaz que el evaluador ya existente sabe juzgar.</desc>
+
+      <defs>
+        <marker id="cd-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <path class="d-conn" d="M 208,104 H 248" marker-end="url(#cd-arrow)"/>
+      <path class="d-conn" d="M 424,104 H 464" marker-end="url(#cd-arrow)"/>
+      <path class="d-conn" d="M 552,136 V 160 Q 552,168 544,168 H 128 Q 120,168 120,176 V 208" marker-end="url(#cd-arrow)"/>
+      <path class="d-conn" d="M 208,240 H 248" marker-end="url(#cd-arrow)"/>
+      <path class="d-conn" d="M 424,240 H 464" marker-end="url(#cd-arrow)"/>
+      <path class="d-conn" d="M 640,240 H 668 Q 676,240 676,232 V 212 Q 676,204 684,204 H 712" marker-end="url(#cd-arrow)"/>
+
+      <rect class="d-mask" x="300" y="148" width="72" height="12" rx="2"/>
+      <text class="d-arrow" x="336" y="157" text-anchor="middle">SE DECLARA</text>
+
+      <rect class="d-mask" x="32" y="72" width="176" height="64" rx="6"/>
+      <rect class="d-store" x="32" y="72" width="176" height="64" rx="6"/>
+      <text class="d-name" x="120" y="100" text-anchor="middle">Autor</text>
+      <text class="d-sub" x="120" y="118" text-anchor="middle">Bollinger · Appel · Elder</text>
+
+      <rect class="d-mask" x="248" y="72" width="176" height="64" rx="6"/>
+      <rect class="d-store" x="248" y="72" width="176" height="64" rx="6"/>
+      <text class="d-name" x="336" y="100" text-anchor="middle">Hipótesis</text>
+      <text class="d-sub" x="336" y="118" text-anchor="middle">afirmación falsable</text>
+
+      <rect class="d-mask" x="464" y="72" width="176" height="64" rx="6"/>
+      <rect class="d-store" x="464" y="72" width="176" height="64" rx="6"/>
+      <text class="d-name" x="552" y="100" text-anchor="middle">Estrategia</text>
+      <text class="d-sub" x="552" y="118" text-anchor="middle">una implementación</text>
+
+      <rect class="d-mask" x="32" y="208" width="176" height="64" rx="6"/>
+      <rect class="d-focal" x="32" y="208" width="176" height="64" rx="6"/>
+      <text class="d-name-a" x="120" y="236" text-anchor="middle">Genoma</text>
+      <text class="d-sub-a" x="120" y="254" text-anchor="middle">datos, no código</text>
+
+      <rect class="d-mask" x="248" y="208" width="176" height="64" rx="6"/>
+      <rect class="d-opt" x="248" y="208" width="176" height="64" rx="6"/>
+      <text class="d-name" x="336" y="236" text-anchor="middle">Compilador</text>
+      <text class="d-sub" x="336" y="254" text-anchor="middle">función pura, auditada</text>
+
+      <rect class="d-mask" x="464" y="208" width="176" height="64" rx="6"/>
+      <rect class="d-node" x="464" y="208" width="176" height="64" rx="6"/>
+      <text class="d-name" x="552" y="236" text-anchor="middle">StrategyCandidate</text>
+      <text class="d-sub" x="552" y="254" text-anchor="middle">el contrato que ya existe</text>
+
+      <rect class="d-mask" x="712" y="136" width="216" height="136" rx="6"/>
+      <rect class="d-node" x="712" y="136" width="216" height="136" rx="6"/>
+      <rect class="d-mask" x="724" y="144" width="76" height="12" rx="2"/>
+      <text class="d-eyebrow" x="728" y="153">YA CONSTRUIDO</text>
+      <text class="d-name" x="820" y="184" text-anchor="middle">El evaluador</text>
+      <text class="d-sub" x="820" y="204" text-anchor="middle">4 capas · 18 gates</text>
+      <text class="d-sub" x="820" y="222" text-anchor="middle">DSR · PBO · prop_sim</text>
+      <text class="d-sub" x="820" y="248" text-anchor="middle">GO / NO-GO</text>
+
+      <line class="d-hair" x1="32" y1="304" x2="928" y2="304"/>
+      <text class="d-eyebrow" x="32" y="324">LEYENDA</text>
+      <rect class="d-store" x="128" y="316" width="20" height="12" rx="2"/>
+      <text class="d-sub" x="156" y="325">conceptual</text>
+      <rect class="d-node" x="248" y="316" width="20" height="12" rx="2"/>
+      <text class="d-sub" x="276" y="325">existe en el código</text>
+      <rect class="d-opt" x="428" y="316" width="20" height="12" rx="2"/>
+      <text class="d-sub" x="456" y="325">propuesto</text>
+      <rect class="d-focal" x="560" y="316" width="20" height="12" rx="2"/>
+      <text class="d-sub" x="588" y="325">la pieza clave del RFC</text>
+
+      <text class="d-sub" x="32" y="356">El genoma es datos y el ejecutor es código fijo ya auditado: agregar una estrategia no agrega código que pueda violar</text>
+      <text class="d-sub" x="32" y="374">el anti-lookahead. Y entra por el campo `candidate_config` del ledger, que se dejó sin esquema fijo justamente para esto.</text>
+      <text class="d-sub" x="32" y="392">El enganche ya está construido.</text>
+    </svg>
+    <figcaption>
+      La pieza nueva es el genoma: una descripción declarativa sobre una gramática cerrada de
+      primitivas ya verificadas forward-only. Nunca un <code>on_bar</code> escrito por un modelo,
+      porque <code>LookaheadError</code> protege el framework, no la lógica que le metan adentro.
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>La aportación genuinamente nueva: procedencia</h3>
+
+    <p>
+      genesis ya tiene reproducibilidad de <em>corridas</em>. Lo que no tiene es procedencia de
+      <em>ideas</em>: de dónde salió la regla, qué decía el original, qué interpretaste vos.
+    </p>
+
+    <p>
+      Importa porque casi toda regla publicada es ambigua. «Comprar en la banda inferior» no dice
+      si es al tocarla, al cerrar fuera, o al volver a entrar. <strong>Elegir la variante que
+      funcionó después de verlas todas es sobreajuste</strong>, y hoy no queda registrado en
+      ninguna parte. De ahí los cuatro grados de fidelidad:
+    </p>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Grado</th><th>Definición</th><th>Grados de libertad que gasta</th></tr></thead>
+      <tbody>
+        <tr><td class="id">Canónico</td><td>La regla publicada con sus parámetros publicados</td><td><strong>Cero</strong></td></tr>
+        <tr><td class="id">Interpretado</td><td>Una desambiguación explícita, elegida <em>a priori</em></td><td>Uno por ambigüedad resuelta</td></tr>
+        <tr><td class="id">Optimizado</td><td>Parámetros elegidos por barrido</td><td>Uno por dimensión barrida</td></tr>
+        <tr><td class="id">Combinado</td><td>Dos o más autores o reglas mezclados</td><td>Los de sus partes, más la combinación</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p>
+      Por eso la primera regla de dirección del laboratorio es <strong>empezar por lo canónico</strong>:
+      es lo único que sale gratis en grados de libertad.
+    </p>
+  </div>
+</section>
+
+<!-- ══════ 04 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">04 — Dónde estamos</p>
+    <h2>El roadmap, con lo ya hecho descontado</h2>
+
+    <p>
+      Acá está la parte que más confunde, y no es culpa tuya: <strong>el RFC quedó
+      desactualizado</strong>. Su tabla de fases sigue describiendo como pendiente algo que ya se
+      construyó, y lista como decisión abierta una que ya se resolvió.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 340" role="img" aria-labelledby="road-title road-desc">
+      <title id="road-title">El roadmap del laboratorio y sus decisiones</title>
+      <desc id="road-desc">Cinco etapas encadenadas desde las decisiones humanas iniciales hasta el arquitecto, con las decisiones que gobiernan cada una; la etapa del runner ya está construida y la decisión sobre el registro de candidatos ya está resuelta.</desc>
+
+      <defs>
+        <marker id="rd-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <path class="d-conn" d="M 192,156 H 216" marker-end="url(#rd-arrow)"/>
+      <path class="d-conn" d="M 376,156 H 400" marker-end="url(#rd-arrow)"/>
+      <path class="d-conn" d="M 560,156 H 584" marker-end="url(#rd-arrow)"/>
+      <path class="d-conn" d="M 744,156 H 768" marker-end="url(#rd-arrow)"/>
+
+      <rect class="d-mask" x="32" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-focal" x="32" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-mask" x="44" y="120" width="52" height="12" rx="2"/>
+      <text class="d-eyebrow" x="48" y="129">FASE 0</text>
+      <text class="d-name-a" x="112" y="152" text-anchor="middle">Decisiones</text>
+      <text class="d-sub-a" x="112" y="170" text-anchor="middle">D1 · qué es un ensayo</text>
+      <text class="d-sub-a" x="112" y="186" text-anchor="middle">D3 · holdout intocable</text>
+
+      <rect class="d-mask" x="216" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-node" x="216" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-mask" x="228" y="120" width="52" height="12" rx="2"/>
+      <text class="d-eyebrow" x="232" y="129">FASE 1</text>
+      <text class="d-name" x="296" y="152" text-anchor="middle">Primitivas</text>
+      <text class="d-sub" x="296" y="170" text-anchor="middle">SMA · EMA · ATR</text>
+      <text class="d-sub" x="296" y="186" text-anchor="middle">forward-only</text>
+
+      <rect class="d-mask" x="400" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-node" x="400" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-mask" x="412" y="120" width="52" height="12" rx="2"/>
+      <text class="d-eyebrow" x="416" y="129">FASE 2</text>
+      <text class="d-name" x="480" y="152" text-anchor="middle">Dos canónicas</text>
+      <text class="d-sub" x="480" y="170" text-anchor="middle">Bollinger · MACD</text>
+      <text class="d-sub" x="480" y="186" text-anchor="middle">D4 y D6 gobiernan</text>
+
+      <rect class="d-mask" x="584" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-opt" x="584" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-mask" x="596" y="120" width="52" height="12" rx="2"/>
+      <text class="d-eyebrow" x="600" y="129">FASE 5</text>
+      <text class="d-name" x="664" y="152" text-anchor="middle">Genoma</text>
+      <text class="d-sub" x="664" y="170" text-anchor="middle">+ compilador</text>
+      <text class="d-sub" x="664" y="186" text-anchor="middle">D5 gobierna</text>
+
+      <rect class="d-mask" x="768" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-opt" x="768" y="112" width="160" height="88" rx="6"/>
+      <rect class="d-mask" x="780" y="120" width="52" height="12" rx="2"/>
+      <text class="d-eyebrow" x="784" y="129">FASE 6</text>
+      <text class="d-name" x="848" y="152" text-anchor="middle">El arquitecto</text>
+      <text class="d-sub" x="848" y="170" text-anchor="middle">búsqueda automática</text>
+      <text class="d-sub" x="848" y="186" text-anchor="middle">D7 gobierna</text>
+
+      <line class="d-hair" x1="32" y1="232" x2="928" y2="232"/>
+      <text class="d-eyebrow" x="32" y="252">LO QUE EL RFC TODAVÍA NO REGISTRA</text>
+      <text class="d-sub" x="32" y="274">Fase 3 · el runner end-to-end «que hoy no existe» — construido el 2026-08-29 (PR #70), con el ledger cableado por defecto.</text>
+      <text class="d-sub" x="32" y="292">Decisión D2 · «cambio de contrato de capa 2» — su premisa era falsa y quedó resuelta en el PR #69; la §6.4 ya lo corrige,</text>
+      <text class="d-sub" x="32" y="310">pero la tabla del §12 sigue listándola como abierta.</text>
+      <text class="d-sub" x="32" y="332">Fase 4 · procedencia y grados de fidelidad — sigue pendiente, de costo bajo, y no bloquea a nadie.</text>
+    </svg>
+    <figcaption>
+      La fase 0 está en coral porque es la única que te toca a vos y no tiene código: son
+      decisiones. Todo lo demás espera detrás.
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <p class="aside">
+      El RFC no está esperando que alguien programe.<br>
+      Está esperando que vos decidas dos cosas.
+    </p>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>#</th><th>Decisión</th><th>Estado</th></tr></thead>
+      <tbody>
+        <tr><td class="id">D1</td><td>Qué cuenta como un ensayo — define si el laboratorio es honesto</td><td><span class="mark tuya">issue #76, abierto</span></td></tr>
+        <tr><td class="id">D3</td><td>¿Existe ya un holdout OOS intocable? Declararlo antes de la primera campaña</td><td><span class="mark tuya">sin issue</span></td></tr>
+        <tr><td class="id">D2</td><td>Destino del registro de candidatos por letra</td><td><span class="mark hecho">resuelta · PR #69</span></td></tr>
+        <tr><td class="id">D4</td><td>Presupuesto de ensayos: ¿hay un techo declarado?</td><td><span class="mark hecho">espera a la fase 2</span></td></tr>
+        <tr><td class="id">D5</td><td>Límites de complejidad del genoma</td><td><span class="mark hecho">espera a la fase 5</span></td></tr>
+        <tr><td class="id">D6</td><td>Qué autores y en qué orden</td><td><span class="mark hecho">espera a la fase 2</span></td></tr>
+        <tr><td class="id">D7</td><td>Concurrencia del ledger — bloquea la búsqueda en paralelo</td><td><span class="mark hecho">espera a la fase 6</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cards duo">
+    <div class="card">
+      <p class="card-eyebrow">La que decide todo</p>
+      <div class="card-header"><span class="card-dot coral"></span><h3>D1 — qué cuenta como un ensayo</h3></div>
+      <p>
+        La regla propuesta: cuenta toda dimensión sobre la que <em>seleccionás</em>; no cuenta
+        ninguna sobre la que <em>exigís</em>. Elegir el mejor de un barrido cuenta. Exigir que
+        todos los símbolos pasen, no — eso lo hace más difícil, no más fácil.
+      </p>
+    </div>
+    <div class="card">
+      <p class="card-eyebrow">La que caduca</p>
+      <div class="card-header"><span class="card-dot ink"></span><h3>D3 — el holdout intocable</h3></div>
+      <p>
+        Un tramo de datos que nadie mira hasta el final. Tiene urgencia propia: un holdout
+        declarado <em>después</em> de mirar los datos no es un holdout. Cada corrida que pasa lo
+        encarece.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════ 05 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">05 — Cómo se dirige</p>
+    <h2>Cinco reglas para no quemar el presupuesto</h2>
+
+    <p>
+      El RFC cierra con reglas de dirección. Todas salen de la misma idea: cada ensayo es un
+      gasto irreversible, así que el laboratorio se administra como un presupuesto.
+    </p>
+
+    <ul>
+      <li><strong>Empezá por lo canónico</strong>, que es gratis en grados de libertad.</li>
+      <li><strong>Pre-registrá antes de correr</strong> — declarar qué esperás, antes de verlo.</li>
+      <li><strong>Los filtros baratos ahorran CPU, no presupuesto estadístico.</strong> Descartar
+          rápido no descuenta el ensayo: ya lo miraste.</li>
+      <li><strong>Hipótesis primero, generador al final.</strong></li>
+      <li><strong>Reservá un OOS que nadie toca</strong> — la decisión D3.</li>
+    </ul>
+
+    <p>
+      La tercera es la menos intuitiva y la más fácil de violar sin darse cuenta. Filtrar mil
+      genomas con un test barato y quedarse con diez no cuesta diez ensayos: cuesta mil.
+    </p>
+
+    <h3>Lo que el RFC descarta a propósito</h3>
+
+    <p>
+      Vale saberlo porque explica varias ausencias: se descartaron la función de score ponderada,
+      el ranking sobre OOS, un registro paralelo de estrategias, el modelo vectorizado y la
+      auditoría del documento de origen. Del material externo se conservan solo el encuadre de
+      hipótesis y la idea de procedencia.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <p>
+    Lectura guiada de <code>docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md</code>
+    (587 líneas, 2026-08-11). Las tres desincronizaciones señaladas en la sección 04 se
+    verificaron contra el repositorio el 2026-08-29; el propio RFC todavía no las registra.
+    Este documento no autoriza nada: las decisiones marcadas como humanas siguen siéndolo.
+  </p>
+</footer>
+
+</div>
+</body>
+</html>
