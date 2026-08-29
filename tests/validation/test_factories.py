@@ -7,6 +7,8 @@ un candidato que no está en `CANDIDATE_REGISTRY`, no hereda de nada y no vive e
 `genesis.strategy.candidate_b`, y verifica que `run_wfa` lo ejecuta.
 """
 
+from collections.abc import Mapping
+
 import pandas as pd
 import pytest
 
@@ -17,7 +19,7 @@ from genesis.data.profile import FirmProfile
 from genesis.data.store import AnnotatedBar
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_b.candidate import CandidateB
-from genesis.strategy.contract import CANDIDATE_REGISTRY, CONFIG_VERSION, Direction, EntryIntent
+from genesis.strategy.contract import CANDIDATE_REGISTRY, CONFIG_VERSION, EntryIntent
 from genesis.strategy.errors import CandidateFactoryError
 from genesis.strategy.factories import (
     DEFAULT_CANDIDATE_FACTORIES,
@@ -48,7 +50,8 @@ def test_candidate_b_factory_convierte_n_minutes_a_int(
     candidate = candidate_b_factory(
         figure=symbol_figure_fixture, reference_balance=100_000.0, params=_PARAMS_B
     )
-    assert isinstance(candidate._n_minutes, int)  # type: ignore[attr-defined]
+    assert isinstance(candidate, CandidateB)
+    assert isinstance(candidate._n_minutes, int)
 
 
 @pytest.mark.parametrize("faltante", ["n_minutes", "atr_stop_frac", "risk_pct"])
@@ -129,7 +132,7 @@ def test_run_wfa_usa_la_fabrica_inyectada(
     construidos: list[_CandidatoSinRegistrar] = []
 
     def fabrica_inyectada(
-        *, figure: SymbolFigure, reference_balance: float, params: dict[str, float]
+        *, figure: SymbolFigure, reference_balance: float, params: Mapping[str, float]
     ) -> _CandidatoSinRegistrar:
         candidato = _CandidatoSinRegistrar()
         construidos.append(candidato)
