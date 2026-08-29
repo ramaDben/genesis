@@ -1,0 +1,1194 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Genesis de Cero a Cien</title>
+<meta name="description" content="Guía completa del pipeline de validación institucional genesis, para alguien sin contexto previo: el problema del sobreajuste, las cuatro capas, los 18 gates y el primer veredicto real.">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ── Tokens — skin por defecto del sistema, el mismo que ya usan los
+      tres diagramas versionados en docs/research/ ─────────────────── */
+:root {
+  --color-paper:        #f5f5f5;
+  --color-paper-2:      #ececec;
+  --color-ink:          #2d3142;
+  --color-muted:        #4f5d75;
+  --color-soft:         #7a8399;
+  --color-rule:         rgba(45,49,66,0.12);
+  --color-rule-solid:   rgba(79,93,117,0.25);
+  --color-accent:       #eb6c36;
+  --color-accent-tint:  rgba(235,108,54,0.08);
+  --color-link:         #2e5aa8;
+
+  --color-node:         #ffffff;
+  --color-store:        rgba(45,49,66,0.05);
+  --color-input:        rgba(79,93,117,0.10);
+  --color-opt:          rgba(45,49,66,0.02);
+  --color-opt-stroke:   rgba(45,49,66,0.20);
+  --color-zone:         rgba(45,49,66,0.02);
+  --color-zone-stroke:  rgba(45,49,66,0.10);
+  --color-card:         #ffffff;
+
+  --font-sans:  'Geist', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Instrument Serif', 'Times New Roman', serif;
+  --font-mono:  'Geist Mono', ui-monospace, Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-paper:       #2d3142;
+    --color-paper-2:     #393e53;
+    --color-ink:         #f5f5f5;
+    --color-muted:       #bfc0c0;
+    --color-soft:        #8e98ac;
+    --color-rule:        rgba(245,245,245,0.12);
+    --color-rule-solid:  rgba(191,192,192,0.25);
+    --color-accent:      #f08a59;
+    --color-accent-tint: rgba(240,138,89,0.10);
+    --color-link:        #6a95d8;
+
+    --color-node:        #393e53;
+    --color-store:       rgba(245,245,245,0.06);
+    --color-input:       rgba(191,192,192,0.10);
+    --color-opt:         rgba(245,245,245,0.03);
+    --color-opt-stroke:  rgba(245,245,245,0.20);
+    --color-zone:        rgba(245,245,245,0.03);
+    --color-zone-stroke: rgba(245,245,245,0.10);
+    --color-card:        #393e53;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-paper:       #2d3142;
+  --color-paper-2:     #393e53;
+  --color-ink:         #f5f5f5;
+  --color-muted:       #bfc0c0;
+  --color-soft:        #8e98ac;
+  --color-rule:        rgba(245,245,245,0.12);
+  --color-rule-solid:  rgba(191,192,192,0.25);
+  --color-accent:      #f08a59;
+  --color-accent-tint: rgba(240,138,89,0.10);
+  --color-link:        #6a95d8;
+
+  --color-node:        #393e53;
+  --color-store:       rgba(245,245,245,0.06);
+  --color-input:       rgba(191,192,192,0.10);
+  --color-opt:         rgba(245,245,245,0.03);
+  --color-opt-stroke:  rgba(245,245,245,0.20);
+  --color-zone:        rgba(245,245,245,0.03);
+  --color-zone-stroke: rgba(245,245,245,0.10);
+  --color-card:        #393e53;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container { max-width: 1080px; margin: 0 auto; padding: 3rem 2rem 5rem; }
+.col { max-width: 66ch; }
+
+/* ── Cabecera ─────────────────────────────────────────────────── */
+.header { margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-rule); }
+.header-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.66rem; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--color-muted);
+  margin-bottom: 0.75rem;
+}
+h1 {
+  font-family: var(--font-serif);
+  font-size: clamp(2rem, 4vw + 1rem, 3rem);
+  font-weight: 400; letter-spacing: -0.02em; line-height: 1.08;
+  text-wrap: balance;
+  margin: 0 0 0.75rem;
+}
+.subtitle {
+  font-size: 1.05rem; line-height: 1.55;
+  color: var(--color-muted); max-width: 54ch;
+  margin: 0 0 2rem;
+}
+.subtitle em { font-family: var(--font-serif); font-style: italic; color: var(--color-accent); }
+
+.statline { display: flex; flex-wrap: wrap; gap: 0 2.25rem; }
+.stat { padding: 0.25rem 0; }
+.stat dt {
+  font-family: var(--font-mono); font-size: 0.62rem;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-soft); margin-bottom: 0.1rem;
+}
+.stat dd {
+  font-family: var(--font-mono); font-size: 0.95rem; font-weight: 500;
+  font-variant-numeric: tabular-nums; margin: 0;
+}
+
+/* ── Secciones ───────────────────────────────────────────────── */
+section { padding: 2.75rem 0; border-bottom: 1px solid var(--color-rule); }
+section:last-of-type { border-bottom: 0; }
+
+.sec-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.66rem; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--color-accent);
+  margin: 0 0 0.6rem;
+}
+h2 {
+  font-family: var(--font-serif);
+  font-size: clamp(1.6rem, 3vw, 2.1rem);
+  font-weight: 400; letter-spacing: -0.015em; line-height: 1.15;
+  text-wrap: balance; max-width: 26ch;
+  margin: 0 0 1.25rem;
+}
+h3 {
+  font-family: var(--font-sans);
+  font-size: 1.05rem; font-weight: 600; line-height: 1.35;
+  margin: 2.25rem 0 0.75rem;
+}
+p { margin: 0 0 1.1rem; }
+p:last-child { margin-bottom: 0; }
+a { color: var(--color-accent); text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+
+code {
+  font-family: var(--font-mono); font-size: 0.86em;
+  background: var(--color-paper-2);
+  padding: 0.1em 0.34em; border-radius: 4px;
+}
+ul { margin: 0 0 1.1rem; padding-left: 1.3rem; }
+li { margin-bottom: 0.45rem; }
+li::marker { color: var(--color-soft); }
+
+.aside {
+  font-family: var(--font-serif); font-style: italic;
+  font-size: 1.2rem; line-height: 1.5;
+  color: var(--color-ink);
+  border-left: 2px solid var(--color-accent);
+  padding-left: 1.25rem;
+  margin: 2rem 0;
+  max-width: 56ch;
+}
+
+/* ── Figuras ─────────────────────────────────────────────────── */
+figure { margin: 2.25rem 0; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 720px; }
+figcaption {
+  font-size: 0.86rem; line-height: 1.5;
+  color: var(--color-muted);
+  border-top: 1px solid var(--color-rule);
+  padding-top: 0.8rem; margin-top: 0.9rem;
+  max-width: 74ch;
+}
+
+/* SVG — roles semánticos vía tokens, para que el diagrama viva en ambos temas */
+.d-mask    { fill: var(--color-paper); }
+.d-node    { fill: var(--color-node); stroke: var(--color-ink); stroke-width: 1; }
+.d-store   { fill: var(--color-store); stroke: var(--color-muted); stroke-width: 1; }
+.d-input   { fill: var(--color-input); stroke: var(--color-soft); stroke-width: 1; }
+.d-focal   { fill: var(--color-accent-tint); stroke: var(--color-accent); stroke-width: 1.2; }
+.d-opt     { fill: var(--color-opt); stroke: var(--color-opt-stroke); stroke-width: 1; stroke-dasharray: 4 3; }
+.d-zone    { fill: var(--color-zone); stroke: var(--color-zone-stroke); stroke-width: 0.8; }
+.d-bound   { fill: none; stroke: var(--color-accent); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.5; }
+.d-conn    { fill: none; stroke: var(--color-muted); stroke-width: 1.2; }
+.d-conn-a  { fill: none; stroke: var(--color-accent); stroke-width: 1.2; }
+.d-dash    { stroke-dasharray: 4 3; stroke-width: 1; }
+.d-hair    { stroke: var(--color-rule); stroke-width: 0.8; }
+
+.d-name    { font-family: var(--font-sans); font-size: 12px; font-weight: 600; fill: var(--color-ink); }
+.d-name-a  { font-family: var(--font-sans); font-size: 12px; font-weight: 600; fill: var(--color-accent); }
+.d-big     { font-family: var(--font-sans); font-size: 16px; font-weight: 600; fill: var(--color-ink); }
+.d-sub     { font-family: var(--font-mono); font-size: 9px; fill: var(--color-muted); }
+.d-sub-a   { font-family: var(--font-mono); font-size: 9px; fill: var(--color-accent); }
+.d-eyebrow { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.18em; fill: var(--color-soft); }
+.d-arrow   { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--color-soft); }
+.m-muted   { fill: var(--color-muted); }
+.m-accent  { fill: var(--color-accent); }
+
+/* ── Tablas ──────────────────────────────────────────────────── */
+.tablewrap {
+  overflow-x: auto; margin: 1.75rem 0;
+  border: 1px solid var(--color-rule); border-radius: 6px;
+  background: var(--color-card);
+}
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 560px; }
+th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--color-rule); vertical-align: top; }
+thead th {
+  font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-soft); background: var(--color-paper-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+td.id { font-family: var(--font-mono); font-weight: 600; white-space: nowrap; width: 1%; }
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.mark {
+  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 500;
+  white-space: nowrap;
+}
+.mark.ok   { color: var(--color-muted); }
+.mark.no   { color: var(--color-accent); }
+.mark.none { color: var(--color-soft); opacity: 0.7; }
+
+/* ── Tarjetas ────────────────────────────────────────────────── */
+.cards { display: grid; gap: 1rem; margin: 1.75rem 0; }
+.cards.trio { grid-template-columns: 1.15fr 1fr 0.9fr; }
+.cards.duo  { grid-template-columns: 1.1fr 0.9fr; }
+@media (max-width: 760px) { .cards.trio, .cards.duo { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-rule);
+  border-radius: 6px;
+  padding: 1.25rem;
+}
+.card-eyebrow {
+  font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-soft); margin: 0 0 0.6rem;
+}
+.card-header {
+  display: flex; align-items: center; gap: 0.55rem;
+  margin-bottom: 0.8rem; padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--color-rule);
+}
+.card-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.card-dot.ink { background: var(--color-ink); }
+.card-dot.muted { background: var(--color-muted); }
+.card-dot.coral { background: var(--color-accent); }
+.card-dot.soft { background: var(--color-soft); }
+.card h3 { font-size: 0.95rem; font-weight: 600; margin: 0; }
+.card p, .card ul { font-size: 0.88rem; line-height: 1.55; color: var(--color-muted); margin-bottom: 0; }
+.card ul { padding-left: 1.1rem; }
+
+/* ── Lectura del veredicto ───────────────────────────────────── */
+.readout {
+  background: var(--color-card);
+  border: 1px solid var(--color-rule);
+  border-radius: 6px; padding: 1.4rem;
+  margin: 1.75rem 0;
+}
+.readout-top {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: 0.5rem;
+  border-bottom: 1px solid var(--color-rule);
+  padding-bottom: 0.85rem; margin-bottom: 1.1rem;
+}
+.readout-top .v {
+  font-family: var(--font-mono); font-size: 1.4rem; font-weight: 600;
+  letter-spacing: 0.02em; color: var(--color-accent);
+}
+.readout-top .m { font-family: var(--font-mono); font-size: 0.72rem; color: var(--color-soft); }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: 1rem 1.25rem; }
+.metric dt {
+  font-family: var(--font-mono); font-size: 0.62rem;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--color-soft); margin-bottom: 0.1rem;
+}
+.metric dd {
+  font-family: var(--font-mono); font-size: 1rem; font-weight: 500;
+  font-variant-numeric: tabular-nums; margin: 0;
+}
+.metric dd span { font-size: 0.7rem; color: var(--color-soft); font-weight: 400; }
+
+/* ── Pie ─────────────────────────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--color-rule);
+  margin-top: 3rem; padding-top: 1.5rem;
+  font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.7;
+  color: var(--color-soft);
+}
+footer p { max-width: 76ch; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+
+<div class="container">
+
+<header class="header">
+  <p class="header-eyebrow">Pipeline de validación institucional · Guía completa</p>
+  <h1>Genesis de cero a cien</h1>
+  <p class="subtitle">
+    Genesis no existe para encontrar estrategias que funcionen. Existe para <em>rechazar</em>
+    las que solo lo parecen. Esta guía explica cómo, empezando por qué el problema es difícil.
+  </p>
+  <dl class="statline">
+    <div class="stat"><dt>Capas</dt><dd>4</dd></div>
+    <div class="stat"><dt>Gates</dt><dd>18</dd></div>
+    <div class="stat"><dt>Módulos</dt><dd>60</dd></div>
+    <div class="stat"><dt>Tests</dt><dd>740</dd></div>
+    <div class="stat"><dt>Versión</dt><dd>0.1.18</dd></div>
+    <div class="stat"><dt>Veredictos reales</dt><dd>1</dd></div>
+  </dl>
+</header>
+
+<!-- ══════ 01 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">01 — El problema</p>
+    <h2>Un buen backtest no significa casi nada</h2>
+
+    <p>
+      Una <strong>prop firm</strong> es una empresa que presta capital para operar. Se pasa una
+      evaluación —el <em>challenge</em>— y quien la supera recibe fondeo y comparte ganancias.
+      Las reglas son duras y automáticas: límite de pérdida diaria, límite de pérdida total,
+      objetivo de beneficio. Se cruza un límite y la cuenta se cierra. No hay apelación.
+    </p>
+
+    <p>
+      La pregunta, entonces, es si una estrategia sobrevive un challenge real. Y ahí aparece la
+      trampa que hace difícil todo lo demás.
+    </p>
+
+    <p>
+      Probá cien combinaciones de parámetros sobre datos históricos y algunas se van a ver
+      excelentes. No porque sean buenas: porque probaste cien. Es el mismo mecanismo por el que
+      si tirás suficientes monedas, alguna saca diez caras seguidas. Esa moneda no tiene nada
+      especial. La estrategia que ganó el barrido, tampoco.
+    </p>
+
+    <p>
+      El nombre técnico es <strong>sesgo de selección por comparaciones múltiples</strong>, y es
+      el modo de fallo dominante del backtesting cuantitativo. Lo insidioso es que el resultado
+      se ve idéntico a un hallazgo genuino: la curva de equity sube, el profit factor es bueno,
+      y no hay ninguna señal visible de que se está mirando ruido.
+    </p>
+
+    <p class="aside">
+      La pregunta que ordena el sistema entero no es cuánto ganó en el backtest.
+      Es cuántas veces hubo que probar para encontrarlo.
+    </p>
+
+    <p>
+      Una configuración probada una vez que funciona es evidencia. Una entre cuatro mil
+      quinientas, no. El resultado en pantalla es el mismo; lo que cambia es el denominador.
+      Genesis está construido alrededor de llevar ese denominador con honestidad — la
+      <a href="#ledger">sección 07</a> es sobre eso, y es la idea más importante de la página.
+    </p>
+  </div>
+</section>
+
+<!-- ══════ 02 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">02 — Qué es</p>
+    <h2>Un evaluador de caja negra</h2>
+
+    <p>
+      Genesis toma un candidato de estrategia y emite un veredicto <strong>GO / NO-GO</strong>
+      reproducible. La palabra que importa es reproducible: el mismo candidato con los mismos
+      datos produce el mismo veredicto, siempre, y cada artefacto registra el commit, el hash del
+      dataset, la ficha de la firma y las semillas que lo produjeron.
+    </p>
+
+    <p>
+      «Caja negra» no es peyorativo acá — es la propiedad de diseño central. El evaluador no sabe
+      <em>nada</em> de la estrategia que evalúa. La capa 2 define un contrato plugin,
+      <code>StrategyCandidate</code>, y todo lo demás opera contra ese contrato.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 320" role="img" aria-labelledby="cajanegra-title cajanegra-desc">
+      <title id="cajanegra-title">El evaluador de caja negra de genesis</title>
+      <desc id="cajanegra-desc">Un candidato de estrategia y los datos de mercado con la ficha de la firma entran a un evaluador agnóstico a la estrategia, que los pasa por sus cuatro capas y por dieciocho gates mecánicos para emitir uno de cuatro veredictos junto con sus artefactos de reproducibilidad.</desc>
+
+      <defs>
+        <marker id="cn-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+        <marker id="cn-arrow-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-accent" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <!-- zona -->
+      <rect class="d-zone" x="272" y="40" width="384" height="240" rx="8"/>
+      <rect class="d-mask" x="288" y="44" width="196" height="12" rx="2"/>
+      <text class="d-eyebrow" x="292" y="53">EL EVALUADOR · AGNÓSTICO</text>
+
+      <!-- conectores (antes que las cajas) -->
+      <path class="d-conn" d="M 192,104 H 240 Q 248,104 248,112 V 124 Q 248,132 256,132 H 304" marker-end="url(#cn-arrow)"/>
+      <path class="d-conn" d="M 192,216 H 240 Q 248,216 248,208 V 164 Q 248,156 256,156 H 304" marker-end="url(#cn-arrow)"/>
+      <path class="d-conn" d="M 448,144 H 512" marker-end="url(#cn-arrow)"/>
+      <path class="d-conn-a" d="M 648,144 H 744" marker-end="url(#cn-arrow-a)"/>
+
+      <!-- etiqueta de arista: mask 20px sobre el trazo, gap 8px -->
+      <rect class="d-mask" x="452" y="124" width="56" height="12" rx="2"/>
+      <text class="d-arrow" x="480" y="133" text-anchor="middle">MÉTRICAS</text>
+
+      <!-- entradas -->
+      <rect class="d-mask" x="32" y="72" width="160" height="64" rx="6"/>
+      <rect class="d-input" x="32" y="72" width="160" height="64" rx="6"/>
+      <text class="d-name" x="112" y="100" text-anchor="middle">Candidato</text>
+      <text class="d-sub" x="112" y="118" text-anchor="middle">StrategyCandidate</text>
+
+      <rect class="d-mask" x="32" y="184" width="160" height="64" rx="6"/>
+      <rect class="d-input" x="32" y="184" width="160" height="64" rx="6"/>
+      <text class="d-name" x="112" y="212" text-anchor="middle">Datos + firma</text>
+      <text class="d-sub" x="112" y="230" text-anchor="middle">M1 · ticks · reglas</text>
+
+      <!-- interior -->
+      <rect class="d-mask" x="304" y="112" width="144" height="64" rx="6"/>
+      <rect class="d-node" x="304" y="112" width="144" height="64" rx="6"/>
+      <text class="d-name" x="376" y="140" text-anchor="middle">Las cuatro capas</text>
+      <text class="d-sub" x="376" y="158" text-anchor="middle">datos · estrategia · backtest</text>
+
+      <rect class="d-mask" x="512" y="112" width="136" height="64" rx="6"/>
+      <rect class="d-focal" x="512" y="112" width="136" height="64" rx="6"/>
+      <text class="d-name-a" x="580" y="140" text-anchor="middle">18 gates</text>
+      <text class="d-sub-a" x="580" y="158" text-anchor="middle">G · C · P · T</text>
+
+      <!-- salida -->
+      <rect class="d-mask" x="744" y="80" width="184" height="128" rx="6"/>
+      <rect class="d-node" x="744" y="80" width="184" height="128" rx="6"/>
+      <rect class="d-mask" x="756" y="88" width="72" height="12" rx="2"/>
+      <text class="d-eyebrow" x="760" y="97">VEREDICTO</text>
+      <text class="d-sub" x="760" y="124">GO</text>
+      <text class="d-sub" x="760" y="144">GO-ENSEMBLE</text>
+      <text class="d-sub" x="760" y="164">GO-PARCIAL</text>
+      <text class="d-sub" x="760" y="184">NO-GO</text>
+      <text class="d-sub" x="760" y="200">+ manifest · tearsheet</text>
+
+      <!-- nota de reproducibilidad -->
+      <line class="d-hair" x1="32" y1="272" x2="928" y2="272"/>
+      <text class="d-eyebrow" x="32" y="292">REPRODUCIBILIDAD</text>
+      <text class="d-sub" x="32" y="308">Cada corrida sella commit · hash de dataset · ficha de firma · semillas. Un veredicto de una firma no es transferible a otra.</text>
+    </svg>
+    <figcaption>
+      El evaluador no conoce la estrategia que evalúa: entra por el contrato plugin y sale como
+      veredicto. Los cuatro veredictos son normativos — la lista no crece para acomodar un
+      resultado incómodo.
+    </figcaption>
+  </figure>
+
+  <div class="cards trio">
+    <div class="card">
+      <p class="card-eyebrow">Candidato A</p>
+      <div class="card-header"><span class="card-dot muted"></span><h3>CT sweep-fade</h3></div>
+      <p>Parcial. La estructura de mercado y el diagnóstico de señal están implementados, pero A
+         todavía no es un <code>StrategyCandidate</code> ejecutable.</p>
+    </div>
+    <div class="card">
+      <p class="card-eyebrow">Candidato B</p>
+      <div class="card-header"><span class="card-dot coral"></span><h3>ORB intradía</h3></div>
+      <p>Ejecutable. El único que ha corrido de punta a punta, y el único con veredicto real.</p>
+    </div>
+    <div class="card">
+      <p class="card-eyebrow">Candidato C</p>
+      <div class="card-header"><span class="card-dot soft"></span><h3>TSMOM</h3></div>
+      <p>Diferido. Sin implementar.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════ 03 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">03 — Arquitectura</p>
+    <h2>Cuatro capas, ninguna sabe de estrategias</h2>
+
+    <p>
+      El código vive en <code>src/genesis/</code>. Cada capa depende solo de las anteriores, y
+      ninguna contiene lógica específica de una estrategia — esa vive detrás del contrato de la
+      capa 2.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 400" role="img" aria-labelledby="capas-title capas-desc">
+      <title id="capas-title">Las cuatro capas de genesis</title>
+      <desc id="capas-desc">Pila de cuatro capas de abstracción, de datos de mercado en la base a validación estadística en la cima; la capa de validación es la que produce el veredicto y la que concentra la maquinaria de deflación.</desc>
+
+      <defs>
+        <marker id="cp-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <!-- indicador de dirección, fuera de la pila -->
+      <path class="d-conn" d="M 48,320 V 88" marker-end="url(#cp-arrow)"/>
+      <rect class="d-mask" x="20" y="184" width="56" height="12" rx="2"/>
+      <text class="d-arrow" x="48" y="193" text-anchor="middle">ABSTRACCIÓN</text>
+
+      <!-- capa 4 — focal -->
+      <rect class="d-focal" x="96" y="72" width="832" height="64" rx="6"/>
+      <rect class="d-mask" x="116" y="96" width="24" height="12" rx="2"/>
+      <text class="d-eyebrow" x="118" y="105">L4</text>
+      <text class="d-name-a" x="176" y="100" >Validación</text>
+      <text class="d-sub-a" x="176" y="118">WFA · Monte Carlo · purged K-fold · DSR/PBO · prop_sim · veredicto</text>
+      <text class="d-sub-a" x="908" y="108" text-anchor="end">genesis/validation/</text>
+
+      <!-- capa 3 -->
+      <rect class="d-node" x="96" y="144" width="832" height="64" rx="6"/>
+      <rect class="d-mask" x="116" y="168" width="24" height="12" rx="2"/>
+      <text class="d-eyebrow" x="118" y="177">L3</text>
+      <text class="d-name" x="176" y="172">Backtest</text>
+      <text class="d-sub" x="176" y="190">simulador event-driven · fills por tick · costos con stress · métricas prop</text>
+      <text class="d-sub" x="908" y="180" text-anchor="end">genesis/backtest/</text>
+
+      <!-- capa 2 -->
+      <rect class="d-store" x="96" y="216" width="832" height="64" rx="6"/>
+      <rect class="d-mask" x="116" y="240" width="24" height="12" rx="2"/>
+      <text class="d-eyebrow" x="118" y="249">L2</text>
+      <text class="d-name" x="176" y="244">Estrategia</text>
+      <text class="d-sub" x="176" y="262">contrato StrategyCandidate · Inspector compartido · la frontera de la caja negra</text>
+      <text class="d-sub" x="908" y="252" text-anchor="end">genesis/strategy/</text>
+
+      <!-- capa 1 -->
+      <rect class="d-node" x="96" y="288" width="832" height="64" rx="6"/>
+      <rect class="d-mask" x="116" y="312" width="24" height="12" rx="2"/>
+      <text class="d-eyebrow" x="118" y="321">L1</text>
+      <text class="d-name" x="176" y="316">Datos</text>
+      <text class="d-sub" x="176" y="334">export MT5 M1 + ticks · calendario · sesiones · calidad · store · ficha de firma</text>
+      <text class="d-sub" x="908" y="324" text-anchor="end">genesis/data/</text>
+
+      <line class="d-hair" x1="96" y1="376" x2="928" y2="376"/>
+      <text class="d-sub" x="96" y="394">La capa 4 está en coral porque es la que emite el veredicto — y la que contiene el gate cuyo denominador todavía no es del todo honesto.</text>
+    </svg>
+    <figcaption>
+      Cada capa consume solo lo que está debajo. La capa 2 es la frontera: por encima, nada sabe
+      qué estrategia se está evaluando.
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <p>
+      La capa 3 merece una nota. Genesis no usa una librería de backtesting: el simulador es
+      propio y event-driven, porque el detalle que decide un challenge es justamente el que las
+      librerías genéricas aproximan — el equity <em>flotante</em> intradía, el redondeo del lote
+      al paso real del bróker, el swap, el spread por hora.
+    </p>
+  </div>
+
+  <div class="cards duo">
+    <div class="card">
+      <p class="card-eyebrow">Por qué el detalle importa</p>
+      <div class="card-header"><span class="card-dot coral"></span><h3>Un bug que producía NO-GO falsos</h3></div>
+      <p>
+        Durante meses el simulador calculaba el tamaño de posición sin redondearlo al
+        <code>volume_step</code> real del bróker. El efecto no era un error de centavos: el
+        Inspector rechazaba <em>todas</em> las intenciones de trade por lote inviable, y el
+        candidato producía cero operaciones.
+      </p>
+    </div>
+    <div class="card">
+      <p class="card-eyebrow">La regla que salió de ahí</p>
+      <div class="card-header"><span class="card-dot ink"></span><h3>Ausencia de evidencia ≠ NO-GO</h3></div>
+      <p>
+        El veredicto separa «no funciona» de «nunca llegó a operar». La señal
+        <code>sizing_evidence_insufficient</code> viaja hasta el manifest, sin relajar ningún
+        gate ni ampliar la lista de veredictos.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════ 04 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">04 — El pipeline</p>
+    <h2>Del dato crudo al veredicto</h2>
+
+    <p>
+      Una corrida completa atraviesa seis etapas de análisis antes de emitir el veredicto. Cada
+      una responde a una pregunta distinta, y ninguna es opcional.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 400" role="img" aria-labelledby="pipe-title pipe-desc">
+      <title id="pipe-title">El pipeline de validación de genesis</title>
+      <desc id="pipe-desc">Los datos de un minuto pasan por walk-forward, Monte Carlo y purged K-fold, y esas tres alimentan la deflación por ensayos, el análisis de sensibilidad y la simulación del challenge, que convergen en el veredicto por gates.</desc>
+
+      <defs>
+        <marker id="pp-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+        <marker id="pp-arrow-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-accent" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <!-- conectores primero -->
+      <path class="d-conn" d="M 192,176 H 200 Q 208,176 208,168 V 128 Q 208,120 216,120 H 224" marker-end="url(#pp-arrow)"/>
+      <path class="d-conn" d="M 352,120 H 376" marker-end="url(#pp-arrow)"/>
+      <path class="d-conn" d="M 504,120 H 528" marker-end="url(#pp-arrow)"/>
+      <path class="d-conn" d="M 592,152 V 168 Q 592,176 584,176 H 296 Q 288,176 288,184 V 200" marker-end="url(#pp-arrow)"/>
+      <path class="d-conn" d="M 352,232 H 376" marker-end="url(#pp-arrow)"/>
+      <path class="d-conn" d="M 504,232 H 528" marker-end="url(#pp-arrow)"/>
+      <path class="d-conn" d="M 656,232 H 676 Q 684,232 684,224 V 200 Q 684,192 692,192 H 712" marker-end="url(#pp-arrow)"/>
+
+      <!-- etiqueta sobre el tramo horizontal de retorno (y=176) -->
+      <rect class="d-mask" x="404" y="156" width="72" height="12" rx="2"/>
+      <text class="d-arrow" x="440" y="165" text-anchor="middle">MISMA GRILLA</text>
+
+      <!-- entrada -->
+      <rect class="d-mask" x="32" y="144" width="160" height="64" rx="6"/>
+      <rect class="d-input" x="32" y="144" width="160" height="64" rx="6"/>
+      <text class="d-name" x="112" y="172" text-anchor="middle">Datos M1</text>
+      <text class="d-sub" x="112" y="190" text-anchor="middle">+ ticks · ficha</text>
+
+      <!-- fila A -->
+      <rect class="d-mask" x="224" y="88" width="128" height="64" rx="6"/>
+      <rect class="d-node" x="224" y="88" width="128" height="64" rx="6"/>
+      <rect class="d-mask" x="236" y="96" width="20" height="12" rx="2"/>
+      <text class="d-eyebrow" x="238" y="105">01</text>
+      <text class="d-name" x="288" y="126" text-anchor="middle">Walk-forward</text>
+      <text class="d-sub" x="288" y="142" text-anchor="middle">¿aguanta fuera?</text>
+
+      <rect class="d-mask" x="376" y="88" width="128" height="64" rx="6"/>
+      <rect class="d-node" x="376" y="88" width="128" height="64" rx="6"/>
+      <rect class="d-mask" x="388" y="96" width="20" height="12" rx="2"/>
+      <text class="d-eyebrow" x="390" y="105">02</text>
+      <text class="d-name" x="440" y="126" text-anchor="middle">Monte Carlo</text>
+      <text class="d-sub" x="440" y="142" text-anchor="middle">¿y si cambia el orden?</text>
+
+      <rect class="d-mask" x="528" y="88" width="128" height="64" rx="6"/>
+      <rect class="d-node" x="528" y="88" width="128" height="64" rx="6"/>
+      <rect class="d-mask" x="540" y="96" width="20" height="12" rx="2"/>
+      <text class="d-eyebrow" x="542" y="105">03</text>
+      <text class="d-name" x="592" y="126" text-anchor="middle">Purged K-fold</text>
+      <text class="d-sub" x="592" y="142" text-anchor="middle">¿hay fuga temporal?</text>
+
+      <!-- fila B -->
+      <rect class="d-mask" x="224" y="200" width="128" height="64" rx="6"/>
+      <rect class="d-focal" x="224" y="200" width="128" height="64" rx="6"/>
+      <rect class="d-mask" x="236" y="208" width="20" height="12" rx="2"/>
+      <text class="d-eyebrow" x="238" y="217">04</text>
+      <text class="d-name-a" x="288" y="238" text-anchor="middle">DSR y PBO</text>
+      <text class="d-sub-a" x="288" y="254" text-anchor="middle">¿cuántas veces probé?</text>
+
+      <rect class="d-mask" x="376" y="200" width="128" height="64" rx="6"/>
+      <rect class="d-node" x="376" y="200" width="128" height="64" rx="6"/>
+      <rect class="d-mask" x="388" y="208" width="20" height="12" rx="2"/>
+      <text class="d-eyebrow" x="390" y="217">05</text>
+      <text class="d-name" x="440" y="238" text-anchor="middle">Sensibilidad</text>
+      <text class="d-sub" x="440" y="254" text-anchor="middle">¿hay acantilados?</text>
+
+      <rect class="d-mask" x="528" y="200" width="128" height="64" rx="6"/>
+      <rect class="d-node" x="528" y="200" width="128" height="64" rx="6"/>
+      <rect class="d-mask" x="540" y="208" width="20" height="12" rx="2"/>
+      <text class="d-eyebrow" x="542" y="217">06</text>
+      <text class="d-name" x="592" y="238" text-anchor="middle">prop_sim</text>
+      <text class="d-sub" x="592" y="254" text-anchor="middle">¿pasa el challenge?</text>
+
+      <!-- veredicto -->
+      <rect class="d-mask" x="712" y="144" width="216" height="96" rx="6"/>
+      <rect class="d-node" x="712" y="144" width="216" height="96" rx="6"/>
+      <rect class="d-mask" x="724" y="152" width="72" height="12" rx="2"/>
+      <text class="d-eyebrow" x="728" y="161">VEREDICTO</text>
+      <text class="d-sub" x="728" y="184">G1–G9  por símbolo</text>
+      <text class="d-sub" x="728" y="202">C1–C2  por candidato</text>
+      <text class="d-sub" x="728" y="220">P1–P5  economía prop</text>
+      <text class="d-sub" x="728" y="234">T1–T2  torneo</text>
+
+      <!-- pie de figura -->
+      <line class="d-hair" x1="32" y1="312" x2="928" y2="312"/>
+      <text class="d-eyebrow" x="32" y="332">CORRIDA INSTITUCIONAL REAL · US500 · 3 AÑOS</text>
+      <text class="d-sub" x="32" y="352">1.055.530 barras M1 · 5 ventanas walk-forward · 405 trades fuera de muestra</text>
+      <text class="d-sub" x="32" y="370">1 h 43 m de cómputo, dominado por la matriz de ensayos y el walk-forward</text>
+    </svg>
+    <figcaption>
+      La etapa 4 está en coral porque es la que ataca el problema de la sección 01 — y la única
+      cuyo denominador todavía no es completamente honesto.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════ 05 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">05 — Los gates</p>
+    <h2>Dieciocho umbrales que no se negocian</h2>
+
+    <p>
+      Un gate es una comparación entre un número ya calculado y una constante nombrada en el
+      código. No hay juicio ni ajuste. Los umbrales viven como constantes de módulo justamente
+      para que relajarlos sea un cambio visible en un diff, y no una decisión silenciosa dentro
+      de una función.
+    </p>
+
+    <p>
+      Cada familia responde a una pregunta de alcance distinto: <strong>G</strong> evalúa un
+      símbolo, <strong>C</strong> agrega los símbolos de un candidato, <strong>P</strong> mide la
+      economía del challenge, y <strong>T</strong> corrige por haber elegido un ganador entre
+      varios.
+    </p>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Gate</th><th>Qué mide</th><th>Umbral</th></tr></thead>
+      <tbody>
+        <tr><td class="id">G1</td><td>Trades fuera de muestra totales</td><td class="num">≥ 300</td></tr>
+        <tr><td class="id">G2</td><td>Eficiencia walk-forward (OOS cosido vs. IS agregado)</td><td class="num">≥ 0,5</td></tr>
+        <tr><td class="id">G3</td><td>Profit factor OOS con costos completos, swap incluido</td><td class="num">≥ 1,3</td></tr>
+        <tr><td class="id">G4</td><td>DSR — Sharpe deflactado por los ensayos del candidato</td><td class="num">≥ 0,95</td></tr>
+        <tr><td class="id">G5</td><td>PBO — probabilidad de sobreajuste por backtest (CSCV)</td><td class="num">&lt; 25 %</td></tr>
+        <tr><td class="id">G6</td><td>Máxima caída Monte Carlo, percentil 95</td><td class="num">≤ 50 % del límite</td></tr>
+        <tr><td class="id">G7</td><td>Probabilidad de romper el límite total en 12 meses</td><td class="num">&lt; 5 %</td></tr>
+        <tr><td class="id">G8</td><td>Degradación del PF al perturbar parámetros ±10 %</td><td class="num">&lt; 30 %, sin acantilados</td></tr>
+        <tr><td class="id">G9</td><td>Profit factor OOS con costos ×1,5</td><td class="num">≥ 1,15</td></tr>
+        <tr><td class="id">C1</td><td>Símbolos del universo que pasan G1–G9</td><td class="num">≥ 60 %</td></tr>
+        <tr><td class="id">C2</td><td>PF mínimo entre los símbolos que no pasan</td><td class="num">≥ 0,8</td></tr>
+        <tr><td class="id">P1</td><td>Probabilidad de pasar el challenge completo</td><td class="num">≥ 50 %</td></tr>
+        <tr><td class="id">P2</td><td>Intentos esperados hasta el fondeo</td><td class="num">≤ 2</td></tr>
+        <tr><td class="id">P3</td><td>Probabilidad de romper el límite diario en un mes fondeado</td><td class="num">&lt; 2 %</td></tr>
+        <tr><td class="id">P4</td><td>Supervivencia mediana con cuenta fondeada</td><td class="num">≥ 6 meses</td></tr>
+        <tr><td class="id">P5</td><td>Payout neto a 12 meses, percentil 25</td><td class="num">&gt; 0</td></tr>
+        <tr><td class="id">T1</td><td>DSR del ganador, deflactado por el nº de candidatos</td><td class="num">≥ 0,95</td></tr>
+        <tr><td class="id">T2</td><td>Correlación OOS entre candidatos, para validar ensemble</td><td class="num">&lt; 0,3</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p>
+      T1 merece una lectura aparte. Elegir el mejor de tres candidatos <em>es</em> un ensayo más:
+      si el torneo corriera tres estrategias sin valor y se quedara con la que mejor salió, el
+      ganador se vería bien por construcción. T1 vuelve a deflactar el DSR del ganador por el
+      número de competidores. Es la idea de la sección 01, un nivel más arriba.
+    </p>
+  </div>
+</section>
+
+<!-- ══════ 06 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">06 — Invariantes</p>
+    <h2>Cuatro reglas que el código hace cumplir solo</h2>
+
+    <p>
+      Los gates protegen el resultado. Los invariantes protegen el proceso que lo produce — y
+      están implementados como propiedades verificables, no como convenciones que alguien debe
+      recordar.
+    </p>
+
+    <h3>Anti-lookahead por construcción</h3>
+
+    <p>
+      El pecado capital del backtesting es el <em>lookahead</em>: usar sin querer información del
+      futuro. Un indicador calculado sobre la serie completa, un stop ubicado sabiendo dónde
+      llegó el precio. El resultado se ve espectacular y es completamente ficticio.
+    </p>
+
+    <p>
+      Genesis lo hace estructuralmente imposible: la estrategia recibe una barra por vez y
+      actualiza estado; nunca ve el arreglo completo. Cruzar el límite levanta
+      <code>LookaheadError</code> en vez de degradar en silencio.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 400" role="img" aria-labelledby="fwd-title fwd-desc">
+      <title id="fwd-title">Estado forward-only y el límite del lookahead</title>
+      <desc id="fwd-desc">La estrategia consume las barras ya vistas y la barra actual para actualizar un estado que solo avanza y emitir su decisión; las barras posteriores están del otro lado de un límite y cualquier intento de leerlas levanta LookaheadError.</desc>
+
+      <defs>
+        <marker id="fw-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+        <marker id="fw-arrow-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-accent" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <!-- límite -->
+      <line class="d-bound" x1="392" y1="56" x2="392" y2="200"/>
+      <rect class="d-mask" x="340" y="52" width="104" height="12" rx="2"/>
+      <text class="d-eyebrow" x="392" y="61" text-anchor="middle">EL LÍMITE DEL AHORA</text>
+
+      <!-- conectores -->
+      <path class="d-conn" d="M 264,120 H 288" marker-end="url(#fw-arrow)"/>
+      <path class="d-conn" d="M 336,152 V 232" marker-end="url(#fw-arrow)"/>
+      <path class="d-conn" d="M 384,264 H 440" marker-end="url(#fw-arrow)"/>
+      <path class="d-conn-a d-dash" d="M 288,232 V 184 Q 288,176 296,176 H 464 Q 472,176 472,168 V 152" marker-end="url(#fw-arrow-a)"/>
+
+      <!-- etiqueta del intento prohibido, en el extremo visible -->
+      <rect class="d-mask" x="308" y="156" width="88" height="12" rx="2"/>
+      <text class="d-arrow" x="352" y="165" text-anchor="middle">LOOKAHEADERROR</text>
+
+      <!-- barras -->
+      <rect class="d-mask" x="40" y="88" width="224" height="64" rx="6"/>
+      <rect class="d-store" x="40" y="88" width="224" height="64" rx="6"/>
+      <text class="d-name" x="152" y="116" text-anchor="middle">Barras ya vistas</text>
+      <text class="d-sub" x="152" y="134" text-anchor="middle">t−n … t−1</text>
+
+      <rect class="d-mask" x="288" y="88" width="96" height="64" rx="6"/>
+      <rect class="d-focal" x="288" y="88" width="96" height="64" rx="6"/>
+      <text class="d-name-a" x="336" y="116" text-anchor="middle">Barra t</text>
+      <text class="d-sub-a" x="336" y="134" text-anchor="middle">la actual</text>
+
+      <rect class="d-mask" x="408" y="88" width="224" height="64" rx="6"/>
+      <rect class="d-opt" x="408" y="88" width="224" height="64" rx="6"/>
+      <text class="d-name" x="520" y="116" text-anchor="middle">Barras posteriores</text>
+      <text class="d-sub" x="520" y="134" text-anchor="middle">no existen todavía</text>
+
+      <!-- estado y salida -->
+      <rect class="d-mask" x="144" y="232" width="240" height="64" rx="6"/>
+      <rect class="d-node" x="144" y="232" width="240" height="64" rx="6"/>
+      <text class="d-name" x="264" y="260" text-anchor="middle">Estado incremental</text>
+      <text class="d-sub" x="264" y="278" text-anchor="middle">solo avanza · nunca retrocede</text>
+
+      <rect class="d-mask" x="440" y="232" width="224" height="64" rx="6"/>
+      <rect class="d-node" x="440" y="232" width="224" height="64" rx="6"/>
+      <text class="d-name" x="552" y="260" text-anchor="middle">Salida de on_bar(t)</text>
+      <text class="d-sub" x="552" y="278" text-anchor="middle">decisión de trade</text>
+
+      <!-- la propiedad -->
+      <line class="d-hair" x1="40" y1="328" x2="920" y2="328"/>
+      <text class="d-eyebrow" x="40" y="348">LA PROPIEDAD QUE SE VERIFICA</text>
+      <text class="d-sub" x="40" y="368">Mutá cualquier barra posterior a t: ninguna salida de on_bar(t) cambia.</text>
+      <text class="d-sub" x="40" y="386">Property test con hypothesis, generando casos al azar — no revisión manual.</text>
+    </svg>
+    <figcaption>
+      La propiedad central del sistema, y la única que se verifica generando casos al azar en vez
+      de escribiendo ejemplos: si mutar el futuro cambiara algo del pasado, habría fuga temporal
+      en alguna parte.
+    </figcaption>
+  </figure>
+
+  <div class="cards trio">
+    <div class="card">
+      <p class="card-eyebrow">Invariante 2</p>
+      <div class="card-header"><span class="card-dot ink"></span><h3>Reproducibilidad</h3></div>
+      <p>Cada artefacto sella versión de configuración, hash de dataset, hash de la ficha,
+         semillas y commit. Un veredicto de una firma no es transferible a otra.</p>
+    </div>
+    <div class="card">
+      <p class="card-eyebrow">Invariante 3</p>
+      <div class="card-header"><span class="card-dot muted"></span><h3>Gates mecánicos</h3></div>
+      <p>Constantes nombradas contra números ya calculados. La regla cultural que lo acompaña:
+         ante un NO-GO se revisa la hipótesis, no los parámetros.</p>
+    </div>
+    <div class="card">
+      <p class="card-eyebrow">Invariante 4</p>
+      <div class="card-header"><span class="card-dot soft"></span><h3>Fallo ruidoso</h3></div>
+      <p>Ante un dato faltante, el sistema se detiene nombrando qué falta. No rellena, no
+         interpola. Y la misma entrada produce la misma salida, siempre.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════ 07 ══════ -->
+<section id="ledger">
+  <div class="col">
+    <p class="sec-eyebrow">07 — La idea central</p>
+    <h2>El denominador tiene que ser honesto</h2>
+
+    <p>
+      Acá vuelve el problema de la sección 01, y es donde se decide si todo lo demás sirve.
+    </p>
+
+    <p>
+      El <strong>DSR</strong> (Deflated Sharpe Ratio, de Bailey y López de Prado) es la
+      herramienta correcta: castiga el Sharpe en función de cuántos ensayos hicieron falta para
+      encontrarlo. Con muchos intentos, hace falta un Sharpe mucho más alto para que el resultado
+      signifique lo mismo. El gate G4 exige DSR ≥ 0,95.
+    </p>
+
+    <p>
+      Pero el DSR es tan bueno como el número que se le pasa. Y ahí está el problema que ordena
+      todo el roadmap.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 360" role="img" aria-labelledby="led-title led-desc">
+      <title id="led-title">La arista que el ledger de ensayos agrega</title>
+      <desc id="led-desc">Sin ledger persistente, solo la corrida actual aporta ensayos al denominador del DSR; el ledger agrega la arista por la que las corridas anteriores también cuentan, y sin esa arista el gate G4 deja de proteger sin emitir señal.</desc>
+
+      <defs>
+        <marker id="ld-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+        <marker id="ld-arrow-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-accent" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <!-- conectores -->
+      <path class="d-conn-a" d="M 264,104 H 312 Q 320,104 320,112 V 152 Q 320,160 328,160 H 360" marker-end="url(#ld-arrow-a)"/>
+      <path class="d-conn" d="M 264,264 H 312 Q 320,264 320,256 V 216 Q 320,208 328,208 H 360" marker-end="url(#ld-arrow)"/>
+      <path class="d-conn" d="M 600,184 H 680" marker-end="url(#ld-arrow)"/>
+
+      <!-- etiquetas de arista -->
+      <rect class="d-mask" x="292" y="112" width="56" height="12" rx="2"/>
+      <text class="d-arrow" x="320" y="121" text-anchor="middle">ACUMULA</text>
+
+      <rect class="d-mask" x="612" y="164" width="56" height="12" rx="2"/>
+      <text class="d-arrow" x="640" y="173" text-anchor="middle">N_TRIALS</text>
+
+      <!-- corridas anteriores -->
+      <rect class="d-mask" x="40" y="72" width="224" height="64" rx="6"/>
+      <rect class="d-store" x="40" y="72" width="224" height="64" rx="6"/>
+      <text class="d-name" x="152" y="100" text-anchor="middle">Corridas anteriores</text>
+      <text class="d-sub" x="152" y="118" text-anchor="middle">todos los ensayos ya quemados</text>
+
+      <!-- corrida actual -->
+      <rect class="d-mask" x="40" y="232" width="224" height="64" rx="6"/>
+      <rect class="d-input" x="40" y="232" width="224" height="64" rx="6"/>
+      <text class="d-name" x="152" y="260" text-anchor="middle">Corrida actual</text>
+      <text class="d-sub" x="152" y="278" text-anchor="middle">su grilla interna</text>
+
+      <!-- ledger -->
+      <rect class="d-mask" x="360" y="144" width="240" height="80" rx="6"/>
+      <rect class="d-focal" x="360" y="144" width="240" height="80" rx="6"/>
+      <rect class="d-mask" x="372" y="152" width="52" height="12" rx="2"/>
+      <text class="d-eyebrow" x="376" y="161">LEDGER</text>
+      <text class="d-name-a" x="480" y="188" text-anchor="middle">ledger/trials.jsonl</text>
+      <text class="d-sub-a" x="480" y="206" text-anchor="middle">un ensayo por candidato y símbolo</text>
+
+      <!-- DSR -->
+      <rect class="d-mask" x="680" y="144" width="240" height="80" rx="6"/>
+      <rect class="d-node" x="680" y="144" width="240" height="80" rx="6"/>
+      <rect class="d-mask" x="692" y="152" width="40" height="12" rx="2"/>
+      <text class="d-eyebrow" x="696" y="161">G4</text>
+      <text class="d-name" x="800" y="188" text-anchor="middle">DSR</text>
+      <text class="d-sub" x="800" y="206" text-anchor="middle">deflacta por el denominador</text>
+
+      <!-- la comparación, como nota editorial -->
+      <line class="d-hair" x1="40" y1="272" x2="920" y2="272"/>
+      <text class="d-eyebrow" x="40" y="292">LA ARISTA CORAL ES TODA LA DIFERENCIA</text>
+      <text class="d-sub" x="40" y="312">Sin ledger, esa flecha no existe: cada corrida cuenta solo su propia grilla. Con 500 candidatos propuestos, el DSR se</text>
+      <text class="d-sub" x="40" y="328">calcularía sobre 9 ensayos cuando hubo 4.500 — y G4 dejaría de proteger sin emitir ninguna señal de que dejó de hacerlo.</text>
+      <text class="d-sub" x="40" y="348">Invariante verificado con property test: el ledger solo puede endurecer un gate, nunca relajarlo.</text>
+    </svg>
+    <figcaption>
+      La diferencia entre tener y no tener esa arista no se ve en ninguna métrica de la corrida:
+      el DSR sin ledger parece perfectamente respetable. Ese es exactamente el problema.
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <p>
+      Por eso el ledger va <strong>antes</strong> que la búsqueda automatizada, no después.
+      Construido al revés, produce resultados que se ven excelentes y no significan nada — sin
+      forma de distinguirlos retroactivamente, porque los ensayos descartados no quedaron
+      registrados en ninguna parte.
+    </p>
+  </div>
+
+  <div class="cards duo">
+    <div class="card">
+      <p class="card-eyebrow">Lo que existe</p>
+      <div class="card-header"><span class="card-dot ink"></span><h3>El mecanismo está construido</h3></div>
+      <p>
+        <code>trial_ledger</code> persiste cada ensayo con un identificador determinista derivado
+        de la configuración del candidato y de los hashes de la corrida. El veredicto lo consume
+        de solo lectura.
+      </p>
+    </div>
+    <div class="card">
+      <p class="card-eyebrow">Lo que falta</p>
+      <div class="card-header"><span class="card-dot coral"></span><h3>El archivo está vacío</h3></div>
+      <p>
+        No falta código: falta decidir qué cuenta como un ensayo. La regla propuesta es «cuenta
+        toda dimensión sobre la que <em>seleccionás</em>; no cuenta ninguna sobre la que
+        <em>exigís</em>». Es una decisión humana pendiente.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════ 08 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">08 — El resultado real</p>
+    <h2>La primera corrida completa dijo que no</h2>
+
+    <p>
+      En agosto de 2026 el pipeline corrió de punta a punta por primera vez con datos reales de
+      bróker: tres años del índice US500, más de un millón de barras de un minuto, ventanas
+      normativas y sin atajos.
+    </p>
+  </div>
+
+  <div class="readout">
+    <div class="readout-top">
+      <span class="v">NO-GO</span>
+      <span class="m">Candidato B · US500 · 2023-09 → 2026-08 · 1.055.530 barras M1</span>
+    </div>
+    <dl class="metrics">
+      <div class="metric"><dt>Trades OOS</dt><dd>405 <span>/ ≥ 300</span></dd></div>
+      <div class="metric"><dt>Ventanas</dt><dd>5</dd></div>
+      <div class="metric"><dt>WFE</dt><dd>0,3496 <span>/ ≥ 0,5</span></dd></div>
+      <div class="metric"><dt>Profit factor</dt><dd>1,0676 <span>/ ≥ 1,3</span></dd></div>
+      <div class="metric"><dt>DSR</dt><dd>0,0019 <span>/ ≥ 0,95</span></dd></div>
+      <div class="metric"><dt>PBO</dt><dd>0,1667 <span>/ &lt; 0,25</span></dd></div>
+      <div class="metric"><dt>P(breach) 12 m</dt><dd>73,8 % <span>/ &lt; 5 %</span></dd></div>
+      <div class="metric"><dt>P(pasar)</dt><dd>0,122 <span>/ ≥ 0,50</span></dd></div>
+    </dl>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Gate</th><th>Medido</th><th>Umbral</th><th>Resultado</th></tr></thead>
+      <tbody>
+        <tr><td class="id">G1</td><td class="num">405 trades</td><td class="num">≥ 300</td><td><span class="mark ok">pasa</span></td></tr>
+        <tr><td class="id">G2</td><td class="num">WFE 0,3496</td><td class="num">≥ 0,5</td><td><span class="mark no">falla</span></td></tr>
+        <tr><td class="id">G3</td><td class="num">PF 1,0676</td><td class="num">≥ 1,3</td><td><span class="mark no">falla</span></td></tr>
+        <tr><td class="id">G4</td><td class="num">DSR 0,0019</td><td class="num">≥ 0,95</td><td><span class="mark no">falla</span></td></tr>
+        <tr><td class="id">G5</td><td class="num">PBO 0,1667</td><td class="num">&lt; 0,25</td><td><span class="mark ok">pasa</span></td></tr>
+        <tr><td class="id">G6</td><td class="num">—</td><td class="num">≤ 50 % del límite</td><td><span class="mark none">sin registro</span></td></tr>
+        <tr><td class="id">G7</td><td class="num">73,8 %</td><td class="num">&lt; 5 %</td><td><span class="mark no">falla</span></td></tr>
+        <tr><td class="id">G8</td><td class="num">acantilado detectado</td><td class="num">sin acantilados</td><td><span class="mark no">falla</span></td></tr>
+        <tr><td class="id">G9</td><td class="num">—</td><td class="num">≥ 1,15</td><td><span class="mark none">sin registro</span></td></tr>
+        <tr><td class="id">C1</td><td class="num">0 % de símbolos</td><td class="num">≥ 60 %</td><td><span class="mark no">falla</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p style="font-size:0.85rem;color:var(--color-soft)">
+      G6 y G9 figuran como «sin registro» porque la nota de esa corrida no capturó sus valores,
+      no porque los gates no se hayan evaluado. C1 en 0 % ya determina el NO-GO.
+    </p>
+
+    <p class="aside">
+      El candidato B sobrevive mecánicamente —genera señales, pasa el redondeo de lote, completa
+      las cinco ventanas— y no despega en ningún gate económico.
+    </p>
+
+    <p>
+      Vale detenerse en un contraste. Una corrida anterior, con ventanas reducidas para depurar,
+      había dado WFE = 4,28 sobre 48 trades. Un número espectacular. Con la ventana institucional
+      y 405 trades, el mismo candidato da 0,35.
+    </p>
+
+    <p>
+      Ese 4,28 era ruido de muestra chica: exactamente el tipo de resultado que describe la
+      sección 01. La única razón por la que no se convirtió en una conclusión falsa es que había
+      un sistema construido para no dejarlo pasar.
+    </p>
+
+    <p>
+      <strong>Que el primer veredicto real sea un NO-GO no es un fracaso del proyecto: es el
+      proyecto funcionando.</strong> Un pipeline de validación que aprueba lo primero que le dan
+      no sirve para nada.
+    </p>
+  </div>
+</section>
+
+<!-- ══════ 09 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">09 — Cómo se trabaja</p>
+    <h2>Ocho fases y un gate humano</h2>
+
+    <p>
+      El proyecto no se desarrolla escribiendo código y viendo qué pasa. Usa un flujo
+      <strong>SDD</strong> (spec-driven development): cada cambio atraviesa ocho fases y no puede
+      saltarse ninguna.
+    </p>
+
+    <p>
+      <code>explore → propose → specify → design → break-to-tasks → apply → review → close</code>
+    </p>
+
+    <p>
+      Entre <em>design</em> y <em>apply</em> hay un gate que <strong>solo una persona puede
+      abrir</strong>. Ningún agente automático aprueba un diseño. La razón es la misma que
+      sostiene todo lo demás: la decisión de diseño tiene que verse <em>antes</em> de estar en la
+      rama principal, no después.
+    </p>
+
+    <p>
+      Al cerrar, el cambio promueve su especificación al árbol de specs, captura una heurística,
+      sube la versión y se archiva. Esa promoción es lo que mantiene la documentación alineada
+      con el código.
+    </p>
+  </div>
+
+  <div class="cards duo">
+    <div class="card">
+      <p class="card-eyebrow">Una lección cara</p>
+      <div class="card-header"><span class="card-dot coral"></span><h3>Dieciocho días detenido</h3></div>
+      <p>
+        El flujo tiene una guarda: mientras exista un cambio sin cerrar, no se puede crear
+        ninguno nuevo. En agosto de 2026 un cambio quedó a medio cerrar, en un estado del que la
+        máquina de estados no permitía salir. La consecuencia no fue un pendiente — el flujo
+        entero dejó de ser ejecutable, y durante ese tiempo el trabajo siguió por fuera.
+      </p>
+    </div>
+    <div class="card">
+      <p class="card-eyebrow">La moraleja</p>
+      <div class="card-header"><span class="card-dot ink"></span><h3>No siempre es indisciplina</h3></div>
+      <p>
+        Un proceso que se abandona a veces deja de ser ejecutable, y nadie se da cuenta de que
+        esa es la razón. Se destrabó revirtiendo un campo de estado a mano, con autorización
+        explícita, y corrigiendo la instrucción que lo causaba.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════ 10 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">10 — Dónde va</p>
+    <h2>El evaluador es el producto</h2>
+
+    <p>
+      El torneo de tres candidatos es el primer caso de uso, no el techo. Como las cuatro capas
+      son agnósticas a la estrategia, el destino es una <strong>búsqueda automatizada</strong>:
+      un arquitecto que proponga candidatos y aprenda del veredicto.
+    </p>
+
+    <p>
+      Dos invariantes de esa visión ya están decididos, y los dos son defensivos:
+    </p>
+
+    <ul>
+      <li>
+        <strong>El arquitecto emitirá un genoma declarativo</strong> sobre una gramática cerrada
+        de primitivas, materializado por un ejecutor fijo y auditado. Nunca código escrito por un
+        modelo: <code>LookaheadError</code> protege el framework, no la lógica que le metan
+        adentro.
+      </li>
+      <li>
+        <strong>Su señal de retorno no incluirá el fuera de muestra</strong> — solo métricas
+        dentro de muestra, diagnóstico de señal y taxonomía de rechazos. Un buscador que ve el
+        OOS y ajusta <em>se convierte</em> en el mecanismo de sobreajuste que todo el sistema
+        existe para detectar.
+      </li>
+    </ul>
+
+    <p>
+      Y antes de todo eso va el ledger honesto de la sección 07, que sigue esperando una decisión
+      humana. Ese es el orden, y no es negociable por la misma razón que ningún umbral lo es.
+    </p>
+
+    <p class="aside">
+      Genesis tiene validación de grado institucional y un solo candidato ejecutable. El cuello de
+      botella no es la capacidad de validar hipótesis — es el suministro de hipótesis que valgan
+      la pena validar.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <p>
+    Cifras tomadas del código y del spec del repositorio, no de memoria: los umbrales son las
+    constantes de módulo de <code>validation/verdict.py</code>, y los resultados son los de la
+    corrida institucional del 28–29 de agosto de 2026. Donde un valor no quedó registrado, la
+    tabla lo dice en vez de estimarlo. — Software propietario; el acceso al repositorio no
+    concede licencia de uso.
+  </p>
+</footer>
+
+</div>
+
+</body>
+</html>
