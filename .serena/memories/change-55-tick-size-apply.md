@@ -1,71 +1,65 @@
-*(Actualizado 2026-08-11 — cierre)*
+*(Actualizado 2026-08-29 — CERRADO de verdad)*
 
-# Change #55 — cerrado en los hechos (PR mergeado), pulse-engine atascado
+# Change #55 — cerrado el 2026-08-29, tras 18 días atascado
 
 ## Resultado final
 
-- **PR #56 mergeado** (squash) a `main`: commit `d7906a9e7e73fd270f6255b0a9e6fe3b55db2280`. CI y CodeRabbit verdes. Ramas
-  remota y local (`fix/55-symbolfigure-tick-size`) eliminadas. `main` local en WSL actualizado (fast-forward).
-- El trabajo de código de #55 (`SymbolFigure.tick_size` + `value_per_point`) está **completo y en `main`**.
-- El **issue #55 sigue abierto en GitHub** — no se cerró manualmente (decisión del usuario: dejar la
-  inconsistencia documentada en vez de forzar cierre a mano o version bump).
+- Código en `main` desde el 2026-08-11 (PR #56, commit `d7906a9`): `SymbolFigure.tick_size` +
+  `value_per_point`.
+- **Cierre real del change ejecutado el 2026-08-29** (PR #72, squash `c994c82`). Produjo:
+  - `promote_delta`: **+296 líneas** en `.pulse/specs/data/spec.md` — la spec del #55 entró a la
+    SSoT del dominio `data`, donde faltaba desde agosto.
+  - `HeuristicsExtracted` en `.pulse/audit.jsonl` (bucle de aprendizaje #63).
+  - Bump `0.1.17 → 0.1.18` (el engine lo commitea solo).
+  - `closed_at = 2026-08-29T19:23:38Z` y archivado en `.pulse/changes/archive/`.
+- `list_active_changes` volvió a `[]`.
 
-## Bug/inconsistencia confirmada en `pulse-engine`: Change atascado en fase `close` sin `close_change`
+## Lo que costó el atasco: la guarda G2
 
-`list_active_changes` / `get_current_phase` muestran `current_phase: "close"` para el slug
-`55-fix-data-symbolfigure-no-captura-tick-size-el-sizing-costos-asum`, con `closed_at: null`,
-`version_bumped_to: null`. Es decir: **la FSM ya avanzó a la fase terminal `close` sin que
-`close_change` se haya ejecutado nunca** (no hay `closed_at`, no hay bump de versión, no hubo
-promoción de delta/archivado).
+Esto es lo que **no** estaba documentado y explica el daño real. `create_change_from_issue`
+rechaza crear cualquier change nuevo mientras exista uno sin `closed_at`:
 
-`close_change(slug)` — la única tool que hace el bump de versión + promoción de delta + archivado —
-**rechaza la llamada**: `"close_change requiere un Change en fase review."`. Es decir, exige
-`current_phase == "review"` como precondición, pero el estado real ya es `"close"`.
+```python
+# G2 (#103): si existe otro Change activo sin cerrar, el switch de contexto
+# debe ser explícito (`switch_active=True`); por defecto se bloquea.
+if active is not None and active.closed_at is None:
+    raise PulseGuardError(f"Ya existe un Change activo sin cerrar: {active_slug}. ...")
+```
 
-Intenté recuperarlo con `request_sdd_transition(target_phase="review", ...)` para volver a fase
-`review` y reintentar `close_change` desde ahí — **rechazado también**:
-`"ACCESO DENEGADO (SpecGate): Transición inválida para Change activo: close solo puede avanzar a
-la fase siguiente."` La FSM no permite retroceder desde `close`, que es fase terminal.
+**El flujo SDD del proyecto no se abandonó por indisciplina: dejó de ser posible el 2026-08-11**,
+el día que el #55 quedó atascado. La ruta muerta de Docker en `mise-tasks/mcp.toml` (corregida en
+el PR #71) llegó con la migración a WSL2 el ~22 de agosto — fue un segundo muro sobre uno que ya
+existía, no la causa.
 
-**Conclusión**: el Change quedó en un estado sin salida con las tools actuales — no hay forma de
-ejecutar `close_change` (exige fase `review`) ni de retroceder a `review` (la FSM lo prohíbe desde
-`close`). Ninguna otra tool de `pulse-engine` hace el bump de versión/archivado (`create_change_from_issue`,
-`approve_design`, `mark_tests_passed`, `request_sdd_transition`, `view_project_dashboard`,
-`list_active_changes` son las únicas además de `close_change`).
+## Cómo se destrabó
 
-**Hipótesis de causa raíz**: algo (una sesión anterior, posiblemente el `review-agent` al emitir
-ambos gates `si/si`, o un `request_sdd_transition(target_phase="close")` manual) avanzó la fase a
-`close` sin pasar por `close_change` — probablemente `close_change` debería ser la tool que hace
-*ambas* cosas (transición review→close + archivado), y alguien llamó solo a la transición FSM sin
-la tool de cierre real.
+La salida es la que `mem:entorno-de-desarrollo` ya documentaba desde el #53 (2026-08-10) y que
+esta memoria, en su versión anterior, declaraba prohibida: revertir `current_phase` a `"review"`
+a mano y recién ahí llamar `close_change`. Se aplicó con autorización humana explícita, tocando
+**solo** ese campo, en los dos sitios que lo persisten:
 
-## Trampa operativa para la próxima vez
+- `.pulse/changes/<slug>/state.yaml`
+- el blob JSON de `.pulse/state.sqlite` (tabla `project_state`, fila `singleton`)
 
-Si un Change llega a `/pulse:close` y `list_active_changes` ya muestra `current_phase: "close"`
-con `closed_at: null`, **no asumir que solo falta invocar `close_change`** — probablemente está en
-este mismo estado atascado. Verificar con `get_current_phase` + intentar `close_change` primero;
-si falla con "requiere fase review", es este bug, no un error de uso. No intentar
-`request_sdd_transition` hacia atrás (confirmado que la FSM lo bloquea). Reportar al usuario en vez
-de forzar workarounds (edición manual de `state.yaml` está prohibida — es ledger read-only del
-engine).
+No se saltó ningún gate: `design_approved_at` (humano) y `tests_passed_at` ya estaban registrados
+y quedaron intactos, y `close_change` corrió después el gate determinista de verdad.
 
-## Pendiente
+## Lección de proceso, no de código
 
-- Reportar el bug de `pulse-engine` (close_change/FSM inconsistente) — no se abrió issue para esto
-  todavía, evaluar si corresponde a este repo o al repo del engine (`ghcr.io/bajmein/pulse`).
-  Ver `mem:datos-ftmo-y-respaldos` y CLAUDE.md sobre `mise run docker:pull` — la imagen `:latest`
-  del engine ya tiene un problema conocido similar en `promote_delta` (no construir desde ahí,
-  usar `main`).
-- Issue #55 en GitHub sigue **abierto** — decisión explícita del usuario de no cerrarlo a mano.
-- Version bump (`v0.1.17 -> v0.1.18` esperado, label `bug` sin `type:` explícito → fallback patch)
-  **no se ejecutó**. `pyproject.toml`/changelog siguen en `v0.1.17`.
-- Archivo de `.pulse/changes/55-.../` no se archivó/limpió (queda como Change activo en el ledger
-  del engine, aunque el código ya está en `main`).
+La trampa **ya estaba escrita** en `mem:entorno-de-desarrollo`, con el mismo diagnóstico y la
+misma salida, desde el #53. Esta memoria, en cambio, la declaraba sin solución y prohibía el
+workaround. Dos memorias en conflicto sobre el mismo hecho, y se actuó sobre la equivocada.
 
-## Referencia — trabajo de la fase apply (histórico, sin cambios)
+Regla: ante un síntoma de pulse, **leer las dos** (`mem:entorno-de-desarrollo` tiene las trampas
+del engine; esta tiene el historial del change). Y cuando una memoria dice "sin salida", buscar si
+otra dice lo contrario antes de darla por buena.
 
-T1-T10 implementados y verificados en su momento; toolchain verde (ruff, ty, pytest 729 passed/1
-skipped, bandit/vulture sin hallazgos, deptry con 1 hallazgo preexistente no relacionado). T12/T13
-no bloqueantes por diseño explícito (G7). Detalles de las trampas de `git stash` y de subagentes
-sin `pulse-engine` disponible: ver historial de este mismo archivo en git (`git log -p -- 
-.serena/memories/change-55-tick-size-apply.md`) si se necesita el detalle completo.
+## Causa raíz upstream, sin reportar todavía
+
+La skill `pulse:review` instruye llamar `request_sdd_transition(target_phase="close")` cuando
+ambos gates son ✅. Eso es lo que rompe: `close_change` es quien debe hacer esa transición, y
+exige fase `review`. Mientras esa skill no se corrija, el bug se reproduce en cada change.
+
+Ver `mem:entorno-de-desarrollo` (regla operativa: nunca transicionar a `close`, llamar
+`close_change` directo desde `review`) y `mem:pulse-engine-sin-plugin` (cómo operar el engine
+cuando el plugin no carga).
