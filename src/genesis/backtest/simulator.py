@@ -16,7 +16,7 @@ contaminar la tabla golden de fills (R32–R36).
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -199,6 +199,25 @@ def _compute_rr(
     if risk <= 0:
         return 0.0
     return reward / risk
+
+
+def _rounded_to_volume_step(intent: EntryIntent, figure: SymbolFigure) -> EntryIntent:
+    """Redondea `sizing_hint` al múltiplo de `volume_step` más cercano (RI-E6, R70).
+
+    R70 deja el redondeo fuera del candidato ("el redondeo es del Inspector, no del
+    candidato"); este es el punto de la capa de ejecución donde ese redondeo se aplica
+    de verdad, antes de que el Inspector evalúe `LOT_SIZE_OUT_OF_BOUNDS` (R13) y antes de
+    que el resto del simulador use `sizing_hint` para costos/P&L — así ambos ven el mismo
+    valor. Sin este paso, un `sizing_hint` continuo (derivado de ATR) casi nunca cae en un
+    múltiplo exacto del `volume_step` real de un broker, y el Inspector rechaza casi toda
+    señal por una tolerancia (`lot_step_tolerance`) pensada para ruido de punto flotante,
+    no para diferencias de tamaño reales.
+    """
+    volume_step = figure.volume_step
+    if volume_step <= 0:
+        return intent
+    rounded = round(intent.sizing_hint / volume_step) * volume_step
+    return replace(intent, sizing_hint=rounded)
 
 
 class Simulator:
@@ -481,6 +500,7 @@ class Simulator:
         risk_provider = cast(RiskLevelsProvider, self.candidate)
         intents = self.candidate.on_bar(bar)
         for intent in intents:
+            intent = _rounded_to_volume_step(intent, self.figure)
             stop_loss, take_profit = risk_provider.risk_levels(intent)
             proposed_rr = _compute_rr(intent.direction, bar.close, stop_loss, take_profit)
             verdict = inspect(
