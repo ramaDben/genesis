@@ -6,8 +6,13 @@ modificar ninguno de los tres árboles (R61). Grid exhaustivo 27 combinaciones d
 ejecución / 9 configuraciones de señal (spec §6.2, Candidato B): sin muestreo, sin
 paralelismo de procesos ni hilos (R32), loop secuencial.
 
+El candidato de cada combinación lo construye una `CandidateFactory` de capa 2
+(`genesis.strategy.factories`): este módulo no conoce la firma del constructor de
+ningún candidato concreto, de modo que un candidato construido en runtime entra por
+la misma vía. Por defecto se resuelve desde `candidate_id` (camino del torneo A/B/C).
+
 Advertencia heredada del Candidato B (Rg-1, aceptada, no defecto de este Change):
-cada combinación/ventana instancia un `CandidateB` **nuevo** (nunca reutilizado);
+cada combinación/ventana instancia un candidato **nuevo** (nunca reutilizado);
 el estado ATR-Wilder-14 arranca en frío (`atr_value=None`) al inicio de cada
 instancia, de modo que los primeros `atr_period` (14) días de cada ventana pueden
 operar sin componente ATR del stop. Con `IS_WINDOW_TRADING_DAYS = 252` el sesgo es
@@ -32,7 +37,7 @@ from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash
 from genesis.data.store import iter_bars
 from genesis.data.symbols import SymbolFigure
-from genesis.strategy.candidate_b.candidate import CandidateB
+from genesis.strategy.factories import CandidateFactory, default_factory_for
 from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation import window_config as window_config_module
 from genesis.validation._dsr import deflated_sharpe_ratio
@@ -222,20 +227,26 @@ def _run_execution_combo(
     tick_store: RawParquetStore | None,
     starting_balance: float,
     dataset_hash: str,
+    candidate_factory: CandidateFactory,
     tick_cache: TickCache | None = None,
 ) -> Ledger:
-    """Instancia `CandidateB`/`Simulator` **nuevos** para `combo` y corre `frame` (R24).
+    """Instancia candidato/`Simulator` **nuevos** para `combo` y corre `frame` (R24).
+
+    El candidato lo construye `candidate_factory` (capa 2): esta capa no conoce la
+    firma del constructor de ningún candidato concreto.
 
     El `tick_cache` es del orquestador de la ventana, no de esta llamada: los combos
     comparten los mismos días y así no se relee el store por cada uno (Change #46, R30).
     """
     n_minutes, atr_stop_frac, risk_pct = combo
-    candidate = CandidateB(
+    candidate = candidate_factory(
         figure=figure,
         reference_balance=starting_balance,
-        n_minutes=n_minutes,
-        atr_stop_frac=atr_stop_frac,
-        risk_pct=risk_pct,
+        params={
+            "n_minutes": n_minutes,
+            "atr_stop_frac": atr_stop_frac,
+            "risk_pct": risk_pct,
+        },
     )
     simulator = Simulator(
         candidate,
@@ -314,6 +325,7 @@ def _run_single_window(
     starting_balance: float,
     grid_config: GridConfig,
     grid_config_hash: str,
+    candidate_factory: CandidateFactory,
 ) -> WindowResult:
     """Grid IS exhaustivo, selección DSR-IS, congelamiento y run OOS de una ventana (R24-R29)."""
     # Un solo caché de ticks para toda la ventana: los combos y el run OOS recorren los
@@ -335,6 +347,7 @@ def _run_single_window(
             tick_store=tick_store,
             starting_balance=starting_balance,
             dataset_hash=dataset_hash_is,
+            candidate_factory=candidate_factory,
             tick_cache=tick_cache,
         )
         signal_config = (n_minutes, atr_stop_frac)
@@ -360,6 +373,7 @@ def _run_single_window(
         tick_store=tick_store,
         starting_balance=starting_balance,
         dataset_hash=dataset_hash_oos,
+        candidate_factory=candidate_factory,
         tick_cache=tick_cache,
     )
 
@@ -442,6 +456,7 @@ def run_wfa(
     *,
     window_config: WfaWindowConfig | None = None,
     grid_config: GridConfig | None = None,
+    candidate_factory: CandidateFactory | None = None,
     seed: int,
 ) -> WfaResult:
     """Walk-forward rolling completo para `(candidate_id, symbol)` (R23).
@@ -455,6 +470,11 @@ def run_wfa(
     `wfa.py` no consume ningún generador aleatorio (grid exhaustivo, sin muestreo):
     el determinismo total (R54) es estructural.
 
+    `candidate_factory` (capa 2) construye el candidato de cada combinación: esta capa
+    no conoce la firma del constructor de ningún candidato concreto. Si el llamador no
+    la fija, se resuelve por `candidate_id` vía `default_factory_for` — el camino del
+    torneo A/B/C. Quien tenga un candidato construido en runtime inyecta la suya.
+
     Advertencia heredada del Candidato B (Rg-1): cada ventana/combinación instancia
     `CandidateB` en frío (`atr_value=None` al inicio), de modo que los primeros
     `atr_period` (14) días de cada ventana pueden operar sin componente ATR del
@@ -462,6 +482,9 @@ def run_wfa(
     """
     resolved_window_config = window_config if window_config is not None else WfaWindowConfig()
     resolved_grid_config = grid_config if grid_config is not None else GridConfig()
+    resolved_candidate_factory = (
+        candidate_factory if candidate_factory is not None else default_factory_for(candidate_id)
+    )
 
     days, row_span = _plan_and_validate_windows(
         frame, symbol, firm_profile, resolved_window_config, candidate_id=candidate_id
@@ -498,6 +521,7 @@ def run_wfa(
             starting_balance=starting_balance,
             grid_config=resolved_grid_config,
             grid_config_hash=grid_config_hash,
+            candidate_factory=resolved_candidate_factory,
         )
         windows.append(window_result)
 

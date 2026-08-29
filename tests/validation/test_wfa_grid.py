@@ -104,13 +104,20 @@ def test_run_wfa_wfe_finito_y_oos_cosido_no_vacio(
 
 
 def test_run_wfa_no_usa_load_candidate_b_config() -> None:
-    """R24: `wfa.py` instancia `CandidateB` con kwargs directos, sin `load_candidate_b_config`."""
+    """R24: `wfa.py` construye el candidato con params explícitos, sin `load_candidate_b_config`.
+
+    Tras la costura de inyección, `wfa.py` ya no nombra a `CandidateB`: delega en una
+    `CandidateFactory` de capa 2. El invariante de R24 no cambia —los parámetros de
+    señal/ejecución vienen de la grilla, explícitos en el sitio de construcción, nunca
+    de un cargador de configuración— y es lo que estas aserciones siguen protegiendo.
+    """
     import genesis.validation.wfa as wfa_module
 
     source = wfa_module.__file__
     with open(source, encoding="utf-8") as handle:
         content = handle.read()
-    assert "CandidateB(" in content
+    assert "candidate_factory(" in content
+    assert "params={" in content
     assert "load_candidate_b_config" not in content
     assert "multiprocessing" not in content
     assert "concurrent.futures" not in content

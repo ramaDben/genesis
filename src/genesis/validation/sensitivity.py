@@ -23,7 +23,7 @@ from genesis.data.calendar import EconomicEvent
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
-from genesis.strategy.candidate_b.candidate import CandidateB
+from genesis.strategy.factories import CandidateFactory, default_factory_for
 from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation._windowing import slice_frame_by_day_range
 from genesis.validation.errors import SensitivityConfigError
@@ -152,6 +152,7 @@ def _run_combo(
     starting_balance: float,
     dataset_hash: str,
     stress: float,
+    candidate_factory: CandidateFactory,
 ) -> Ledger:
     """Instancia un candidato/motor de simulación **nuevos** para `combo` (R38-R41).
 
@@ -160,12 +161,14 @@ def _run_combo(
     el parámetro que `Simulator.__init__` ya acepta (R41).
     """
     n_minutes, atr_stop_frac, risk_pct = combo
-    candidate = CandidateB(
+    candidate = candidate_factory(
         figure=figure,
         reference_balance=starting_balance,
-        n_minutes=n_minutes,
-        atr_stop_frac=atr_stop_frac,
-        risk_pct=risk_pct,
+        params={
+            "n_minutes": n_minutes,
+            "atr_stop_frac": atr_stop_frac,
+            "risk_pct": risk_pct,
+        },
     )
     simulator = Simulator(
         candidate,
@@ -198,6 +201,7 @@ def run_sensitivity(
     tick_store: RawParquetStore | None,
     starting_balance: float,
     config: SensitivityConfig | None = None,
+    candidate_factory: CandidateFactory | None = None,
 ) -> SensitivityResult:
     """Perturbación ±10% eje-por-eje + stress de costos sobre la última ventana WFA (R37-R42).
 
@@ -212,6 +216,11 @@ def run_sensitivity(
     acotado y constante (decisión 7 §3), loop secuencial (R63).
     """
     resolved_config = config if config is not None else SensitivityConfig()
+    resolved_candidate_factory = (
+        candidate_factory
+        if candidate_factory is not None
+        else default_factory_for(wfa_result.candidate_id)
+    )
 
     if not wfa_result.windows:
         message = (
@@ -242,6 +251,7 @@ def run_sensitivity(
             starting_balance=starting_balance,
             dataset_hash=dataset_hash_oos,
             stress=stress,
+            candidate_factory=resolved_candidate_factory,
         )
         return profit_factor(ledger)
 

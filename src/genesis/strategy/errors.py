@@ -25,6 +25,16 @@ class InspectorConfigError(GenesisStrategyError):
     """Configuración del embudo (`InspectorFunnelConfig`) inválida o incompleta."""
 
 
+class CandidateFactoryError(GenesisStrategyError):
+    """No se pudo construir un candidato desde parámetros nombrados (`factories.py`).
+
+    Cubre los dos fallos de la costura de inyección: `candidate_id` sin fábrica por
+    defecto registrada, y `params` al que le falta una clave que la fábrica exige. El
+    mensaje debe nombrar el `candidate_id` y la clave/fábricas disponibles — nunca un
+    `KeyError` opaco aguas adentro.
+    """
+
+
 class CandidateBConfigError(GenesisStrategyError):
     """Configuración de `candidates.B.*` inválida o incompleta en `inspector_config.json` (R73).
 
