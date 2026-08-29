@@ -54,6 +54,31 @@ El ciclo de vida lo orquesta el MCP `pulse-engine` (Docker, workspace montado en
 - Estado del proyecto en GitHub: issues/labels codifican las fases (`state:1-explore` … `state:8-close`).
 - Cadena de issues del spec: A (spec definitivo, bloquea al resto) → B (data) → C (contrato+Inspector) → {D/E paralelos, G} → H → I → J → K.
 
+### Dónde aplica el ciclo, y dónde no
+
+**Obligatorio** para todo cambio que altere comportamiento o contrato bajo `src/genesis/**`:
+firmas públicas, invariantes, gates, formato de artefactos, jerarquía de excepciones, módulos
+nuevos. Ahí el gate humano protege algo real.
+
+**Vía rápida** (rama → PR → merge, sin ciclo) para lo que no toca esa superficie:
+
+| Vía rápida | Por qué |
+|---|---|
+| `scripts/` (runners, benchmarks) | Componen APIs ya publicadas; precedente de los `bench_*.py` |
+| `docs/`, `.serena/memories/` | No ejecutan |
+| Investigación, diagnóstico, mediciones | Exploratorio por naturaleza; no cabe en ocho fases |
+| Dependencias, CI, formato | Mecánico |
+
+**La zona gris se resuelve a favor del gate.** Si un cambio en `scripts/` obliga a tocar `src/`,
+la parte de `src/` va por el ciclo aunque sea pequeña.
+
+**Precedente que originó esta regla (2026-08-29).** Los PR #68 y #69 modificaron `src/` sin pasar
+por el ciclo. #69 añadió `strategy/factories.py`, una excepción nueva a la jerarquía de dominio y
+cambió las firmas públicas de `run_wfa`/`build_signal_trial_matrix`/`run_sensitivity`, resolviendo
+de paso la decisión **D2** del RFC del laboratorio — que ese mismo RFC marcaba como
+**[DECISIÓN HUMANA]**. Una autorización conversacional para hacer el trabajo no sustituye al gate:
+el gate existe para que la decisión de diseño se vea **antes** de estar en `main`, no después.
+
 ## Memoria entre sesiones (Serena MCP)
 
 Lo que deba sobrevivir al fin de una sesión va a las **memorias de Serena**
