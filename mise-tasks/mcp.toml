@@ -1,6 +1,11 @@
+# La ruta del repo se resuelve en tiempo de ejecución, no se fija: hasta el 2026-08-29 esta
+# tarea montaba `C:/Users/bbrav/genesis`, la ruta anterior a la migración a WSL2, que ya no
+# existe. El contenedor arrancaba con `/work` vacío.
+# La imagen tampoco es `:latest`: la publicada en ghcr es la v0.13.0 y falla en `promote_delta`
+# (ver CLAUDE.md). Hay que construir desde `main` y etiquetar `mcp-pulse:<version>`.
 ["mcp:add"]
 description = "Añade el servidor MCP de Pulse a Claude Code vía Docker (scope: project, repo montado en /work)"
-run = 'claude mcp add pulse-engine -- docker run -i --rm -v "C:/Users/bbrav/genesis:/work" -w /work -e PULSE_WORKSPACE_ROOT=/work -e PULSE_SQLITE_PATH=/work/.pulse/state.sqlite ghcr.io/bajmein/pulse/mcp-pulse:latest'
+run = 'claude mcp add pulse-engine -- docker run -i --rm -v "$(git rev-parse --show-toplevel):/work" -w /work -e PULSE_WORKSPACE_ROOT=/work -e PULSE_SQLITE_PATH=/work/.pulse/state.sqlite mcp-pulse:0.13.6'
 
 ["mcp:list"]
 description = "Lista MCPs configurados en Claude Code"
@@ -13,5 +18,5 @@ run = "claude mcp get ${usage_name?}"
 
 ["mcp:inspect-image"]
 description = "Verifica que la imagen Docker del MCP de Pulse exista localmente"
-run = "docker image inspect ghcr.io/bajmein/pulse/mcp-pulse:latest"
+run = "docker image inspect mcp-pulse:0.13.6"
 hide = true
