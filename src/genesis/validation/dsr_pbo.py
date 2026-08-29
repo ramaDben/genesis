@@ -25,7 +25,7 @@ from genesis.data.calendar import EconomicEvent
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
-from genesis.strategy.candidate_b.candidate import CandidateB
+from genesis.strategy.factories import CandidateFactory, default_factory_for
 from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation._dsr import deflated_sharpe_ratio
 from genesis.validation._returns import extract_trade_returns
@@ -225,6 +225,7 @@ def _run_combo(
     tick_store: RawParquetStore | None,
     starting_balance: float,
     dataset_hash: str,
+    candidate_factory: CandidateFactory,
 ) -> Ledger:
     """Instancia un candidato/motor de simulación **nuevos** para `combo` y corre `frame` (R26).
 
@@ -233,12 +234,14 @@ def _run_combo(
     configuración de perfil.
     """
     n_minutes, atr_stop_frac, risk_pct = combo
-    candidate = CandidateB(
+    candidate = candidate_factory(
         figure=figure,
         reference_balance=starting_balance,
-        n_minutes=n_minutes,
-        atr_stop_frac=atr_stop_frac,
-        risk_pct=risk_pct,
+        params={
+            "n_minutes": n_minutes,
+            "atr_stop_frac": atr_stop_frac,
+            "risk_pct": risk_pct,
+        },
     )
     simulator = Simulator(
         candidate,
@@ -271,6 +274,7 @@ def build_signal_trial_matrix(
     starting_balance: float,
     window_config: WfaWindowConfig | None = None,
     grid_config: GridConfig | None = None,
+    candidate_factory: CandidateFactory | None = None,
 ) -> SignalTrialMatrix:
     """Reconstruye, de forma independiente, el DSR-IS de las 9 configs x N ventanas (R24-R27).
 
@@ -289,6 +293,9 @@ def build_signal_trial_matrix(
     """
     resolved_window_config = window_config if window_config is not None else WfaWindowConfig()
     resolved_grid_config = grid_config if grid_config is not None else GridConfig()
+    resolved_candidate_factory = (
+        candidate_factory if candidate_factory is not None else default_factory_for(candidate_id)
+    )
 
     days, row_span = plan_trading_days(frame, symbol, firm_profile)
     bounds = list(iter_is_oos_bounds(len(days), resolved_window_config))
@@ -322,6 +329,7 @@ def build_signal_trial_matrix(
                     tick_store=tick_store,
                     starting_balance=starting_balance,
                     dataset_hash=dataset_hash_is,
+                    candidate_factory=resolved_candidate_factory,
                 )
                 aggregated_returns.extend(
                     trade.pnl_delta for trade in extract_trade_returns(ledger_is)
