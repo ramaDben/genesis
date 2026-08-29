@@ -49,30 +49,54 @@ El gate crea/actualiza el PR enlazado al issue con **ambos veredictos** (sea ✅
 
 ## Regla de Transicion (invariante)
 
-**NO** solicitar `request_sdd_transition(target_phase="close")` hasta que:
+**NO** cerrar el Change hasta que:
 
 1. `spec_compliance_report.md` exista y contenga `SPEC_COMPLIANCE: ✅`.
 2. `code_quality_report.md` exista y contenga `CODE_QUALITY: ✅`.
 
 Ambas condiciones deben cumplirse simultaneamente. Una sola falla basta para bloquear.
 
-Cuando ambos son ✅, solicitar:
+Cuando ambos son ✅, llamar **directamente**:
 
 ```
-request_sdd_transition(
-  target_phase="close",
-  evidence_artifacts=[
-    ".pulse/changes/<slug>/spec_compliance_report.md",
-    ".pulse/changes/<slug>/code_quality_report.md"
-  ]
-)
+close_change(slug="<slug>")
 ```
+
+El Change debe seguir en fase `review` al hacerlo: `close_change` **es** quien lo mueve a
+`close`, junto con la promocion del delta, la captura de heuristicas, el bump de version,
+`closed_at` y el archivado.
+
+### Por que NO se transiciona a `close` a mano
+
+Hasta el 2026-08-29 esta skill instruia
+`request_sdd_transition(target_phase="close", evidence_artifacts=[...])` antes de cerrar. **Eso
+deja el Change inservible** y ya ocurrio dos veces (issues #53 y #55):
+
+- `close_change` exige fase `review` — `"close_change requiere un Change en fase review."`
+- `close` es fase terminal, asi que no se puede volver — `"ACCESO DENEGADO (SpecGate):
+  close solo puede avanzar a la fase siguiente."`
+- Y como la guarda **G2** rechaza crear cualquier Change nuevo mientras exista uno sin
+  `closed_at`, un solo Change atascado **detiene el flujo SDD entero**. Eso paso entre el
+  2026-08-11 y el 2026-08-29.
+
+La unica salida conocida es revertir `current_phase` a `"review"` a mano en
+`.pulse/changes/<slug>/state.yaml` **y** en el blob JSON de `.pulse/state.sqlite`, con
+autorizacion humana explicita, y recien ahi llamar `close_change`.
+
+### Como verificar que el cierre fue real
+
+- `HeuristicsExtracted` aparece en `.pulse/audit.jsonl` para el slug.
+- El directorio del Change se movio a `.pulse/changes/archive/`.
+- `list_active_changes` devuelve `[]`.
+
+Si `current_phase` quedo en `"close"` con `closed_at: null`, el cierre **no** ocurrio.
 
 ## Prohibiciones
 
 - **NO** hacer edits funcionales de codigo en esta fase.
 - **NO** omitir Gate 1 y ejecutar Gate 2 directamente.
-- **NO** solicitar `close` con un solo gate ✅.
+- **NO** cerrar con un solo gate ✅.
+- **NO** llamar `request_sdd_transition(target_phase="close")` — es lo que rompe el Change.
 
 ## Memoria Persistente (Knowledge Graph)
 

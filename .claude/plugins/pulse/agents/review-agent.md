@@ -101,33 +101,37 @@ El gate crea/actualiza el PR enlazado al issue con ambos veredictos (sea ✅ o �
 - Reportar al hilo principal con los bugs encontrados para que apply los corrija.
 - **Detenerse.**
 
-### Paso 3 — Transicion a close (solo si AMBOS gates son ✅)
+### Paso 3 — Cierre (solo si AMBOS gates son ✅)
 
-Solo cuando `SPEC_COMPLIANCE: ✅` **Y** `CODE_QUALITY: ✅`:
+Solo cuando `SPEC_COMPLIANCE: ✅` **Y** `CODE_QUALITY: ✅`, llamar **directamente**:
 
 ```
-request_sdd_transition(
-  target_phase="close",
-  evidence_artifacts=[
-    ".pulse/changes/<slug>/spec_compliance_report.md",
-    ".pulse/changes/<slug>/code_quality_report.md"
-  ]
-)
+close_change(slug="<slug>")
 ```
+
+El Change debe seguir en fase `review`: `close_change` **es** quien lo mueve a `close`.
 
 ## Regla de cierre (invariante)
 
-**NO** solicitar `request_sdd_transition(target_phase="close")` hasta que:
+**NO** cerrar hasta que:
 
 1. `spec_compliance_report.md` exista y contenga `SPEC_COMPLIANCE: ✅`.
 2. `code_quality_report.md` exista y contenga `CODE_QUALITY: ✅`.
 
 Ambas condiciones deben cumplirse simultaneamente. Una sola basta para bloquear.
 
+Verificar que el cierre fue real: `HeuristicsExtracted` en `.pulse/audit.jsonl`, el directorio
+del Change movido a `.pulse/changes/archive/`, y `list_active_changes` en `[]`. Si
+`current_phase` quedo en `"close"` con `closed_at: null`, el cierre **no** ocurrio.
+
 ## Prohibiciones absolutas
 
 - **NO** auditar compliance ni calidad el mismo (eso lo hacen los gates).
 - **NO** hacer edits funcionales de codigo.
+- **NO** llamar `request_sdd_transition(target_phase="close")`. Deja el Change inservible:
+  `close_change` exige fase `review`, `close` es terminal y no se puede volver, y la guarda G2
+  bloquea la creacion de cualquier Change nuevo mientras ese quede sin `closed_at`. Paso en los
+  issues #53 y #55; el segundo detuvo el flujo SDD entero durante 18 dias.
 - **NO** llamar `approve_design`.
 - **NO** hacer merge del PR.
 - **NO** omitir Gate 1 y ejecutar Gate 2 directamente.

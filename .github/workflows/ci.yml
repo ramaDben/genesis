@@ -41,7 +41,8 @@ jobs:
         run: uv run deptry src/
 
       - name: ty check
-        run: uv run ty check
+        # Ver el comentario de la tarea `ty` en mise.toml: obligatorio desde ty 0.0.75.
+        run: uv run ty check --extra-search-path .agents/hooks/_lib
 
       - name: pytest
         run: uv run pytest
