@@ -576,3 +576,299 @@ ENTONCES el contador de llamadas de descarga del fake para ese chunk es 0 (no se
 | R55–R58 | §11.2 (dependencias de runtime vía `uv`) |
 | Alcance OUT (LookaheadError) | §11.1 PA-4, §8 |
 | Alcance OUT (universos A/C, G1 real) | §2.x, §7.1, §11 (tabla de issues) |
+
+<!-- change:55-fix-data-symbolfigure-no-captura-tick-size-el-sizing-costos-asum -->
+# Specification — `SymbolFigure` captura `tick_size`; la conversión punto→dinero usa `tick_value / tick_size`
+
+Change #55 (Issue #55). Formaliza `idea.md` (Explore) + `proposal.md` (Propose): `SymbolFigure`
+(capa 1, `src/genesis/data/symbols.py:11-28`) persiste hoy `tick_value` como el
+`trade_tick_value` crudo del SDK MT5, sin su contraparte `trade_tick_size`. Los tres sitios de
+capa 3 que convierten distancia de precio en dinero multiplicando por `figure.tick_value` asumen
+implícitamente que ese campo ya es "$/punto" — pero `$/punto = trade_tick_value /
+trade_tick_size`, y para los 4 índices del Candidato B el valor crudo persistido difiere ~100× del
+valor real, causando 100 % de rechazos `lot_size_out_of_bounds` en backtests con datos reales.
+
+## Objetivo
+
+Que `SymbolFigure` capture ambos términos crudos del cociente MT5 (`tick_value`, `tick_size`) y
+que los tres sitios de capa 3 que hoy multiplican por `figure.tick_value` asumiendo $/punto
+obtengan el $/punto real vía `tick_value / tick_size`, sin relajar ningún gate G/C/P/T (SSoT
+`docs/SPEC_GENESIS_v1.4_...md`) y sin tocar `max_lot`, `trade_contract_size`, ni las fichas
+placeholder de Candidato A.
+
+## Alcance
+
+### IN
+
+1. Agregar `tick_size: float` a `SymbolFigure`, capturado desde `raw.trade_tick_size` en
+   `_coerce_symbol_figure` (mismo patrón que `tick_value`).
+2. Corregir los tres sitios confirmados de capa 3 que multiplican por `figure.tick_value` asumiendo
+   $/punto, para que usen el cociente `tick_value / tick_size` (variante exacta —normalizar en
+   ingesta vs. dividir en cada consumidor— es decisión de `design`, no de este spec).
+3. Actualizar `R10` de `.pulse/specs/data/spec.md` (delta explícito, ver sección dedicada más
+   abajo) para incorporar `tick_size` a la lista normativa de la ficha extendida.
+4. Actualizar los fixtures/tests que instancian `SymbolFigure` directamente y el golden fixture de
+   `signal_diagnostic` al esquema de 9 campos (lista exhaustiva en Riesgos/Referencias).
+5. Re-exportar la ficha real de los 4 índices del Candidato B (`US500.cash`, `US100.cash`,
+   `US30.cash`, `GER40.cash`) con `tick_size` capturado, como tarea de `apply` posterior al fix de
+   esquema/fórmula (no bloqueante para el merge del fix, que se valida con fixtures sintéticas).
+
+### OUT (YAGNI explícito — fuera de este Change)
+
+- **`max_lot=50.0`** de `inspector_config.json:candidates.B.*` (`src/genesis/strategy/
+  inspector_config.json:5`): no es la causa raíz (el bug es la conversión $/punto, no el techo de
+  lote). Riesgo conocido documentado abajo: el residual algebraico tras el fix puede seguir
+  excediendo `max_lot` en el peor día observado.
+- **`trade_contract_size`**: los 4 símbolos confirmados tienen `contract_size=1.0`; generalizar la
+  fórmula a `$/punto = contract_size × tick_value / tick_size` sin evidencia de un símbolo real
+  con `contract_size != 1` es especulativo. Riesgo conocido documentado abajo.
+- **Candidato A**: se beneficia estructuralmente del cambio de esquema (mismo value object), pero
+  no se le inventa un `tick_size` placeholder plausible en este Change — sigue "no confirmado"
+  (Issue B/F). `apply` decide cómo construye sus 4 fichas placeholder con el esquema nuevo.
+- **Default de `tick_size` para deserialización retro-compatible**: decisión explícita de NO tener
+  default (ver R2) — no es un OUT por alcance sino por diseño deliberado, se documenta aquí para
+  que no se reabra en `design`.
+
+## Delta explícito a `.pulse/specs/data/spec.md` (R10)
+
+**Hallazgo verificado en esta sesión**: `.pulse/specs/data/spec.md:143-145` (R10 actual) enumera
+los 8 campos de la ficha extendida (`tick_value`, `volume_step`, `stops_level`, `freeze_level`,
+`digits`, `swap_long`, `swap_short`, `swap_rollover_day`) **sin** la cláusula "como mínimo"/"al
+menos" que sí usa el precedente de Change #51 en otro spec normativo. Confirmado leyendo el texto
+actual de R10: la lista es cerrada, no abierta. A diferencia de #51 (que no necesitó delta porque
+su spec normativo sí tenía esa cláusula), **este Change SÍ requiere modificar R10 explícitamente**
+para no dejar el spec normativo desincronizado del código tras agregar `tick_size`.
+
+- **Texto actual de R10**: "Cada export DEBE capturar y persistir la ficha extendida del símbolo
+  (`tick_value`, `volume_step`, `stops_level`, `freeze_level`, `digits`, `swap_long`,
+  `swap_short`, `swap_rollover_day`) como metadata adjunta al Parquet."
+- **Texto propuesto para R10** (a aplicar en `.pulse/specs/data/spec.md` durante `apply`, tras
+  `design`): "Cada export DEBE capturar y persistir la ficha extendida del símbolo (`tick_value`,
+  `tick_size`, `volume_step`, `stops_level`, `freeze_level`, `digits`, `swap_long`, `swap_short`,
+  `swap_rollover_day`) como metadata adjunta al Parquet."
+- Este delta es responsabilidad de `apply` (edición del spec normativo va junto con el código que
+  lo satisface, mismo patrón que R91 en #51), pero queda fijado aquí como requisito de este Change
+  para que no se pierda entre `design` y `apply`.
+
+## Requisitos funcionales
+
+- **R1** (mapea idea.md §"`SymbolFigure` no tiene tick_size", proposal "Hipótesis de solución").
+  `SymbolFigure` (`src/genesis/data/symbols.py:11-28`) DEBE ganar un campo `tick_size: float`,
+  documentado en su docstring junto a los 8 campos existentes, referenciando el R10 actualizado.
+- **R2** (mapea proposal "Decisiones de alcance fijadas... SIN default"). El campo `tick_size` de
+  R1 NO DEBE tener valor default: `SymbolFigure(**payload)` para cualquier payload de esquema
+  viejo (sin `tick_size`) DEBE fallar con `TypeError` en vez de construirse con un valor inventado
+  — ruptura deliberada, consistente con "fail-fast con contexto" (`CLAUDE.md`) y con R9
+  (`resolve_symbol_alias`, "fallar ruidosamente... nunca adivinar"). Aplica a `ArtifactMetadata.
+  from_json` (`src/genesis/data/metadata.py:73-92`) y a `signal_diagnostic._resolve_figure`
+  (`src/genesis/validation/signal_diagnostic.py:319-326`): ambos deben seguir construyendo
+  `SymbolFigure(**...)` sin pasar un default sintético para `tick_size`.
+- **R3** (mapea idea.md/proposal "Contexto observado", `_coerce_symbol_figure`).
+  `_coerce_symbol_figure` (`src/genesis/data/mt5_export.py:388-406`) DEBE leer
+  `raw.trade_tick_size` y poblar `SymbolFigure.tick_size` con `float(raw.trade_tick_size)`, mismo
+  patrón que el `tick_value` existente (`float(raw.trade_tick_value)`), para cualquier `raw` que
+  no sea ya un `SymbolFigure` (rama de fakes de test preservada sin cambios).
+- **R4** (mapea idea.md/proposal "Tres sitios confirmados", `candidate_b/candidate.py:220`). El
+  cálculo de `sizing` en `_compute_risk_geometry`
+  (`src/genesis/strategy/candidate_b/candidate.py:216-222`) DEBE usar el $/punto real derivado de
+  `figure.tick_value` y `figure.tick_size` (fórmula `tick_value / tick_size`, aplicada en el sitio
+  de consumo o ya normalizada en la ficha según decida `design`), en vez de `figure.tick_value`
+  crudo, de modo que `stop_distance * ($/punto real)` sea la base correcta del sizing.
+- **R5** (mapea idea.md/proposal "Tres sitios confirmados", `simulator.py:345`, `_floating_pnl`).
+  `_floating_pnl` (`src/genesis/backtest/simulator.py:340-346`) DEBE usar el $/punto real
+  (`tick_value / tick_size`) en vez de `self.figure.tick_value` crudo para convertir `points *
+  sizing_hint` a dinero.
+- **R6** (mapea idea.md/proposal "Tres sitios confirmados", `simulator.py:529`, costo de entrada).
+  El cálculo de costo de entrada en dinero (`src/genesis/backtest/simulator.py:520-531`) DEBE usar
+  el $/punto real (`tick_value / tick_size`) en vez de `self.figure.tick_value` crudo para
+  convertir `points_total * sizing_hint` a dinero.
+- **R7** (mapea idea.md "Impacto en serialización/reproducibilidad"). `RunProvenance`
+  (`src/genesis/backtest/ledger.py:76`) NO DEBE modificarse: no embebe `SymbolFigure` ni ningún
+  hash derivado de ella; queda fuera del alcance de este Change (confirmado, no afectado por R1).
+- **R8** (mapea proposal "Delta explícito a R10"). `.pulse/specs/data/spec.md` R10 DEBE
+  actualizarse (en `apply`, junto con el código) para incluir `tick_size` en la lista normativa de
+  campos de la ficha extendida, con el texto exacto fijado en la sección "Delta explícito" de este
+  documento.
+- **R9** (mapea idea.md "`inspector_config.json`... `max_lot`", proposal "riesgo conocido"). Este
+  Change NO DEBE modificar `max_lot` en `inspector_config.json`. El residual cuantificado (rango
+  algebraico `[0.11, 1.33] × max_lot` tras el fix, extremo superior aún excede `max_lot=50`) queda
+  documentado como riesgo conocido (ver Riesgos), no como requisito a resolver aquí.
+- **R10** (mapea idea.md pregunta 4/proposal "Candidato A"). Este Change NO DEBE inventar un
+  `tick_size` placeholder para las fichas de Candidato A (`XAUUSD`, `EURUSD`, `GBPUSD`,
+  `USDJPY` en `src/genesis/strategy/candidate_a/config.py:load_placeholder_symbol_figures`). La
+  construcción explícita de esas 4 fichas con el esquema de 9 campos (valor de `tick_size` a
+  elegir) es detalle de `apply`, no de alcance.
+- **R11** (mapea proposal "Re-exportar ficha real"). `apply` DEBE re-exportar la ficha real de los
+  4 índices del Candidato B (`US500.cash`, `US100.cash`, `US30.cash`, `GER40.cash`) con
+  `tick_size` capturado vía R3, como paso posterior al merge del fix de esquema/fórmula (que se
+  valida primero con fixtures sintéticas, sin I/O a MT5).
+
+## Criterios de aceptación (evals ejecutables)
+
+- **A1**
+  ```
+  DADO  SymbolFigure(symbol="US500", tick_value=0.01, tick_size=0.01, volume_step=0.01,
+        stops_level=10, freeze_level=5, digits=2, swap_long=-0.5, swap_short=-0.3,
+        swap_rollover_day=2)
+  CUANDO se construye el objeto
+  ENTONCES no lanza excepción Y figure.tick_size == 0.01
+  ```
+  (test de pytest, `tests/data/test_symbols.py`, `pytest.mark.unit`; reemplaza el test de "8
+  campos" por uno de 9 campos).
+
+- **A2**
+  ```
+  DADO  un payload de deserialización (dict) para SymbolFigure sin la clave "tick_size"
+        (esquema viejo de 8 campos)
+  CUANDO se invoca SymbolFigure(**payload)
+  ENTONCES lanza TypeError (ningún default silencia la ausencia del campo)
+  ```
+  (test de pytest, `tests/data/test_symbols.py`, `pytest.mark.unit`; verifica R2).
+
+- **A3**
+  ```
+  DADO  un objeto raw sintético (namedtuple o SimpleNamespace) con
+        trade_tick_value=0.0115435, trade_tick_size=0.01, volume_step=0.01,
+        trade_stops_level=10, trade_freeze_level=5, digits=2, swap_long=-0.5,
+        swap_short=-0.3, swap_rollover3days=2
+  CUANDO se invoca _coerce_symbol_figure("GER40.cash", raw)
+  ENTONCES el SymbolFigure resultante tiene tick_value == 0.0115435 Y tick_size == 0.01
+  ```
+  (test de pytest, `tests/data/test_mt5_export.py` o módulo equivalente existente,
+  `pytest.mark.unit`; verifica R3).
+
+- **A4**
+  ```
+  DADO  un CandidateB configurado con figure=SymbolFigure(..., tick_value=0.01, tick_size=0.01,
+        ...) (caso US500 real: cociente == 1.0) y un stop_distance conocido D
+  CUANDO se invoca _compute_risk_geometry y se compara el sizing resultante contra el sizing
+        obtenido con figure=SymbolFigure(..., tick_value=1.0, tick_size=1.0, ...)
+        (mismo cociente, distinto par de valores crudos)
+  ENTONCES ambos sizing son iguales (el cociente, no el valor crudo de tick_value, determina el
+       resultado)
+  ```
+  (test de pytest, `tests/strategy/candidate_b/test_candidate.py` o módulo equivalente,
+  `pytest.mark.unit`; verifica R4 — el fix depende del cociente, no del valor absoluto).
+
+- **A5**
+  ```
+  DADO  un CandidateB configurado con figure=SymbolFigure(..., tick_value=0.0115435,
+        tick_size=0.01, ...) (caso GER40 real, cociente == 1.15435) y un stop_distance
+        conocido D, balance B, risk_pct R
+  CUANDO se invoca _compute_risk_geometry
+  ENTONCES el sizing retornado == (R * B) / (D * 1.15435), no (R * B) / (D * 0.0115435)
+  ```
+  (test de pytest, mismo módulo que A4, `pytest.mark.unit`; distingue el bug —dividir por el
+  valor crudo— del fix —dividir por el cociente—).
+
+- **A6**
+  ```
+  DADO  un Simulator con figure=SymbolFigure(..., tick_value=0.01, tick_size=0.01, ...) y una
+        OpenPosition con sizing_hint conocido, entry_price y price de cierre conocidos
+  CUANDO se invoca _floating_pnl(position, price)
+  ENTONCES el resultado == points * sizing_hint * (tick_value / tick_size), con
+       (tick_value / tick_size) == 1.0 para este caso (no == tick_value == 0.01)
+  ```
+  (test de pytest, `tests/backtest/test_simulator.py`, `pytest.mark.unit`; verifica R5).
+
+- **A7**
+  ```
+  DADO  un Simulator con figure=SymbolFigure(..., tick_value=0.01, tick_size=0.01, ...) y un
+        EntryIntent con sizing_hint conocido, spread/slippage points conocidos
+  CUANDO se resuelve el costo de entrada en dinero (flujo de _process_new_entries /
+        _open_position)
+  ENTONCES cost_points == points_total * sizing_hint * (tick_value / tick_size), con
+       (tick_value / tick_size) == 1.0 para este caso
+  ```
+  (test de pytest, `tests/backtest/test_simulator.py`, `pytest.mark.unit`; verifica R6).
+
+- **A8**
+  ```
+  DADO  el repositorio en el estado posterior a implementar R1-R6
+  CUANDO rg -n "\.tick_value\b" src/genesis/
+  ENTONCES ningún resultado en candidate_b/candidate.py, backtest/simulator.py multiplica
+       figure.tick_value sin también referenciar figure.tick_size en la misma expresión
+       (verificación de no-regresión: no queda ningún consumo crudo sin dividir)
+  ```
+  (eval `rg` manual/script, verificación de no-regresión de R4-R6).
+
+- **A9**
+  ```
+  DADO  .pulse/specs/data/spec.md tras aplicar el delta de la sección "Delta explícito a R10"
+  CUANDO rg -n "tick_size" .pulse/specs/data/spec.md
+  ENTONCES aparece al menos una coincidencia dentro del texto de R10
+  ```
+  (eval `rg`, verificación de que R8 se ejecutó; a correr en `apply`, no en `specify`).
+
+- **A10**
+  ```
+  DADO  tests/validation/fixtures/signal_diagnostic_report_golden.json actualizado al esquema
+        de 9 campos (con tick_size)
+  CUANDO se ejecuta la suite de tests de golden de signal_diagnostic
+  ENTONCES pasa sin error de esquema (TypeError al reconstruir SymbolFigure)
+  ```
+  (test de pytest existente, `tests/validation/`, verificación de que R2 no rompe el flujo de
+  golden tests tras la actualización de fixtures en `apply`).
+
+## Riesgos
+
+- **Riesgo 1 (residual de `max_lot`)**: la estimación algebraica del proposal
+  (`sizing_correcto = sizing_erróneo × raw_tick_size`, con `raw_tick_size=0.01` para los 4
+  índices) da un rango corregido `[0.11, 1.33] × max_lot=50`; el extremo superior (`≈66.5`) sigue
+  excediendo `max_lot=50`. No es una re-medición empírica. Se recomienda que `apply` re-ejecute el
+  backtest in-sample original tras el fix (con la ficha re-exportada de R11) para confirmar o
+  refutar el residual; si persisten rechazos por sizing en el mismo orden, abrir Issue de
+  seguimiento para recalibrar `max_lot` (fuera de este Change).
+- **Riesgo 2 (`trade_contract_size`)**: la fórmula de este Change asume `contract_size == 1.0`
+  (confirmado para los 4 símbolos del Candidato B). Si en el futuro se incorpora un símbolo con
+  `contract_size != 1` (p. ej. futuros), la fórmula quedaría incompleta y debe revisarse
+  (`$/punto = contract_size × tick_value / tick_size`).
+- **Riesgo 3 (fixtures y golden tests a actualizar)**: la ruptura deliberada de R2 obliga a
+  actualizar `tests/data/test_symbols.py`, `tests/data/fakes.py:43`
+  (`_default_symbol_figure`, reutilizado por `tests/strategy/candidate_b/conftest.py:22` y por
+  extensión `tests/strategy/candidate_b/test_golden_session.py`), `tests/data/test_metadata.py:49`,
+  `tests/backtest/test_costs.py:25`, `tests/strategy/test_inspector.py:31`, y el golden fixture
+  `tests/validation/fixtures/signal_diagnostic_report_golden.json`. Si `apply` omite alguno, la
+  suite falla con `TypeError` en la construcción de `SymbolFigure` (comportamiento esperado de R2,
+  no un bug oculto — pero requiere tocar todos los sitios listados).
+- **Riesgo 4 (variante de diseño no decidida)**: R4-R6 fijan el resultado observable (el cociente
+  correcto debe aplicarse) sin fijar si `design` normaliza en la ingesta (opción (a) de
+  `idea.md`, un solo punto de cambio) o divide en cada consumidor (opción (b), tres puntos de
+  cambio). Ambas satisfacen los criterios de aceptación A4-A7 (que verifican el resultado, no la
+  ubicación del cálculo); `design` debe fijar una y documentar el trade-off ya identificado en
+  `idea.md`.
+
+## Preguntas abiertas
+
+Ninguna pregunta de alcance queda abierta (resueltas en `proposal.md`). Quedan para `design`:
+
+1. Variante (a) normalizar en ingesta vs. (b) dividir en cada consumidor (Riesgo 4).
+2. Valor de construcción explícita (no deserialización) de `tick_size` para las 4 fichas
+   placeholder de Candidato A (R10) — detalle de `apply`, no bloquea `design`.
+3. Si la re-ejecución del backtest in-sample tras el fix (R11 + Riesgo 1) confirma o refuta el
+   residual algebraico de `max_lot` — a resolver empíricamente en `apply`.
+
+## Referencias
+
+- Issue #55: https://github.com/ramaDben/genesis/issues/55
+- `idea.md`, `proposal.md` de este Change — evidencia completa, sonda MT5 en vivo, decisiones de
+  alcance.
+- `src/genesis/data/symbols.py:11-28` — `SymbolFigure`.
+- `src/genesis/data/mt5_export.py:388-406` — `_coerce_symbol_figure`.
+- `src/genesis/strategy/candidate_b/candidate.py:216-222` — `_compute_risk_geometry`.
+- `src/genesis/backtest/simulator.py:340-346,520-531` — `_floating_pnl` y costo de entrada.
+- `src/genesis/backtest/costs.py:33-67` — sin el patrón, no requiere cambio.
+- `src/genesis/data/metadata.py:60-92` (`ArtifactMetadata.to_json/from_json`),
+  `src/genesis/validation/signal_diagnostic.py:319-326` (`_resolve_figure`) — roundtrip que se
+  rompe deliberadamente sin default (R2).
+- `.pulse/specs/data/spec.md:143-145` (R10) — delta fijado en este documento.
+- `src/genesis/strategy/candidate_a/config.py`, `src/genesis/strategy/inspector_config.json` —
+  fuera de alcance (Candidato A, `max_lot`), riesgos documentados.
+- `src/genesis/backtest/ledger.py:76` (`RunProvenance`) — confirmado no afectado (R7).
+- `tests/data/test_symbols.py`, `tests/data/fakes.py:43`, `tests/data/test_metadata.py:49`,
+  `tests/backtest/test_costs.py:25`, `tests/strategy/test_inspector.py:31`,
+  `tests/strategy/candidate_b/conftest.py:22`, `tests/strategy/candidate_b/test_golden_session.py`,
+  `tests/validation/fixtures/signal_diagnostic_report_golden.json` — a actualizar en `apply`
+  (Riesgo 3).
+- `.pulse/changes/archive/51-fix-validation-.../spec.md` — referencia de formato/estructura usada
+  para este documento.
