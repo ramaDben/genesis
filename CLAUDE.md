@@ -72,6 +72,22 @@ nuevos. Ahí el gate humano protege algo real.
 **La zona gris se resuelve a favor del gate.** Si un cambio en `scripts/` obliga a tocar `src/`,
 la parte de `src/` va por el ciclo aunque sea pequeña.
 
+### Cerrar un change: la trampa que costó tres semanas
+
+**`close_change` es lo único que cierra, y exige el change en `review`.** Nunca avanzar a `close`
+con `request_sdd_transition`: esa llamada mueve la fase pero no cierra nada, e inhabilita la única
+tool capaz de hacerlo. El SpecGate no deja retroceder (`close solo puede avanzar a la fase
+siguiente`) y después de `close` no hay fase siguiente — el change queda inservible.
+
+**Un change sin `closed_at` bloquea todos los demás.** La guarda G2 rechaza crear cualquier change
+nuevo mientras exista uno activo sin cerrar. Un cierre a medias no deja un pendiente: para el
+flujo entero.
+
+Así se detuvo el SDD el **2026-08-11**, el día que el #55 quedó en ese estado. Se destrabó el
+2026-08-29 revirtiendo `current_phase` a `review` en `.pulse/changes/<slug>/state.yaml` y en el
+blob de `.pulse/state.sqlite`, y llamando `close_change` (ver #72). Señal de cierre completo:
+`HeuristicsExtracted` en `.pulse/audit.jsonl` y el change movido a `.pulse/changes/archive/`.
+
 **Precedente que originó esta regla (2026-08-29).** Los PR #68 y #69 modificaron `src/` sin pasar
 por el ciclo. #69 añadió `strategy/factories.py`, una excepción nueva a la jerarquía de dominio y
 cambió las firmas públicas de `run_wfa`/`build_signal_trial_matrix`/`run_sensitivity`, resolviendo
