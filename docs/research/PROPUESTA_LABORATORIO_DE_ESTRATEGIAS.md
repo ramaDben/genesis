@@ -60,11 +60,23 @@ genesis no es la validación: es el suministro de hipótesis que validar.
 ### 1.3 Lo que NO existe **[VERIFICADO]**
 
 - No hay paquete `indicators/`.
-- No hay runner ni CLI que ejecute el pipeline end-to-end. Los `design.md` archivados de los
+> **Enmienda del 2026-08-29.** Las dos afirmaciones de esta subsección quedaron obsoletas y se
+> dejan tachadas en vez de borrarlas, para que el razonamiento original siga siendo legible.
+> Lo que cambió: el 2026-08-28 el Candidato B se corrió de punta a punta sobre ~3 años de M1
+> real de Moneta (US500), con las ventanas normativas y sin fixtures — veredicto `no-go`
+> (WFE 0.35, DSR 0.0019, `p_pass` 0.122). El 2026-08-29 ese flujo quedó versionado en
+> `scripts/run_pipeline.py`. Lo que **no** cambió: `ledger/trials.jsonl` sigue vacío, porque
+> aquellas corridas usaron scripts que no lo invocaban. El argumento central de la propuesta
+> —el cuello de botella es el suministro de hipótesis, no la validación— se sostiene intacto.
+
+- ~~No hay runner ni CLI que ejecute el pipeline end-to-end.~~ Los `design.md` archivados de los
   issues G, H, I y J lo dejaron fuera de alcance de forma **explícita y repetida** ("mismo criterio
   que G con la CLI"). El único flujo completo es `tests/validation/test_integration_pipeline_j.py`,
   sobre fixtures sintéticas.
-- `ledger/trials.jsonl` está **vacío**: ningún candidato se ha corrido nunca sobre datos reales.
+- `ledger/trials.jsonl` está **vacío** — sigue siéndolo, pero ya no por la razón que decía este
+  documento (~~ningún candidato se ha corrido nunca sobre datos reales~~): se corrieron tres
+  backtests reales el 2026-08-28 sin cablear el ledger. Son ensayos quemados que el DSR de la
+  próxima corrida no contará: exactamente el sub-conteo que el #53 existe para impedir.
 
 ---
 
@@ -359,10 +371,22 @@ Eso funciona perfecto para un torneo de tres candidatos y **no escala a un labor
 generador que produce 200 genomas no tiene 200 letras, y el registro por decorador asume clases
 escritas a mano en tiempo de import, no objetos construidos en runtime.
 
-**Es un cambio de contrato de la capa 2, no un detalle de implementación.** Hay que decidirlo
+~~**Es un cambio de contrato de la capa 2, no un detalle de implementación.** Hay que decidirlo
 explícitamente **[DECISIÓN HUMANA]**: si el registro por letra se mantiene para el torneo A/B/C
 y el laboratorio usa una vía paralela, o si se generaliza el identificador. Ambas opciones tienen
-consecuencias sobre los artefactos ya emitidos (el `candidate_id` viaja hasta el manifest).
+consecuencias sobre los artefactos ya emitidos (el `candidate_id` viaja hasta el manifest).~~
+
+> **Corrección del 2026-08-29 — síntoma correcto, causa equivocada.** Todo lo descrito arriba
+> sobre el registro es cierto, pero no era la fricción: `CANDIDATE_REGISTRY` **no tiene ninguna
+> referencia en `validation/` ni en `backtest/`** (verificado por búsqueda), o sea que nunca
+> estuvo en el camino de ejecución. El bloqueador real era que `CandidateB` estaba escrito a mano
+> en tres sitios de la capa 4 (`wfa.py`, `dsr_pbo.py`, `sensitivity.py`), con sus kwargs propios.
+>
+> Eso abarata la decisión D2 en vez de encarecerla: no hacía falta tocar el contrato de capa 2 ni
+> el `candidate_id` que viaja al manifest. Se resolvió con `genesis.strategy.factories`
+> (PR #69, commit `52dcf2c`): un `CandidateFactory` de firma uniforme, **vía paralela** al
+> registro, que el torneo A/B/C sigue usando sin cambios. Un test inyecta y ejecuta un candidato
+> que no está en el registro ni hereda de nada, para probar que la costura sirve de verdad.
 
 ---
 
