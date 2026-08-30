@@ -54,11 +54,20 @@ Regla: ante un síntoma de pulse, **leer las dos** (`mem:entorno-de-desarrollo` 
 del engine; esta tiene el historial del change). Y cuando una memoria dice "sin salida", buscar si
 otra dice lo contrario antes de darla por buena.
 
-## Causa raíz upstream, sin reportar todavía
+## Causa raíz — CORREGIDA el 2026-08-29 (PR #75)
 
-La skill `pulse:review` instruye llamar `request_sdd_transition(target_phase="close")` cuando
-ambos gates son ✅. Eso es lo que rompe: `close_change` es quien debe hacer esa transición, y
-exige fase `review`. Mientras esa skill no se corrija, el bug se reproduce en cada change.
+La skill `pulse:review` instruía llamar `request_sdd_transition(target_phase="close")` cuando
+ambos gates eran ✅. Eso es lo que rompía: `close_change` es quien debe hacer esa transición, y
+exige fase `review`.
+
+**El plugin vive en este repo**, no upstream, así que se corrigió en el origen:
+
+- `.claude/plugins/pulse/skills/review/SKILL.md` — ahora instruye `close_change(slug)` directo
+  desde `review`, con el porqué y la señal de cierre real.
+- `.claude/plugins/pulse/agents/review-agent.md` — misma corrección, más una prohibición
+  explícita de `request_sdd_transition(target_phase="close")`.
+
+Las skills `close` y `orchestrate` ya lo tenían bien; no se tocaron. El bug ya no se reproduce.
 
 Ver `mem:entorno-de-desarrollo` (regla operativa: nunca transicionar a `close`, llamar
 `close_change` directo desde `review`) y `mem:pulse-engine-sin-plugin` (cómo operar el engine
