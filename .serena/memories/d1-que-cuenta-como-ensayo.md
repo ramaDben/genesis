@@ -64,7 +64,8 @@ solo sube**. El crecimiento logarítmico lo hace tolerable (§3.4), pero convier
 
 ## Qué sigue abierto
 
-- **D3** (holdout OOS intocable), la otra decisión de fase 0 del RFC: sigue abierta y **sin issue**.
+- **D3** (holdout OOS intocable), la otra decisión de fase 0 del RFC: **enmarcada en el issue #81**
+  el 2026-08-29, pendiente de decisión humana. Ver `mem:d3-holdout-oos-intocable`.
 - `ledger/trials.jsonl` sigue **vacío**: la decisión desbloquea el cableado, no lo ejecuta.
   Ninguna corrida ha llamado `record_trial_completions` todavía
   (`mem:corrida-institucional-2026-08-us500-primera-e2e-real`).

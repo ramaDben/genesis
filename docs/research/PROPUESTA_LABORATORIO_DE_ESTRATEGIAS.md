@@ -497,9 +497,21 @@ esfuerzo.
 Un período final que no participa de WFA, ni de purged CV, ni de sensibilidad — intocable hasta el
 veredicto definitivo. Es lo único que te dice cuánto de todo lo anterior fue autoengaño.
 
-**Pendiente de verificar**: si el WFA de genesis hoy consume todo el historial disponible o si ya
-existe un holdout estricto. Si no existe, hay que crearlo **antes** de la primera campaña, porque
-un holdout declarado después de haber mirado los datos no es un holdout.
+~~**Pendiente de verificar**~~ — **VERIFICADO el 2026-08-29** (issue #81): **no existe ningún
+holdout**. Cero menciones de `holdout` en `src/`, `scripts/` y `tests/`, y
+`_windowing.py::iter_is_oos_bounds` enumera ventanas mientras entren
+(`while k * step + is_window + oos_window <= n_days`), así que el WFA consume el historial hasta la
+última ventana completa. La cobertura es la misma en las tres etapas que nombra esta regla:
+`run_sensitivity` reusa esa geometría compartida y `run_purged_cv` consume el ledger OOS, no el
+frame crudo.
+
+Queda un residuo al final —los días posteriores al `oos_end` de la última ventana— pero **no es un
+holdout**: es el resto de una división. Nadie lo declaró, su tamaño cambia cada vez que se extiende
+el dataset, y nada impide que la próxima corrida se lo coma.
+
+Sigue en pie lo que esta regla advierte, y ahora con fecha de vencimiento: hay que crearlo **antes**
+de la primera campaña, porque un holdout declarado después de haber mirado los datos no es un
+holdout. **La decisión está enmarcada en el issue #81.**
 
 ---
 
@@ -549,7 +561,7 @@ Ninguna de estas la puede tomar un agente. Están ordenadas por consecuencia.
 |---|---|---|
 | ~~**D1**~~ | ~~**Qué cuenta como un ensayo** (§3.3)~~ — **RESUELTA el 2026-08-29 (#76)**: regla ratificada tal cual; las corridas de diagnóstico cuentan | Definía si el laboratorio es honesto. Era una postura sobre qué significa rigor estadístico en tu proyecto, no un detalle técnico |
 | **D2** | Destino del `CANDIDATE_REGISTRY` por letra (§6.4) | Cambio de contrato de capa 2; el `candidate_id` viaja hasta el manifest |
-| **D3** | ¿Existe ya un holdout OOS intocable? Si no, definirlo antes de la primera campaña (§9 R5) | Un holdout declarado después de mirar los datos no es un holdout |
+| **D3** | ¿Existe ya un holdout OOS intocable? Si no, definirlo antes de la primera campaña (§9 R5). **Verificado: no existe. Enmarcada en el issue #81** | Un holdout declarado después de mirar los datos no es un holdout. Es la única decisión irreversible en una sola dirección: cada corrida previa encarece la respuesta |
 | **D4** | Presupuesto de ensayos: ¿hay un techo declarado? | Fuerza priorización y hace explícito el costo de cada campaña |
 | **D5** | Límites de complejidad del genoma (§6.2) | Determina el tamaño del espacio de búsqueda |
 | **D6** | Qué autores y en qué orden | Elder tiene metodologías compuestas (Triple Screen) mucho más caras de formalizar que Bollinger o MACD |
@@ -563,7 +575,7 @@ Cada fase es candidata a su propio Change del ciclo SDD. **Ninguna está aprobad
 
 | Fase | Qué | Costo relativo | Desbloquea |
 |---|---|---|---|
-| **0** | Resolver D1 y D3 (decisiones, sin código). **D1 resuelta el 2026-08-29 (#76); D3 sigue abierta y sin issue** | Nulo | Todo lo demás |
+| **0** | Resolver D1 y D3 (decisiones, sin código). **D1 resuelta el 2026-08-29 (#76); D3 enmarcada en el #81, pendiente de decisión humana** | Nulo | Todo lo demás |
 | **1** | Primitivas incrementales: SMA, stddev, EMA, ATR + Bollinger y MACD derivados, con property tests forward-only | Bajo | Fases 2+ |
 | **2** | **Dos estrategias canónicas a mano** como `StrategyCandidate` (BB 20/2 mean reversion, MACD 12/26/9 crossover) | Bajo | La primera señal real, por 2 ensayos |
 | **3** | El runner end-to-end que hoy no existe (§1.3) | **Medio-alto** | Cualquier corrida real, incluida la del candidato B |
