@@ -66,7 +66,11 @@ sobre conteo de ticks. Ver `mem:arquitecto-estrategias-y-ledger-ensayos`.
 
 ## Orden recomendado
 
-1. Resolver D1 (issue #76) — decide si cripto suma ensayos.
+1. ~~Resolver D1 (issue #76)~~ — **HECHO el 2026-08-29**: regla ratificada tal cual
+   (`mem:d1-que-cuenta-como-ensayo`). Traducción para cripto: si se **exige** que el candidato pase
+   en índices *y* en cripto, no suma ensayos; si se corre en ambos para ver **dónde** funciona, cada
+   universo suma. La segunda pregunta bloqueante de arriba queda así respondida en su forma general
+   — falta solo declarar cuál de los dos regímenes se elige antes de la primera campaña.
 2. Verificar que exista una firma que fondee cripto; si no, esto es investigación, no torneo.
 3. Change de capa 1: exportador de exchange + marcador de semántica de volumen.
 4. Change de capa 3: costos por nocional y funding.
