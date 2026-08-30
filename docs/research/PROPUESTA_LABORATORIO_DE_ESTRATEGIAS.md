@@ -135,10 +135,32 @@ en `ledger/trials.jsonl` (JSON Lines, versionado en git).
 El ledger sabe **contar** ensayos. No sabe **qué es** un ensayo. Y esa definición es la decisión
 más consecuente de toda la propuesta: determina si el laboratorio es viable o si se autoestrangula.
 
-### 3.3 La regla propuesta **[PROPUESTO]** **[DECISIÓN HUMANA]**
+### 3.3 La regla **[RATIFICADA — 2026-08-29, decisión D1, issue #76]**
 
 > **Cuenta como ensayo toda dimensión sobre la que SELECCIONAS.
 > No cuenta ninguna dimensión sobre la que EXIGES.**
+
+Ratificada **tal cual, sin enmiendas**. El fundamento completo está en el
+[comentario de decisión del #76](https://github.com/ramaDben/genesis/issues/76#issuecomment-5465991537);
+lo esencial es que la regla no es una lista de dimensiones sino un **criterio**, y por eso clasifica
+dimensiones que todavía no existen —mandatos, venues, convenciones de empalme de futuros— sin
+necesidad de volver a legislar. Las enmiendas se descartaron por una razón estructural: casi toda
+enmienda concebible a una regla de conteo reduce el denominador.
+
+**Corolario operativo, decidido junto con la regla:** una corrida de diagnóstico **cuenta igual**
+(opción A del #76). Es sobre-conteo respecto de la regla —una corrida con ventanas reducidas no es
+una dimensión sobre la que seleccionás—, pero va en la dirección segura del §3.5 y es la única
+salida imposible de manipular. La alternativa, excluir lo no normativo, reduce el denominador sin
+dejar rastro de qué se excluyó. Si algún día el listón ata de verdad, la salida es la opción C
+—registrar ambas, marcadas— nunca la exclusión silenciosa.
+
+> **Consecuencia verificada en el código.** `scripts/run_pipeline.py` incluye `"symbols": [symbol]`
+> en `candidate_config` y evalúa un símbolo por invocación, así que cada activo cuenta como un
+> ensayo separado. Cuando se *exige* que el candidato pase en todos, eso sobre-cuenta; pero en
+> **GO-PARCIAL** —que acepta un subconjunto de símbolos, o sea el renglón «activos donde eliges el
+> que funcionó»— es literalmente correcto. Es deliberado: «arreglar» el sobre-conteo del caso
+> conjuntivo rompería el conteo honesto del caso selectivo. La biblioteca, en cambio, sí colapsa un
+> bundle multi-símbolo a un solo ensayo (`compute_trial_id` no incluye `symbol`).
 
 El criterio operativo es la prueba de los grados de libertad del investigador: *¿habrías reportado
 este resultado si hubiera salido bien?* Si la respuesta es sí, es un ensayo.
@@ -525,7 +547,7 @@ Ninguna de estas la puede tomar un agente. Están ordenadas por consecuencia.
 
 | # | Decisión | Por qué es humana |
 |---|---|---|
-| **D1** | **Qué cuenta como un ensayo** (§3.3) | Define si el laboratorio es honesto. Es una postura sobre qué significa rigor estadístico en tu proyecto, no un detalle técnico |
+| ~~**D1**~~ | ~~**Qué cuenta como un ensayo** (§3.3)~~ — **RESUELTA el 2026-08-29 (#76)**: regla ratificada tal cual; las corridas de diagnóstico cuentan | Definía si el laboratorio es honesto. Era una postura sobre qué significa rigor estadístico en tu proyecto, no un detalle técnico |
 | **D2** | Destino del `CANDIDATE_REGISTRY` por letra (§6.4) | Cambio de contrato de capa 2; el `candidate_id` viaja hasta el manifest |
 | **D3** | ¿Existe ya un holdout OOS intocable? Si no, definirlo antes de la primera campaña (§9 R5) | Un holdout declarado después de mirar los datos no es un holdout |
 | **D4** | Presupuesto de ensayos: ¿hay un techo declarado? | Fuerza priorización y hace explícito el costo de cada campaña |
@@ -541,7 +563,7 @@ Cada fase es candidata a su propio Change del ciclo SDD. **Ninguna está aprobad
 
 | Fase | Qué | Costo relativo | Desbloquea |
 |---|---|---|---|
-| **0** | Resolver D1 y D3 (decisiones, sin código) | Nulo | Todo lo demás |
+| **0** | Resolver D1 y D3 (decisiones, sin código). **D1 resuelta el 2026-08-29 (#76); D3 sigue abierta y sin issue** | Nulo | Todo lo demás |
 | **1** | Primitivas incrementales: SMA, stddev, EMA, ATR + Bollinger y MACD derivados, con property tests forward-only | Bajo | Fases 2+ |
 | **2** | **Dos estrategias canónicas a mano** como `StrategyCandidate` (BB 20/2 mean reversion, MACD 12/26/9 crossover) | Bajo | La primera señal real, por 2 ensayos |
 | **3** | El runner end-to-end que hoy no existe (§1.3) | **Medio-alto** | Cualquier corrida real, incluida la del candidato B |

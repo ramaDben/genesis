@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qué cuenta como un ensayo</title>
+<meta name="description" content="La regla del §3.3 del RFC, ratificada el 2026-08-29: por qué exigir no suma ensayos y seleccionar sí, y dónde ocurre el conteo dentro de genesis.">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --color-paper:        #f5f5f5;
+  --color-paper-2:      #ececec;
+  --color-ink:          #2d3142;
+  --color-muted:        #4f5d75;
+  --color-soft:         #7a8399;
+  --color-rule:         rgba(45,49,66,0.12);
+  --color-accent:       #eb6c36;
+  --color-accent-tint:  rgba(235,108,54,0.08);
+  --color-node:         #ffffff;
+  --color-store:        rgba(45,49,66,0.05);
+  --color-input:        rgba(79,93,117,0.10);
+  --color-opt:          rgba(45,49,66,0.02);
+  --color-opt-stroke:   rgba(45,49,66,0.20);
+  --color-zone:         rgba(45,49,66,0.02);
+  --color-zone-stroke:  rgba(45,49,66,0.10);
+  --color-card:         #ffffff;
+  --font-sans:  'Geist', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Instrument Serif', 'Times New Roman', serif;
+  --font-mono:  'Geist Mono', ui-monospace, Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-paper:       #2d3142;
+    --color-paper-2:     #393e53;
+    --color-ink:         #f5f5f5;
+    --color-muted:       #bfc0c0;
+    --color-soft:        #8e98ac;
+    --color-rule:        rgba(245,245,245,0.12);
+    --color-accent:      #f08a59;
+    --color-accent-tint: rgba(240,138,89,0.10);
+    --color-node:        #393e53;
+    --color-store:       rgba(245,245,245,0.06);
+    --color-input:       rgba(191,192,192,0.10);
+    --color-opt:         rgba(245,245,245,0.03);
+    --color-opt-stroke:  rgba(245,245,245,0.20);
+    --color-zone:        rgba(245,245,245,0.03);
+    --color-zone-stroke: rgba(245,245,245,0.10);
+    --color-card:        #393e53;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-paper:       #2d3142;
+  --color-paper-2:     #393e53;
+  --color-ink:         #f5f5f5;
+  --color-muted:       #bfc0c0;
+  --color-soft:        #8e98ac;
+  --color-rule:        rgba(245,245,245,0.12);
+  --color-accent:      #f08a59;
+  --color-accent-tint: rgba(240,138,89,0.10);
+  --color-node:        #393e53;
+  --color-store:       rgba(245,245,245,0.06);
+  --color-input:       rgba(191,192,192,0.10);
+  --color-opt:         rgba(245,245,245,0.03);
+  --color-opt-stroke:  rgba(245,245,245,0.20);
+  --color-zone:        rgba(245,245,245,0.03);
+  --color-zone-stroke: rgba(245,245,245,0.10);
+  --color-card:        #393e53;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.container { max-width: 1040px; margin: 0 auto; padding: 3rem 2rem 5rem; }
+.col { max-width: 66ch; }
+
+.header { margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-rule); }
+.header-eyebrow {
+  font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--color-muted); margin-bottom: 0.75rem;
+}
+h1 {
+  font-family: var(--font-serif); font-size: clamp(2rem, 4vw + 1rem, 2.9rem);
+  font-weight: 400; letter-spacing: -0.02em; line-height: 1.08;
+  text-wrap: balance; margin-bottom: 0.75rem;
+}
+.subtitle { font-size: 1.05rem; line-height: 1.55; color: var(--color-muted); max-width: 56ch; }
+.subtitle strong { color: var(--color-ink); font-weight: 600; }
+
+section { padding: 2.5rem 0; border-bottom: 1px solid var(--color-rule); }
+section:last-of-type { border-bottom: 0; }
+.sec-eyebrow {
+  font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--color-accent); margin-bottom: 0.6rem;
+}
+h2 {
+  font-family: var(--font-serif); font-size: clamp(1.55rem, 3vw, 2rem);
+  font-weight: 400; letter-spacing: -0.015em; line-height: 1.15;
+  text-wrap: balance; max-width: 26ch; margin-bottom: 1.2rem;
+}
+h3 { font-size: 1.02rem; font-weight: 600; margin: 2rem 0 0.7rem; }
+p { margin-bottom: 1.1rem; }
+p:last-child { margin-bottom: 0; }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--color-paper-2); padding: 0.1em 0.34em; border-radius: 4px; }
+ul { margin: 0 0 1.1rem 1.3rem; }
+li { margin-bottom: 0.45rem; }
+li::marker { color: var(--color-soft); }
+
+.aside {
+  font-family: var(--font-serif); font-style: italic;
+  font-size: 1.18rem; line-height: 1.5;
+  border-left: 2px solid var(--color-accent);
+  padding-left: 1.2rem; margin: 1.8rem 0; max-width: 56ch;
+}
+
+figure { margin: 2.2rem 0; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 700px; }
+figcaption {
+  font-size: 0.86rem; line-height: 1.5; color: var(--color-muted);
+  border-top: 1px solid var(--color-rule);
+  padding-top: 0.8rem; margin-top: 0.9rem; max-width: 74ch;
+}
+
+.d-mask    { fill: var(--color-paper); }
+.d-node    { fill: var(--color-node); stroke: var(--color-ink); stroke-width: 1; }
+.d-store   { fill: var(--color-store); stroke: var(--color-muted); stroke-width: 1; }
+.d-input   { fill: var(--color-input); stroke: var(--color-soft); stroke-width: 1; }
+.d-focal   { fill: var(--color-accent-tint); stroke: var(--color-accent); stroke-width: 1.2; }
+.d-opt     { fill: var(--color-opt); stroke: var(--color-opt-stroke); stroke-width: 1; stroke-dasharray: 4 3; }
+.d-zone    { fill: var(--color-zone); stroke: var(--color-zone-stroke); stroke-width: 0.8; }
+.d-conn    { fill: none; stroke: var(--color-muted); stroke-width: 1.2; }
+.d-conn-a  { fill: none; stroke: var(--color-accent); stroke-width: 1.2; }
+.d-conn-d  { fill: none; stroke: var(--color-soft); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.d-hair    { stroke: var(--color-rule); stroke-width: 0.8; }
+.d-name    { font-family: var(--font-sans); font-size: 12px; font-weight: 600; fill: var(--color-ink); }
+.d-name-a  { font-family: var(--font-sans); font-size: 12px; font-weight: 600; fill: var(--color-accent); }
+.d-sub     { font-family: var(--font-mono); font-size: 9px; fill: var(--color-muted); }
+.d-sub-a   { font-family: var(--font-mono); font-size: 9px; fill: var(--color-accent); }
+.d-eyebrow { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.18em; fill: var(--color-soft); }
+.d-arrow   { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; fill: var(--color-soft); }
+.m-muted   { fill: var(--color-muted); }
+.m-accent  { fill: var(--color-accent); }
+
+.tablewrap { overflow-x: auto; margin: 1.7rem 0; border: 1px solid var(--color-rule); border-radius: 6px; background: var(--color-card); }
+table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 540px; }
+th, td { text-align: left; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--color-rule); vertical-align: top; }
+thead th {
+  font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-soft); background: var(--color-paper-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+td.id { font-family: var(--font-mono); font-weight: 600; white-space: nowrap; width: 1%; }
+.mark { font-family: var(--font-mono); font-size: 0.7rem; white-space: nowrap; }
+.mark.hecho { color: var(--color-muted); }
+.mark.tuya  { color: var(--color-accent); }
+
+.cards { display: grid; gap: 1rem; margin: 1.7rem 0; }
+.cards.duo  { grid-template-columns: 1fr 1fr; }
+.cards.trio { grid-template-columns: 1.1fr 1fr 0.9fr; }
+@media (max-width: 760px) { .cards.duo, .cards.trio { grid-template-columns: 1fr; } }
+.card { background: var(--color-card); border: 1px solid var(--color-rule); border-radius: 6px; padding: 1.2rem; }
+.card-eyebrow {
+  font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-soft); margin-bottom: 0.6rem;
+}
+.card-header { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--color-rule); }
+.card-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.card-dot.ink { background: var(--color-ink); }
+.card-dot.muted { background: var(--color-muted); }
+.card-dot.coral { background: var(--color-accent); }
+.card h3 { font-size: 0.95rem; font-weight: 600; margin: 0; }
+.card p { font-size: 0.88rem; line-height: 1.55; color: var(--color-muted); margin-bottom: 0; }
+
+footer {
+  border-top: 1px solid var(--color-rule); margin-top: 3rem; padding-top: 1.5rem;
+  font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.7; color: var(--color-soft);
+}
+footer p { max-width: 76ch; }
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<header class="header">
+  <p class="header-eyebrow">Decisión D1 · ratificada el 2026-08-29 · issue #76</p>
+  <h1>Qué cuenta como un ensayo</h1>
+  <p class="subtitle">
+    <strong>La regla, en una línea:</strong> cuenta como ensayo toda dimensión sobre la que
+    <em>seleccionás</em>; no cuenta ninguna sobre la que <em>exigís</em>. Esta página existe
+    para que esa distinción se resuelva de un vistazo, sobre dimensiones que todavía no existen.
+  </p>
+</header>
+
+<!-- ══════ 01 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">01 — Por qué hay algo que contar</p>
+    <h2>El gate que se relaja solo si nadie lleva la cuenta</h2>
+
+    <p>
+      El DSR —gate G4, y otra vez T1— no juzga un Sharpe contra un umbral fijo. Lo compara contra
+      <em>el mejor resultado que esperarías por puro azar</em> después de probar N configuraciones.
+      Cuanto más probaste, más alto el listón. Ese es el mecanismo que impide que buscar mucho y
+      reportar lo mejor pase por descubrimiento.
+    </p>
+
+    <p>
+      Y por eso <strong>N tiene que ser honesto</strong>. Si el contador sub-cuenta, el gate deja de
+      proteger sin emitir ninguna señal: el veredicto sigue diciendo GO, el manifiesto sigue
+      firmado, y nada indica que el listón estaba más bajo de lo que correspondía. El
+      <code>TrialLedger</code> existe exactamente para eso — llevar la cuenta entre corridas, no
+      solo dentro de una.
+    </p>
+
+    <p class="aside">
+      La pregunta de D1 no era técnica. Era: ¿qué merece ser contado?
+    </p>
+  </div>
+</section>
+
+<!-- ══════ 02 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">02 — El criterio</p>
+    <h2>Exigir y seleccionar no se parecen en nada</h2>
+
+    <p>
+      Las dos cosas se ven iguales desde afuera —corrés el mismo candidato sobre tres activos— y
+      son estadísticamente opuestas. La diferencia no está en lo que hacés, sino en
+      <strong>qué hacés con los resultados</strong>.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 400" role="img" aria-labelledby="f1-title f1-desc">
+      <title id="f1-title">Exigir es una conjunción; seleccionar es un máximo</title>
+      <desc id="f1-desc">Correr un mismo candidato sobre tres activos tiene dos lecturas opuestas. Si se exige que pase en los tres, es una conjunción: hace el resultado más difícil de obtener y no suma ensayos al contador del DSR. Si se elige el activo donde funcionó, es un máximo sobre tres muestras: suma tres ensayos y eleva el listón del DSR.</desc>
+
+      <defs>
+        <marker id="f1-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+        <marker id="f1-arrow-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-accent" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <!-- ── zona izquierda ── -->
+      <rect class="d-zone" x="32" y="56" width="432" height="312" rx="8"/>
+      <rect class="d-mask" x="48" y="60" width="128" height="12" rx="2"/>
+      <text class="d-eyebrow" x="52" y="69">EXIGIR · CONJUNCIÓN</text>
+
+      <path class="d-conn" d="M 184,124 H 204 Q 212,124 212,132 V 152 Q 212,160 220,160 H 232" marker-end="url(#f1-arrow)"/>
+      <path class="d-conn" d="M 184,176 H 232" marker-end="url(#f1-arrow)"/>
+      <path class="d-conn" d="M 184,228 H 204 Q 212,228 212,220 V 200 Q 212,192 220,192 H 232" marker-end="url(#f1-arrow)"/>
+      <path class="d-conn" d="M 320,208 V 272" marker-end="url(#f1-arrow)"/>
+      <rect class="d-mask" x="328" y="232" width="92" height="12" rx="2"/>
+      <text class="d-arrow" x="334" y="241">NO SUMA ENSAYOS</text>
+
+      <rect class="d-node" x="56" y="104" width="128" height="40" rx="6"/>
+      <text class="d-name" x="72" y="128">Índices</text>
+      <rect class="d-node" x="56" y="156" width="128" height="40" rx="6"/>
+      <text class="d-name" x="72" y="180">Cripto</text>
+      <rect class="d-node" x="56" y="208" width="128" height="40" rx="6"/>
+      <text class="d-name" x="72" y="232">Futuros</text>
+
+      <rect class="d-node" x="232" y="144" width="176" height="64" rx="6"/>
+      <text class="d-name" x="248" y="170">Todos deben pasar</text>
+      <text class="d-sub"  x="248" y="186">conjunción · AND</text>
+
+      <rect class="d-node" x="232" y="272" width="176" height="56" rx="6"/>
+      <text class="d-name" x="248" y="296">Cuenta 1 ensayo</text>
+      <text class="d-sub"  x="248" y="312">y es más difícil de pasar</text>
+
+      <!-- ── zona derecha ── -->
+      <rect class="d-zone" x="496" y="56" width="432" height="312" rx="8"/>
+      <rect class="d-mask" x="512" y="60" width="136" height="12" rx="2"/>
+      <text class="d-eyebrow" x="516" y="69">SELECCIONAR · MÁXIMO</text>
+
+      <path class="d-conn" d="M 648,124 H 668 Q 676,124 676,132 V 152 Q 676,160 684,160 H 696" marker-end="url(#f1-arrow)"/>
+      <path class="d-conn" d="M 648,176 H 696" marker-end="url(#f1-arrow)"/>
+      <path class="d-conn" d="M 648,228 H 668 Q 676,228 676,220 V 200 Q 676,192 684,192 H 696" marker-end="url(#f1-arrow)"/>
+      <path class="d-conn-a" d="M 784,208 V 272" marker-end="url(#f1-arrow-a)"/>
+      <rect class="d-mask" x="792" y="232" width="88" height="12" rx="2"/>
+      <text class="d-arrow" x="798" y="241">SUMA 3 ENSAYOS</text>
+
+      <rect class="d-node" x="520" y="104" width="128" height="40" rx="6"/>
+      <text class="d-name" x="536" y="128">Índices</text>
+      <rect class="d-node" x="520" y="156" width="128" height="40" rx="6"/>
+      <text class="d-name" x="536" y="180">Cripto</text>
+      <rect class="d-node" x="520" y="208" width="128" height="40" rx="6"/>
+      <text class="d-name" x="536" y="232">Futuros</text>
+
+      <rect class="d-node" x="696" y="144" width="176" height="64" rx="6"/>
+      <text class="d-name" x="712" y="170">Elegís el que funcionó</text>
+      <text class="d-sub"  x="712" y="186">máximo sobre 3 · MAX</text>
+
+      <rect class="d-focal" x="696" y="272" width="176" height="56" rx="6"/>
+      <text class="d-name-a" x="712" y="296">Cuenta 3 ensayos</text>
+      <text class="d-sub-a"  x="712" y="312">el listón del DSR sube</text>
+    </svg>
+    <figcaption>
+      Mismo trabajo, dos lecturas opuestas. A la izquierda, pedir que pase en los tres activos es
+      una <em>conjunción</em>: cada activo adicional hace el resultado más difícil de conseguir, así
+      que el contador no tiene nada que descontar. A la derecha, quedarse con el activo donde
+      funcionó es un <em>máximo sobre tres muestras</em> — la misma operación que hace el barrido de
+      parámetros, y por eso paga el mismo precio.
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <p>
+      El criterio operativo para distinguirlas no necesita estadística. Es la prueba de los grados
+      de libertad del investigador:
+    </p>
+
+    <p class="aside">
+      ¿Habrías reportado este resultado si hubiera salido bien?
+    </p>
+
+    <p>
+      Si la respuesta es sí, es un ensayo. Da igual que lo hayas llamado robustez, diversificación
+      o exploración.
+    </p>
+
+    <h3>Por qué esta regla y no una lista</h3>
+
+    <p>
+      Podría haberse legislado por enumeración —los parámetros cuentan, los activos no— y habría
+      funcionado hoy. Se rompe mañana: en cuanto entren mandatos, venues o convenciones de empalme
+      de futuros, hay que volver a legislar, y cada revisión es una oportunidad de aflojar.
+    </p>
+
+    <p>
+      El §3.3 no enumera, <strong>clasifica</strong>. Por eso ya resuelve preguntas que todavía no
+      se hicieron: si correr el mismo genoma en cripto <em>y</em> en índices exigiendo ambos, no
+      suma; si es para ver dónde funciona, suma. Ratificarla fue barato porque no es una convención
+      nueva — <code>n_trials_signal_total</code> ya cuenta la grilla interna del WFA y T1 ya suma
+      <code>(n_candidatos − 1)</code>. Ambas son selección. El ledger solo extiende la misma
+      semántica entre corridas.
+    </p>
+  </div>
+</section>
+
+<!-- ══════ 03 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">03 — Dónde ocurre</p>
+    <h2>El conteo pasa en un solo lugar</h2>
+
+    <p>
+      Toda la regla se materializa en un <code>sha256</code>. Lo que entra en ese hash define qué es
+      un ensayo distinto y qué es el mismo ensayo repetido; lo que queda afuera se colapsa. No hay
+      un segundo mecanismo ni una excepción en otra capa.
+    </p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 400" role="img" aria-labelledby="f2-title f2-desc">
+      <title id="f2-title">Dónde se materializa el conteo de ensayos</title>
+      <desc id="f2-desc">La configuración de lo evaluado entra en compute_trial_id, que produce un sha256; el ledger guarda una fila por candidato y símbolo pero deduplica por ese identificador, y el total resultante fija el listón del DSR. Dos de los siete campos de la configuración —symbols y window_config— son los que deciden si dos corridas cuentan como uno o como dos ensayos.</desc>
+
+      <defs>
+        <marker id="f2-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon class="m-muted" points="0 0, 8 3, 0 6"/>
+        </marker>
+      </defs>
+
+      <path class="d-conn" d="M 244,136 H 284" marker-end="url(#f2-arrow)"/>
+      <path class="d-conn" d="M 480,136 H 520" marker-end="url(#f2-arrow)"/>
+      <path class="d-conn" d="M 716,136 H 756" marker-end="url(#f2-arrow)"/>
+      <path class="d-conn-d" d="M 142,168 V 232" marker-end="url(#f2-arrow)"/>
+
+      <rect class="d-node" x="40" y="104" width="204" height="64" rx="6"/>
+      <text class="d-name" x="56" y="130">candidate_config</text>
+      <text class="d-sub"  x="56" y="146">qué se evaluó, completo</text>
+
+      <rect class="d-node" x="284" y="104" width="196" height="64" rx="6"/>
+      <text class="d-name" x="300" y="130">compute_trial_id()</text>
+      <text class="d-sub"  x="300" y="146">sha256 · 4 insumos</text>
+
+      <rect class="d-store" x="520" y="104" width="196" height="64" rx="6"/>
+      <text class="d-name" x="536" y="130">trials.jsonl</text>
+      <text class="d-sub"  x="536" y="146">dedup por trial_id</text>
+
+      <rect class="d-node" x="756" y="104" width="164" height="64" rx="6"/>
+      <text class="d-name" x="772" y="130">Listón del DSR</text>
+      <text class="d-sub"  x="772" y="146">crece con log N</text>
+
+      <rect class="d-zone" x="40" y="232" width="880" height="120" rx="8"/>
+      <rect class="d-mask" x="56" y="236" width="236" height="12" rx="2"/>
+      <text class="d-eyebrow" x="60" y="245">LOS SIETE CAMPOS DE candidate_config</text>
+
+      <rect class="d-node" x="64" y="284" width="112" height="36" rx="6"/>
+      <text class="d-sub" x="120" y="306" text-anchor="middle">candidate_id</text>
+
+      <rect class="d-focal" x="184" y="284" width="112" height="36" rx="6"/>
+      <text class="d-sub-a" x="240" y="306" text-anchor="middle">symbols</text>
+
+      <rect class="d-node" x="304" y="284" width="112" height="36" rx="6"/>
+      <text class="d-sub" x="360" y="306" text-anchor="middle">starting_balance</text>
+
+      <rect class="d-node" x="424" y="284" width="112" height="36" rx="6"/>
+      <text class="d-sub" x="480" y="306" text-anchor="middle">seed</text>
+
+      <rect class="d-focal" x="544" y="284" width="112" height="36" rx="6"/>
+      <text class="d-sub-a" x="600" y="306" text-anchor="middle">window_config</text>
+
+      <rect class="d-node" x="664" y="284" width="112" height="36" rx="6"/>
+      <text class="d-sub" x="720" y="306" text-anchor="middle">grid_config</text>
+
+      <rect class="d-node" x="784" y="284" width="112" height="36" rx="6"/>
+      <text class="d-sub" x="840" y="306" text-anchor="middle">funnel_config</text>
+    </svg>
+    <figcaption>
+      Los dos campos en coral son los que deciden el conteo en la práctica.
+      <code>symbols</code> está dentro de la configuración y el runner evalúa un símbolo por
+      invocación, así que <strong>cada activo produce un identificador distinto</strong>.
+      <code>window_config</code> también está dentro, así que una corrida de diagnóstico con
+      ventanas reducidas <strong>no</strong> se deduplica contra la institucional: cuenta aparte.
+      Los otros cinco campos separan ensayos genuinamente distintos y nunca fueron discutidos.
+    </figcaption>
+  </figure>
+
+  <div class="col">
+    <h3>Las dos consecuencias, verificadas contra el código</h3>
+
+    <div class="cards duo">
+      <div class="card">
+        <div class="card-header"><span class="card-dot muted"></span><h3>La biblioteca colapsa</h3></div>
+        <p>
+          <code>compute_trial_id</code> no incluye <code>symbol</code>. Un bundle con tres símbolos
+          escribe tres filas con el <em>mismo</em> identificador, y el resumen las deduplica: un
+          ensayo. Es exactamente lo que pide el §3.3 para el caso conjuntivo.
+        </p>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-dot coral"></span><h3>El runner separa</h3></div>
+        <p>
+          <code>run_pipeline.py</code> pone <code>"symbols": [symbol]</code> en la configuración y
+          corre un símbolo por invocación. Tres símbolos, tres identificadores, tres ensayos.
+        </p>
+      </div>
+    </div>
+
+    <p>
+      Parecen contradecirse y no lo hacen: <strong>describen los dos regímenes</strong>. Cuando se
+      <em>exige</em> que el candidato pase en todos los símbolos, el runner sobre-cuenta — error
+      barato y en la dirección segura. Cuando el veredicto es <strong>GO-PARCIAL</strong>, que
+      acepta que el candidato pase solo en un subconjunto de símbolos, el runner cuenta
+      <em>exactamente bien</em>: ese veredicto es, textualmente, el renglón «activos donde elegís el
+      que funcionó».
+    </p>
+
+    <p class="aside">
+      «Arreglar» el sobre-conteo del caso conjuntivo rompería el conteo honesto del caso selectivo.
+    </p>
+  </div>
+</section>
+
+<!-- ══════ 04 ══════ -->
+<section>
+  <div class="col">
+    <p class="sec-eyebrow">04 — Lo decidido</p>
+    <h2>Ratificada tal cual, y las corridas de diagnóstico cuentan</h2>
+
+    <p>
+      La segunda mitad de D1 no estaba en el RFC: la destapó el uso real del runner. Una corrida con
+      ventanas reducidas para depurar no es una dimensión sobre la que seleccionás —no la
+      reportarías— así que registrarla infla <code>n_trials</code> y endurece el gate sin
+      justificación. Pero <em>no</em> registrarla abre la puerta a que «diagnóstico» se vuelva la
+      excusa para no contar los ensayos incómodos.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th></th><th>Salida</th><th>Qué implica</th><th>Veredicto</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="id">A</td>
+            <td>Todo cuenta</td>
+            <td>Cero criterio que administrar; imposible de manipular</td>
+            <td><span class="mark tuya">ELEGIDA</span></td>
+          </tr>
+          <tr>
+            <td class="id">B</td>
+            <td>Solo corridas normativas</td>
+            <td>Reduce el denominador sin dejar rastro de qué se excluyó</td>
+            <td><span class="mark hecho">descartada</span></td>
+          </tr>
+          <tr>
+            <td class="id">C</td>
+            <td>Ambas, marcadas</td>
+            <td>B con auditoría; cuesta un ciclo SDD de capa 4</td>
+            <td><span class="mark hecho">diferida</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <strong>La aritmética dice que A es barata.</strong> Multiplicar los ensayos por diez sube el
+      listón un 33 %. Para que la depuración cueste eso, las corridas de diagnóstico tendrían que
+      ser nueve veces las institucionales — y aun así, la única corrida real hasta hoy dio
+      <code>DSR = 0.0019</code> contra un umbral de 0.95. Se falla por un factor de ~500. Ningún
+      veredicto habría cambiado.
+    </p>
+
+    <p>
+      <strong>Pero el argumento decisivo no es aritmético.</strong> Con un arquitecto lanzando
+      corridas en volumen, una categoría que no cuenta se convierte, con total buena fe, en el cajón
+      donde terminan los ensayos que molestan. A es la única salida que no se puede manipular, y esa
+      propiedad vale más que un 33 % teórico.
+    </p>
+
+    <h3>Cuándo volver sobre esto</h3>
+
+    <p>
+      Solo si un candidato falla G4 <strong>y</strong> el ledger muestra que los registros de
+      diagnóstico son la causa. En ese caso la salida es <strong>C</strong>, nunca B: para entonces
+      hará falta el rastro de qué se excluyó, que es justo lo que B no deja.
+    </p>
+
+    <h3>Lo que se aceptó con los ojos abiertos</h3>
+
+    <p>
+      <code>dataset_hash_by_symbol</code> participa del identificador, así que extender el dataset
+      genera ensayos nuevos y los viejos siguen contando para siempre. El ledger no olvida y no
+      tiene reset sancionado: <strong>el listón solo sube</strong>. El crecimiento logarítmico lo
+      hace tolerable, pero convierte a <strong>D4</strong> —presupuesto declarado de ensayos— en el
+      único freno que existe.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <p>
+    Decisión D1 del RFC del Laboratorio (<code>docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md</code>
+    §3.3), ratificada el 2026-08-29 en el issue #76. Las dos consecuencias de la sección 03 se
+    verificaron contra <code>src/genesis/validation/trial_ledger.py</code> y
+    <code>scripts/run_pipeline.py</code> en el commit de esta rama. La otra decisión de fase 0 del
+    RFC, <strong>D3</strong> —si existe un holdout OOS intocable— sigue abierta y sin issue.
+  </p>
+</footer>
+
+</div>
+</body>
+</html>

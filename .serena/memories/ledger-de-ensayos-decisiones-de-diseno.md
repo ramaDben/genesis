@@ -67,6 +67,13 @@ resuelto con este Change).
 4. `recorded_at_utc` es el único campo no determinista del registro: inyectable y **fuera** de
    `compute_trial_id` (si participara, la idempotencia por `trial_id` sería imposible).
 
+## Qué se escribe en el ledger — resuelto el 2026-08-29
+
+Este Change dejó construido el **cómo** se cuenta, no el **qué**. Eso era la decisión D1, ratificada
+el 2026-08-29 (issue #76): ver `mem:d1-que-cuenta-como-ensayo`, que registra además las dos
+consecuencias verificadas del conteo por símbolo —una en esta biblioteca, otra en el runner— y por
+qué ninguna de las dos debe «arreglarse».
+
 ## Invariante nueva que el diseño se autoimpone
 
 > El ledger solo puede **endurecer** un gate, nunca relajarlo: para todo `extra >= 0`,
