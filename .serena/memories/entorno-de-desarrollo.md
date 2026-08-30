@@ -79,8 +79,15 @@ otro campo) y recién ahí llamar `close_change(slug)`, que sí completó el cie
 
 Regla operativa: en la fase review, **no** llamar `request_sdd_transition(target_phase=
 "close")` cuando ambos gates son ✅ — llamar directamente `close_change(slug)` desde fase
-`review` (sin pasar por `request_sdd_transition`). Ese texto de la skill `pulse:review` parece
-un bug/desactualización pendiente de reportar al mantenedor del plugin.
+`review` (sin pasar por `request_sdd_transition`).
+
+**Corregido en el origen el 2026-08-29 (PR #75).** El plugin vive en este repo, así que el
+texto culpable se arregló en `.claude/plugins/pulse/skills/review/SKILL.md` y en
+`agents/review-agent.md`: ahora instruyen `close_change(slug)` directo y prohíben
+explícitamente la transición manual a `close`. Volvió a pasar en el change #55 (2026-08-11),
+y esa vez la guarda G2 dejó el flujo SDD entero detenido 18 días — ver
+`mem:change-55-tick-size-apply`. Señal de cierre real: `HeuristicsExtracted` en el audit log,
+el change movido a `archive/`, y `list_active_changes` en `[]`.
 
 ## Desde una sesión de Claude Code que corre en Windows
 
