@@ -51,6 +51,12 @@ El ciclo de vida lo orquesta el MCP `pulse-engine` (Docker, workspace montado en
 `/pulse:explore` → `/pulse:propose` → `/pulse:specify` → `/pulse:design` → `/pulse:break-to-tasks` → `/pulse:apply` → `/pulse:review` → `/pulse:close`
 
 - **Gate humano obligatorio**: solo un humano llama `approve_design` (en design o break-to-tasks). Nunca auto-aprobar.
+  **Debilidad conocida y aceptada a sabiendas (2026-09-05):** en la práctica se aprobó sin leer,
+  porque las decisiones llegan en un vocabulario que no es el del dueño del proyecto. La salida
+  diseñada —separar política de adjudicación, con un adjudicador externo y un chequeo mecánico—
+  está **reservada** en el hito *Gobernanza y política de decisión* (issues #86, #87). Se asume
+  la debilidad mientras no haya capital real ni un candidato cerca de un GO. Ver
+  `.serena/memories/reserva-de-gobernanza-2026-09.md`.
 - Estado del proyecto en GitHub: issues/labels codifican las fases (`state:1-explore` … `state:8-close`).
 - Cadena de issues del spec: A (spec definitivo, bloquea al resto) → B (data) → C (contrato+Inspector) → {D/E paralelos, G} → H → I → J → K.
 

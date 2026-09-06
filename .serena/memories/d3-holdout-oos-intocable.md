@@ -1,4 +1,5 @@
-*(2026-08-29 — hallazgo verificado + decisión enmarcada, NO tomada)*
+*(2026-09-05 — hallazgo verificado, decisión NO tomada, issue **reservado**. La sección final
+es lo que llegó después de enmarcarlo y es lo que más pesa.)*
 
 # D3: el holdout OOS intocable — no existe ninguno
 
@@ -48,3 +49,55 @@ Si sale B o C, no hace falta tocar `_windowing.py`: basta recortar el rango ante
 WFA. Lo que sí hace falta es que **el borde del holdout viaje en el artefacto** como una clave de
 identidad más, junto a los hashes de dataset y perfiles — un holdout que no queda en el manifiesto
 no es auditable.
+
+
+## Lo que llegó después de abrir el #81 — 2026-09-05
+
+### El encuadre de las tres decisiones estaba mal planteado
+
+Una revisión externa (Grok, con briefing a ciegas) mostró que la decisión 1 —«¿se reserva, y
+cuánto?»— trata el asunto **como si todavía existiera un tramo terminal virgen cuya geometría se
+pueda elegir**. No existe. La serie 2023-09 a 2026-08 ya se usó para corregir el redondeo de lote,
+ajustar el embudo pre-trade y correr diagnósticos. Un holdout **se declara antes de mirar**;
+declararlo después es un corte póstumo sobre datos ya vistos, no una prueba independiente.
+
+Dato que refuerza el punto y que la revisión externa no tenía: **la corrida de diagnóstico RI-E6
+usó IS=45 / OOS=10**, geometría que barre casi toda la serie incluido el residuo terminal.
+
+### La cuarta opción, que no estaba en el issue
+
+**No reservar en el histórico; precomprometer que el holdout es futuro** — paper o live, barras que
+todavía no existen — congelado por protocolo cuando (si) un candidato pase el resto de los gates,
+con tamaño y reglas de muerte escritas antes de ver una barra. El argumento de irreversibilidad
+**se sostiene hacia el futuro y no hacia el pasado**.
+
+### El argumento que decide, y viene de B1 de la entrevista
+
+Las hipótesis que se van a probar **las formó el operador mirando estos mismos gráficos durante
+años**. En ese sentido más profundo, **todo el dataset ya está visto**: ningún holdout recortado de
+esta serie es virgen respecto de la hipótesis que va a evaluar. Esto no lo cubre ninguna de las tres
+opciones del issue y es, hasta hoy, la razón más fuerte a favor del holdout futuro.
+
+### Las tres condiciones falsables que harían cambiar de posición
+
+1. Un commit con fecha **anterior** a cualquier corrida que congele un `t*` y prohíba métricas y
+   diagnósticos después de ese punto. Si ese artefacto existe, se retracta «no hay holdout».
+2. Una corrida con **≥ 8 ventanas OOS y ≥ 600 operaciones** después de sacar seis meses, de modo que
+   perder un tramo no deje G1 al 8 % de margen.
+3. Un candidato con **DSR ≥ 0.80**, WFE a ≤ 0.05 del umbral y PF a ≤ 0.10 del umbral, *antes* de
+   tocar el tramo congelado. Con DSR = 0.0019 un segundo test no tiene trabajo que hacer.
+
+Ninguna se cumple hoy.
+
+### Modo de falla de no reservar, declarado por adelantado
+
+El jardín de senderos que se bifurcan sobre las mismas cinco ventanas hasta que algo pase los 18
+gates. Mitigación (no es un holdout retrospectivo): congelar ya geometría y umbrales, registrar cada
+candidato e iteración de pipeline en el `n_trials` del DSR, y que el primer tramo live/paper después
+de un GO **sea** el holdout.
+
+### Estado
+
+El issue #81 queda **reservado** junto con el resto del trabajo de gobernanza. La decisión sigue sin
+tomarse y sigue sin ser urgente **mientras no haya un candidato cerca de los umbrales** — que es
+justamente la condición 3 de arriba. Ver `mem:reserva-de-gobernanza-2026-09`.

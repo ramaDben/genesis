@@ -28,7 +28,13 @@ regla, pero va en la dirección segura del §3.5 y es la única salida imposible
 - **B se descartó porque reduce el denominador sin dejar rastro** de qué se excluyó, y porque con
   un arquitecto corriendo en volumen, «diagnóstico» se vuelve el cajón de los ensayos incómodos.
   Aritméticamente A cuesta poco: ×10 ensayos sube el listón 33 %, y la única corrida real dio
-  `DSR = 0.0019` contra 0.95 — se falla por ~500×, ningún veredicto habría cambiado.
+  `DSR = 0.0019` contra 0.95 — ningún veredicto habría cambiado.
+
+  **Corrección (2026-09-05).** Una redacción anterior decía «se falla por ~500x». Es un error
+  de categoría: `_dsr.py` devuelve `_standard_normal_cdf(...)`, o sea el DSR **es una
+  probabilidad**, no una magnitud. 0.19 % contra 95 % no es un cociente de 500 — es casi
+  certeza de que no hay edge descontada la búsqueda. Lo detectó una revisión externa, no la
+  revisión interna.
 
 **Criterio de revisión declarado:** volver sobre la decisión 2 solo si un candidato falla G4 **y**
 el ledger muestra que los registros de diagnóstico son la causa. En ese caso se va a **C**
