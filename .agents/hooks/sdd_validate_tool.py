@@ -17,7 +17,7 @@ Exit 0 always (blocking is via ``reject`` in the response body).
 from __future__ import annotations
 
 import argparse
-import contextlib
+import re
 import sys
 from pathlib import Path, PurePath
 
@@ -47,6 +47,29 @@ _PHASE_WRITE_GLOBS: dict[str, list[str]] = {
     "close": [],
 }
 
+# Rutas escribibles en CUALQUIER fase — la "vía rápida" de CLAUDE.md.
+#
+# Sin esto el guardián es inutilizable: la allowlist por fase es estricta, y en
+# `explore` sólo pasa `.pulse/changes/*/idea.md`.  Encenderlo tal cual bloquearía
+# escribir documentación, runners y memorias, que CLAUDE.md declara
+# explícitamente fuera del ciclo SDD porque no alteran comportamiento ni
+# contrato bajo `src/genesis/**`.
+#
+# DEBILIDAD ACEPTADA A SABIENDAS (2026-09-05): `.agents/**` y `.claude/**` están
+# acá dentro, así que el agente puede editar los hooks que lo restringen — un
+# control capaz de desactivarse a sí mismo.  Se acepta porque la alternativa
+# (bloquearlos siempre) haría imposible mantenerlos, y porque el historial de git
+# deja el rastro.  Cuando exista el adjudicador externo del #87, esta es la
+# primera excepción que debería escalar.
+_ALWAYS_ALLOWED_GLOBS: list[str] = [
+    "docs/**",
+    "scripts/**",
+    ".serena/memories/**",
+    ".agents/**",
+    ".claude/**",
+    "*.md",
+]
+
 # Canonical write-tool names (normalized)
 _WRITE_TOOLS: frozenset[str] = frozenset({"Write", "Edit", "MultiEdit", "ApplyPatch"})
 
@@ -66,6 +89,15 @@ _TOOL_NAME_MAP: dict[str, str] = {
     "replace_symbol_body": "Edit",
     "insert_after_symbol": "Edit",
     "insert_before_symbol": "Edit",
+    # Serena — el resto de sus herramientas de escritura.  Sin estas entradas
+    # serena era un bypass completo del guardián: `replace_symbol_body` sobre
+    # `src/genesis/**` pasaba sin bloqueo (verificado el 2026-09-05).
+    "replace_lines": "Edit",
+    "delete_lines": "Edit",
+    "insert_at_line": "Edit",
+    "replace_in_files": "MultiEdit",
+    "rename_symbol": "MultiEdit",
+    "safe_delete_symbol": "MultiEdit",
 }
 
 
@@ -103,9 +135,15 @@ def _path_allowed(path: PurePath, allowed_globs: list[str]) -> bool:
 
 
 def _extract_paths(args: dict) -> list[str]:
-    """Extract target paths from tool arguments (simplified)."""
+    """Extract target paths from tool arguments (simplified).
+
+    ``relative_path`` es la clave que usan las herramientas de escritura de
+    serena (``replace_symbol_body``, ``insert_after_symbol``, …).  Sin ella el
+    guardián no encuentra ruta y cae en la rama fail-closed, que bloquea por el
+    motivo equivocado.
+    """
     # Single-file tools
-    for key in ("TargetFile", "file_path", "path", "AbsolutePath"):
+    for key in ("TargetFile", "file_path", "path", "relative_path", "AbsolutePath"):
         val = args.get(key)
         if val and isinstance(val, str):
             return [val]
@@ -127,13 +165,38 @@ def _extract_paths(args: dict) -> list[str]:
     return []
 
 
-def _normalize_path(raw: str, workspace_root: str | None) -> PurePath:
-    """Normalize an absolute path to workspace-relative if possible."""
-    path = PurePath(raw)
-    if path.is_absolute() and workspace_root:
-        with contextlib.suppress(ValueError):
-            path = path.relative_to(workspace_root)
-    return path
+def _normalize_path(raw: str, workspace_root: str | None) -> PurePath | None:
+    """Devuelve la ruta relativa al workspace, o ``None`` si cae fuera de él.
+
+    Traduce las rutas que envía una sesión de Claude Code corriendo en Windows
+    contra el repo de WSL: llegan en forma UNC
+    (``\\\\wsl.localhost\\Ubuntu\\home\\u\\genesis\\docs\\x.md``) mientras que el
+    hook se ejecuta *dentro* de WSL, donde la raíz es ``/home/u/genesis``.  Sin
+    la traducción, ``relative_to`` falla, la ruta queda absoluta y
+    ``_path_allowed`` la rechaza: el guardián bloquearía **toda** escritura
+    (verificado el 2026-09-05).
+
+    ``None`` significa "fuera del repositorio" y el llamador debe **permitir**:
+    el ciclo SDD gobierna este workspace, no el resto del disco.  Es el caso del
+    directorio de scratchpad de la sesión, que vive bajo ``C:\\Users\\...`` y es
+    justamente donde se deben escribir los archivos temporales.
+    """
+    texto = raw.replace("\\", "/")
+    # //wsl.localhost/Ubuntu/home/u/genesis/...  ->  /home/u/genesis/...
+    texto = re.sub(r"^/{2}wsl(?:\.localhost|\$)/[^/]+", "", texto)
+
+    # Ruta de Windows con letra de unidad (C:/Users/...): fuera del repo de WSL
+    # por construcción.  PurePosixPath no la reconoce como absoluta, así que si
+    # no se detecta acá se colaría como si fuera relativa.
+    if re.match(r"^[A-Za-z]:/", texto):
+        return None
+
+    path = PurePath(texto)
+    if not path.is_absolute():
+        return path
+    if workspace_root and path.is_relative_to(workspace_root):
+        return path.relative_to(workspace_root)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +209,16 @@ def _allow() -> dict:
 
 
 def _block(client: str, reason: str) -> dict:
-    if client == "codex":
+    """Construye la respuesta de bloqueo en el dialecto del cliente.
+
+    Claude Code y Codex comparten forma: ``permissionDecision: "deny"`` dentro de
+    ``hookSpecificOutput``.  Gemini/Antigravity usan ``reject``/``rejectReason``.
+
+    Hasta el 2026-09-05 la rama de Claude emitía el dialecto de Gemini, así que
+    **el bloqueo se ignoraba en silencio** y la escritura procedía igual.  Era el
+    único cliente cuya rama nunca se había ejercitado.
+    """
+    if client in ("claude", "codex"):
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -154,11 +226,8 @@ def _block(client: str, reason: str) -> dict:
                 "permissionDecisionReason": reason,
             }
         }
-    # gemini / claude
-    out: dict = {"reject": True, "rejectReason": reason}
-    if client == "claude":
-        out["hookEventName"] = "PreToolUse"
-    return {"hookSpecificOutput": out}
+    # gemini / antigravity
+    return {"hookSpecificOutput": {"reject": True, "rejectReason": reason}}
 
 
 # ---------------------------------------------------------------------------
@@ -180,19 +249,28 @@ def main() -> int:
         emit_response(_allow())
         return 0
 
-    # Normalize to canonical write-tool name
-    canonical = _TOOL_NAME_MAP.get(name, name)
+    # Normalize to canonical write-tool name.
+    #
+    # Las herramientas de un server MCP llegan como `mcp__<server>__<tool>`
+    # (p. ej. `mcp__serena__replace_symbol_body`), así que hay que quitar el
+    # prefijo antes de consultar el mapa o toda escritura vía MCP se cuela.
+    bare = re.sub(r"^mcp__[^_]+(?:_[^_]+)*__", "", name)
+    canonical = _TOOL_NAME_MAP.get(bare, _TOOL_NAME_MAP.get(name, name))
     if canonical not in _WRITE_TOOLS:
         log(f"sdd-validate: {name!r} is not a write tool, allowing")
         emit_response(_allow())
         return 0
 
-    # Read current SDD phase
+    # Read current SDD phase.
+    #
+    # Fase desconocida ⇒ fail-CLOSED (cambiado el 2026-09-05; antes permitía).
+    # Motivo medido: desde una sesión en Windows sobre UNC, leer
+    # `.pulse/state.sqlite` devuelve "database is locked" y la fase es SIEMPRE
+    # "unknown".  Con la rama vieja el guardián permitía todo, siempre, sin
+    # avisar — un control que se apaga solo justo donde más falta hace.
+    # `_ALWAYS_ALLOWED_GLOBS` sigue pasando, así que la vía rápida nunca se
+    # bloquea por este camino y la sesión no queda inutilizable.
     phase = read_phase()
-    if phase == "unknown":
-        log("sdd-validate: phase unknown, allowing (degraded)")
-        emit_response(_allow())
-        return 0
 
     # Extract paths from tool arguments
     paths = _extract_paths(t_args)
@@ -206,9 +284,10 @@ def main() -> int:
         emit_response(_block(args.client, reason))
         return 0
 
-    # Resolve allowed globs for the current phase
+    # Resolve allowed globs: la vía rápida siempre, más lo que abra la fase.
     active_slug = read_active_change_slug()
-    allowed = _concrete_globs(phase, active_slug)
+    phase_globs = _concrete_globs(phase, active_slug)
+    allowed = [*_ALWAYS_ALLOWED_GLOBS, *phase_globs]
 
     # Import project_root for path normalization
     from pulse_hooks_lib.runtime import project_root
@@ -218,11 +297,25 @@ def main() -> int:
     # Check every path against allowed globs
     for raw_path in paths:
         norm = _normalize_path(raw_path, ws_root)
+        if norm is None:
+            # Fuera del repositorio (scratchpad de la sesión, /tmp, etc.).
+            # El ciclo SDD gobierna este workspace, no el resto del disco.
+            log(f"sdd-validate: '{raw_path}' cae fuera del workspace, PERMITIDO")
+            continue
         if not _path_allowed(norm, allowed):
+            if phase == "unknown":
+                detalle = (
+                    "no se pudo determinar la fase del ciclo SDD "
+                    "(¿`.pulse/state.sqlite` ilegible?), así que sólo se permite "
+                    "la vía rápida"
+                )
+            else:
+                detalle = f"no está permitido durante la fase '{phase}'"
             reason = (
-                f"BLOQUEADO: {name} en '{raw_path}' no está permitido "
-                f"durante la fase '{phase}'. "
-                f"Rutas permitidas: {allowed or ['ninguna']}."
+                f"BLOQUEADO: {name} en '{raw_path}' {detalle}. "
+                f"Rutas permitidas: {allowed}. "
+                "Un cambio bajo `src/genesis/**` exige un change activo en fase "
+                "`apply` — pasa por el ciclo SDD (ver CLAUDE.md)."
             )
             log(f"sdd-validate: {reason}")
             emit_response(_block(args.client, reason))

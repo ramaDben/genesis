@@ -1,5 +1,6 @@
 {
-  "_comentario": "Config sugerida adaptada de Bajmein/pulse. Para activarla: revisa los hooks y permisos, y renombra este archivo a settings.json (decisión manual tuya). El hook UserPromptSubmit inyecta la fase SDD actual leyendo .pulse/ vía .agents/hooks/sdd_context_injector.py.",
+  "_comentario": "OBSOLETO — NO renombrar a settings.json (2026-09-05). Los hooks ya están activos en .claude/settings.json, despachados por .agents/hooks/run_hook.sh. Este archivo se conserva sólo como referencia de permisos sugeridos.",
+  "_por_que_no_usarlo": "Los comandos de hook de acá invocan 'uv run .agents/hooks/...' directamente. Medido el 2026-09-05: desde una sesión de Claude Code en Windows eso corre sobre UNC, leer .pulse/state.sqlite devuelve 'database is locked', el hook reporta fase 'unknown' y emite contexto vacío SIN fallar — un control que miente en silencio. Hay que pasar por run_hook.sh. Además los matchers de grep/find/sed/awk suponen rg/fd instalados; se instalaron en el WSL el 2026-09-05, pero no los damos por hechos en otras máquinas.",
   "enableAllProjectMcpServers": true,
   "permissions": {
     "defaultMode": "acceptEdits",
