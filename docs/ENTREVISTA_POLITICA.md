@@ -1,7 +1,11 @@
 # Entrevista de política de decisión
 
-**Estado: pendiente de responder.** Este documento es el insumo de `POLITICA.md`, que todavía
-no existe.
+**Estado: bloque A y pregunta B1 respondidos el 2026-09-05. B2–G pendientes.** Este documento es
+el insumo de `POLITICA.md`, que todavía no existe.
+
+**Reservado.** El trabajo de gobernanza queda en pausa deliberada hasta una fase más madura del
+proyecto — ver el hito *Gobernanza y política de decisión* en GitHub. Las respuestas ya dadas
+quedan escritas acá para que la entrevista se reanude donde quedó y no desde cero.
 
 ## Para qué es esto
 
@@ -43,14 +47,56 @@ funcionara perfectamente, ¿qué estarías haciendo con él?
 
 *Gobierna:* qué cambios son «alcance» y cuáles son deriva.
 
+> **Respuesta (2026-09-05).** El alcance se movió tres veces en veinte minutos durante la
+> entrevista, así que quedó escrito separando lo fijo de lo móvil:
+>
+> - **Propósito (fijo):** producir y validar modelos de trading con evidencia suficiente para
+>   sustentar decisiones de terceros.
+> - **Destino (declarado):** evaluador agnóstico al mandato y al universo — CFDs, futuros, cripto.
+> - **Fase actual:** prop firms, intradía, CFDs e índices. Lo demás es destino, no requisito.
+>
+> **Y el marco real, que apareció recién acá:** el objetivo declarado es entrar al **RPSF de la
+> CMF** y ofrecer asesoría de inversión basada en un modelo probado; si sale algo robusto, buscar
+> inversionistas y no solo prop firms. Genesis deja de ser un proyecto de trading y pasa a ser
+> **la base de evidencia de un negocio regulado**. Los gates dejan de ser gestión de riesgo
+> personal y pasan a sustentar afirmaciones hechas a clientes y a un regulador; la procedencia deja
+> de ser elegancia de ingeniería y pasa a ser rastro de auditoría.
+
 **A2.** ¿Qué NO es este proyecto? Nombrá al menos una cosa que alguien podría proponer con buen
 argumento y que igual querés rechazar.
 
 *Gobierna:* el criterio para rechazar propuestas bien argumentadas — el caso más difícil.
 
+> **Respuesta (2026-09-05).** «No es una máquina de hacer perder dinero, no crea estrategias por
+> suerte ni estrategias que hagan perder dinero. No es una casa de apuestas.»
+>
+> Cláusula concreta que acepta rechazar aunque venga bien argumentada: **desplegar capital real sin
+> haber pasado los gates.** Traducción operativa para `POLITICA.md`:
+>
+> 1. No se despliega nada que no haya pasado los gates.
+> 2. No se afloja un gate para que un candidato pase.
+> 3. El conteo de ensayos no se relaja — es la versión mecánica de «no por suerte», y coincide
+>    con la decisión D1 ya ratificada.
+> 4. No se afirma más de lo que el artefacto sustenta.
+>
+> **Derivación que restringe algo grande:** el arquitecto (búsqueda automatizada de candidatos) es
+> literalmente una máquina de probar muchas cosas; lo único que lo separa de una casa de apuestas
+> es la contabilidad honesta de ensayos. Con A2 escrita, **el arquitecto queda condicionado a que
+> el ledger de ensayos funcione.**
+
 **A3.** ¿Qué te haría abandonarlo? Un resultado, una fecha, una cifra, un cansancio.
 
 *Gobierna:* cuándo el adjudicador debe avisarte que estás cerca de esa condición, en vez de seguir.
+
+> **Respuesta (2026-09-05).** Tres meses, con la pregunta reformulada y aceptada: a los tres meses
+> el control **no** es «¿encontramos edge?» sino **«¿aprendimos si acá hay edge que encontrar?»**.
+>
+> Razón: la IA acelera implementar y probar, pero no acelera cuántos datos existen ni si hay edge
+> en ellos — y **sí acelera el agotamiento del presupuesto estadístico**. Cincuenta candidatos en
+> una semana llevan el denominador del DSR a cincuenta en una semana.
+>
+> Regla que sale de ahí: **ambición en construir es gratis; ambición en buscar es cara y no
+> reembolsable.**
 
 ---
 
@@ -60,10 +106,53 @@ argumento y que igual querés rechazar.
 
 *Gobierna:* si las decisiones de despliegue son hipotéticas o reales.
 
+> **Respuesta (2026-09-05).** No hay capital comprometido. Lo invertido es tiempo y muchas sesiones
+> de trabajo. Y el objetivo declarado va más allá de la pregunta: **verificar si lo estudiado
+> mirando velas japonesas, estructura de precio y ahora regímenes se puede validar o invalidar.**
+>
+> Eso reencuadra el proyecto por tercera vez, y conviene que quede escrito: **el primer trabajo de
+> genesis no es buscar edge genéricamente, es arbitrar las hipótesis discrecionales ya acumuladas
+> por el operador.** Tres consecuencias:
+>
+> 1. **Es el caso más barato que existe.** Bajo D1, una hipótesis formada antes de tocar los datos
+>    y especificada por adelantado es **un ensayo con cero grados de libertad** — la misma categoría
+>    que una regla canónica con parámetros publicados. El objetivo real resulta ser lo
+>    estadísticamente más barato, no lo más caro.
+> 2. **Corrige el hito de tres meses.** El RFC recomienda arrancar por lo canónico; para este
+>    operador eso es menos informativo. Que Bollinger muera con costos reales no dice nada sobre si
+>    su lectura de estructura es válida. La ruta correcta es probar **sus** hipótesis, que cuestan
+>    lo mismo en ensayos y responden la pregunta que de verdad tiene.
+> 3. **La trampa, y es seria.** Las hipótesis se formaron mirando estos mismos gráficos. Testearlas
+>    sobre el mismo período no es fuera de muestra: es testear sobre los datos que las generaron.
+>    Es la versión humana del problema de anticipación que la capa 3 previene por construcción.
+>    **Esto refuerza la posición sobre D3** por una razón que la discusión no tenía: no existe
+>    ningún holdout recortable de esta serie que sea virgen respecto de la hipótesis, porque la
+>    serie completa ya fue mirada por una persona durante años. El holdout que vale es futuro.
+>
+> Acción que se deriva y **no cuesta nada**: pre-registrar las hipótesis por escrito —condición,
+> instrumento, entrada, salida, qué se espera— **antes** de correr nada. Escritas después de la
+> primera corrida ya no son un ensayo limpio, son una racionalización, y eso no se puede demostrar
+> lo contrario ni ante un cliente ni ante la CMF. La regla ya existe: RFC §9, regla 2.
+>
+> **Sobre los regímenes, un aviso concreto:** cada definición de régimen que se pruebe y descarte
+> es un ensayo bajo D1. Tres formas de definir régimen son tres ensayos, no uno.
+>
+> **Y una corrección a A3:** «no es opción retroceder sin antes probar las estrategias» es querer
+> una respuesta antes de irse, que es legítimo — pero el tiempo invertido no es evidencia de que
+> algo funcione. Se escribe así: **la condición de salida es epistémica, no temporal.** Se para
+> cuando hay respuesta, no cuando se acaba la paciencia. Los tres meses son la expectativa, no el
+> criterio.
+
 **B2.** Si mañana un candidato diera GO, ¿cuánto capital entraría? ¿Es plata que podés perder
 entera sin que cambie tu vida, o no?
 
 *Gobierna:* cuánto rigor es proporcionado. La respuesta cambia D3 y varias más.
+
+> **Pendiente — y es la pregunta que sostiene el bloque.** Con el RPSF sobre la mesa hay ahora tres
+> tipos de plata posibles: la propia, la de la prop firm y la de un inversionista o cliente de
+> asesoría. Si el estándar es más exigente cuando la plata es ajena, **el rigor pasa a ser un
+> parámetro del mandato** y no una constante del pipeline — un cambio de arquitectura, no de
+> política. Conviene fijarla ahora, mientras no hay presión.
 
 **B3.** ¿Cuál es la pérdida máxima que tolerás antes de detener todo? No la que esperás — la que
 te haría parar.
@@ -185,3 +274,22 @@ tiempo?
    decisiones y el chequeo mecánico que falla si no hay revisión registrada.
 
 Ver la memoria `politica-de-decision-y-compuerta-humana`.
+
+---
+
+## Estado al reservar — 2026-09-05
+
+Lo respondido: **A1, A2, A3, B1**. Lo pendiente: **B2, B3, B4** y los bloques **C a G**.
+
+El trabajo queda en pausa por decisión explícita, no por bloqueo. Lo que reanuda la entrevista es
+cualquiera de estas tres cosas:
+
+1. **Aparece capital real**, propio o ajeno — B2 y B3 dejan de ser hipotéticas.
+2. **Un candidato se acerca a un GO** — ahí la compuerta humana tiene por primera vez algo que
+   proteger, y aprobar sin leer pasa a tener consecuencia.
+3. **Se decide construir el arquitecto** — A2 lo dejó condicionado al ledger de ensayos, y esa
+   condición es una cláusula de política que todavía no está escrita.
+
+Mientras tanto rige la regla vieja: **solo un humano llama `approve_design`**, con la debilidad ya
+diagnosticada de que en la práctica se aprobaba sin leer. Reservar esto significa aceptar esa
+debilidad a sabiendas mientras no haya capital ni candidatos en juego.

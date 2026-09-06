@@ -517,8 +517,9 @@ footer p { max-width: 76ch; }
       <strong>La aritmética dice que A es barata.</strong> Multiplicar los ensayos por diez sube el
       listón un 33 %. Para que la depuración cueste eso, las corridas de diagnóstico tendrían que
       ser nueve veces las institucionales — y aun así, la única corrida real hasta hoy dio
-      <code>DSR = 0.0019</code> contra un umbral de 0.95. Se falla por un factor de ~500. Ningún
-      veredicto habría cambiado.
+      <code>DSR = 0.0019</code> contra un umbral de 0.95. El DSR es una <em>probabilidad</em>, no
+      una magnitud: 0.19 % contra 95 % no es «fallar por un factor de 500», es casi certeza de que
+      no hay edge una vez descontada la búsqueda. Ningún veredicto habría cambiado.
     </p>
 
     <p>
