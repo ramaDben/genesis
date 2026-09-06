@@ -98,17 +98,18 @@ def log(*args: object) -> None:
 def tool_name(payload: dict[str, Any], client: str) -> str:
     """Extract the tool name respecting client dialect.
 
-    - **gemini**: ``toolName`` or ``call.name``
-    - **claude**: ``toolName``
-    - **codex**: ``tool_name``
-    """
-    if client == "codex":
-        return str(payload.get("tool_name", ""))
+    - **claude** / **codex**: ``tool_name`` (snake_case)
+    - **gemini**: ``toolName`` o ``call.name``
 
-    # claude / gemini both use toolName at the top level
-    name = payload.get("toolName", "")
-    if name:
-        return str(name)
+    Hasta el 2026-09-05 la rama de Claude leía únicamente ``toolName``.  Claude
+    Code envía ``tool_name``, así que el nombre salía vacío y el guardián
+    permitía la operación sin siquiera mirarla.  Se aceptan ambas formas para no
+    volver a depender de qué dialecto usa cada superficie.
+    """
+    for key in ("tool_name", "toolName"):
+        name = payload.get(key)
+        if name:
+            return str(name)
 
     # gemini alternative representation
     if client == "gemini":
@@ -122,20 +123,20 @@ def tool_name(payload: dict[str, Any], client: str) -> str:
 def tool_args(payload: dict[str, Any], client: str) -> dict[str, Any]:
     """Extract tool arguments respecting client dialect.
 
-    - **gemini**: ``toolArgs`` or ``call.args``
-    - **claude**: ``toolInput``
-    - **codex**: ``tool_input`` (may be dict or raw str)
-    """
-    if client == "codex":
-        raw = payload.get("tool_input", {})
-        if isinstance(raw, dict):
-            return raw
-        if isinstance(raw, str):
-            return {"command": raw}
-        return {}
+    - **claude** / **codex**: ``tool_input`` (dict, o str en codex)
+    - **gemini**: ``toolArgs`` o ``call.args``
 
-    if client == "claude":
-        return dict(payload.get("toolInput") or {})
+    Misma corrección que en :func:`tool_name` (2026-09-05): Claude Code envía
+    ``tool_input``, no ``toolInput``.
+    """
+    if client in ("claude", "codex"):
+        for key in ("tool_input", "toolInput"):
+            raw = payload.get(key)
+            if isinstance(raw, dict):
+                return raw
+            if isinstance(raw, str):
+                return {"command": raw}
+        return {}
 
     # gemini
     args = payload.get("toolArgs")

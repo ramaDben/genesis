@@ -108,5 +108,17 @@ Dependencias siempre por `uv`. Python 3.14. Búsquedas con `rg`/`fd`/`ast-grep`.
 
 Estado al 2026-08-01: **639 tests** en verde, `main` en `feb6515`.
 
+## Los hooks se encendieron el 2026-09-05
+
+Ya no hay que acordarse de leer las memorias ni de respetar la fase: `SessionStart` inyecta el
+índice de memorias y el estado del repo, y `PreToolUse` deniega escrituras fuera de fase. **Los
+hooks NO pueden ejecutarse directamente sobre la ruta UNC** —`.pulse/state.sqlite` responde
+`database is locked` y el hook emite contexto vacío sin fallar—; van todos por
+`.agents/hooks/run_hook.sh`, que re-ejecuta dentro de WSL. Detalle completo y los cinco defectos
+que hubo que corregir antes de encenderlos: `mem:hooks-controles-mecanicos`.
+
+`rg` 15.1.0 y `fd` 10.3.0 ya están instalados en el WSL (antes no estaban, y eso obligaba a caer a
+`grep`/`sed`). `fd` es un symlink a `fdfind` en `~/.local/bin`.
+
 Ver también `mem:datos-ftmo-y-respaldos`, `mem:perf-diagnose-detect-ct-events` y
 `mem:change-51-scope-decision`.

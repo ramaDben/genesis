@@ -44,6 +44,35 @@ Al editar desde una sesión de Claude Code en Windows, el repo de WSL se alcanza
 `wsl -d Ubuntu -- bash -lc "..."` — el login shell es obligatorio para tener `uv` y `mise`
 en el `PATH`.
 
+## Hooks: los controles mecánicos del entorno
+
+Activos desde el 2026-09-05 en `.claude/settings.json` (versionado). Todos pasan por
+**`.agents/hooks/run_hook.sh`**, que detecta si la sesión corre en Windows y re-ejecuta dentro de
+WSL. Ese rodeo no es opcional: ejecutar los hooks directamente sobre la ruta UNC hace que
+`.pulse/state.sqlite` responda `database is locked`, el hook reporte fase `unknown` y **emita
+contexto vacío sin fallar** — medido, no supuesto (y de paso el rodeo es más rápido: 1.45 s contra
+3.81 s, porque el I/O por UNC cuesta más que arrancar WSL).
+
+| Evento | Script | Qué hace |
+|---|---|---|
+| `SessionStart` | `session_context.py` | Inyecta el índice de memorias de Serena, rama y último commit, fase del engine, y los issues abiertos que **no** están reservados |
+| `SessionStart` | `omega_welcome` (`mcp_tool`) | Briefing de OMEGA. Si su server MCP aún no conectó, no dispara — el bloque OMEGA del hook anterior lo avisa |
+| `UserPromptSubmit` | `sdd_context_injector.py` | Recuerda la fase del ciclo en cada turno |
+| `PreToolUse` | `sdd_validate_tool.py` | **Deniega** escrituras fuera de la fase. Cubre `Write`/`Edit`/`MultiEdit` y las herramientas de escritura de serena y filesystem |
+
+El guardián de escritura permite siempre la **vía rápida** (`docs/`, `scripts/`, `.serena/memories/`,
+`.agents/`, `.claude/`, `*.md`) y todo lo que caiga fuera del repo (scratchpad, `/tmp`). Para tocar
+`src/**` o `tests/**` hace falta un change activo en fase `apply`. Si la fase no se puede leer,
+**fail-closed**: sólo pasa la vía rápida.
+
+Batería de humo: `bash .agents/hooks/smoke_test_guard.sh` (20 casos). Los tests de la librería:
+`cd .agents/hooks/_lib && uv run pytest`.
+
+**Debilidad aceptada a sabiendas:** `.agents/**` y `.claude/**` están en la vía rápida, así que un
+agente puede editar los hooks que lo restringen. Se acepta porque bloquearlos haría imposible
+mantenerlos y porque git deja el rastro; es la primera excepción que debería escalar al adjudicador
+externo del [#87](https://github.com/ramaDben/genesis/issues/87).
+
 ## Flujo SDD (plugin pulse)
 
 El ciclo de vida lo orquesta el MCP `pulse-engine` (Docker, workspace montado en `/work`) con las skills del plugin `pulse`:
