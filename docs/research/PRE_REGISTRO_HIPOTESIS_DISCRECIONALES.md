@@ -1,7 +1,8 @@
 # Pre-registro de las hipótesis discrecionales
 
-*(2026-09-07 — borrador. Las dos decisiones marcadas `[DECISIÓN HUMANA]` no están tomadas, y
-hasta que lo estén este documento no habilita ninguna corrida. Refs #88.)*
+*(2026-09-07 — borrador. **La doctrina de salida ya está decidida: es exigida.** Las decisiones que
+siguen marcadas `[DECISIÓN HUMANA]` no lo están, y hasta que lo estén este documento no habilita
+ninguna corrida. Refs #88.)*
 
 ## Por qué este documento va antes de correr
 
@@ -84,26 +85,27 @@ un umbral de 2,5. Cero ocurrencias. Así que `BREAKOUT_ADC` se pre-registra como
 su parámetro actual**: o se mide con un umbral alcanzable, y entonces el umbral es una dimensión
 de selección que se paga, o queda fuera de esta ronda. No se puede reportar como probado.
 
-### H3 — La salida asimétrica supera al objetivo fijo en clima direccional
+### H3 — La estrategia funciona con la salida asimétrica que el Playbook declara
 
-Ésta es la hipótesis que motivó abrir el frente, y es la más nítida de las tres.
+**La doctrina de salida ya no es una hipótesis a arbitrar: es una dimensión EXIGIDA.** Decisión del
+director el 2026-09-07, y la sección de dimensiones explica el porqué y lo que costó averiguarlo.
 
-**Enunciado.** En climas direccionales el Playbook prohíbe el objetivo rígido y manda salir por
-*Chandelier Trailing Stop* (máximo de 22 barras menos 3,0 × ATR, monótono). La hipótesis es que esa
-doctrina **domina** a cualquier objetivo fijo sobre la misma señal y el mismo stop inicial, porque
-la distribución de retornos de seguimiento de tendencia tiene la cola derecha pesada y un techo
-fijo la corta.
+**Enunciado.** Con la salida por *Chandelier Trailing Stop* (máximo de 22 barras menos 3,0 × ATR,
+monótono, `ratchet`) y sin ningún objetivo fijo, la estrategia tiene expectativa positiva neta de
+costos y sobrevive los gates.
 
-**Predicción falsificable, cuantificada.** Sobre la misma señal, mismo stop inicial y resultados
-expresados en múltiplos del riesgo: la expectativa por operación del Chandelier es positiva y la de
-todo objetivo fijo es nula o negativa, con una tasa de acierto **menor** en el Chandelier.
+**Especificación previa, sin grados de libertad.** El par `(N = 22, k = 3,0)` viene de LeBeau y
+Lucas (1992) y se verificó *walk-forward* el 2026-09-02 sobre 9.800 barras H1 por activo. No se
+eligió mirando este backtest: se adoptó una norma previa. Por eso cuesta **cero ensayos**.
 
-**Qué la falsifica.** Que un objetivo fijo iguale o supere la expectativa del Chandelier con costos
-reales incluidos; o que la ventaja del Chandelier desaparezca al descontar spread, comisión y
-deslizamiento; o que dependa de un solo activo.
+**Qué la falsifica.** Que la expectativa por operación sea nula o negativa una vez descontados
+spread, comisión y deslizamiento; o que el resultado dependa de un solo activo; o que la
+probabilidad de incumplir el límite de pérdida de la firma haga la cuenta inviable.
 
-**Estado de la evidencia: NO es evidencia.** Ver la sección siguiente, que existe precisamente para
-que este número no se cite como validado.
+**Lo que esta hipótesis NO pregunta, y es deliberado.** No pregunta si el trailing es mejor que un
+objetivo fijo. Esa comparación **ya se pagó** y su resultado no vuelve a estar en discusión: el
+objetivo fijo queda fuera del método, no compitiendo con él. Volver a compararlos sería gastar el
+presupuesto dos veces por la misma pregunta.
 
 ## Lo que NO es evidencia, declarado antes de que alguien lo cite
 
@@ -141,6 +143,17 @@ escritas para que nadie tenga que redescubrirlas:
 6. **Muestra chica y concentrada.** 241 señales en total, y el resultado del Chandelier lo carga
    un solo activo. Dos climas aportan 5 y 2 señales respectivamente: ahí no hay nada que concluir.
 
+**Y un segundo defecto propio, del mismo día y de la misma clase.** La primera medición del híbrido
+modelaba el tramo parcial como el resultado **final** del trailing recortado a un techo. Está mal:
+ese tramo cobra al **tocar** el nivel, y el Chandelier devuelve hasta 3 × ATR desde el máximo, así
+que una operación que tocó `+2 R` puede terminar en `+0,5 R`. El error sesgaba **contra** el
+híbrido, y arrojó una destrucción del 104 % donde la simulación correcta da **59 %**. La detectó una
+revisión externa, no la revisión interna, que es el mismo patrón que ya había pasado con la
+corrección del DSR en D1.
+
+Se deja escrito porque la dirección de un sesgo no vuelve válido un número: la conclusión no
+cambió, pero el número publicado estaba mal, y un pre-registro que tolera eso no sirve para nada.
+
 **Consecuencia operativa:** H3 entra a genesis como hipótesis pre-registrada, no como hallazgo
 previo que haya que confirmar. La diferencia importa: un hallazgo previo invita a buscar hasta
 reproducirlo.
@@ -169,22 +182,71 @@ reportado este resultado si hubiera salido bien?»*.
 | Símbolos, si se acepta un subconjunto | 1 por símbolo | el caso GO-PARCIAL del corolario de D1 |
 | Umbral de compresión de `BREAKOUT_ADC`, si se busca uno alcanzable | ≥ 1 por valor probado | ver la limitación de H2 |
 
-### `[DECISIÓN HUMANA]` 1 — la doctrina de salida
+### Decisión tomada — la doctrina de salida es EXIGIDA (2026-09-07)
 
-Es la decisión que abrió este frente, y tiene dos formas con precios distintos. **No se puede
-tener las dos.**
+**La salida es el Chandelier `(N = 22, k = 3,0)` con `ratchet`, sin objetivo fijo y sin cierres
+parciales.** No se compara contra nada: entra como premisa del método, no como eje de selección.
+Costo: **cero ensayos**.
 
-- **Exigida** significa: *el candidato debe pasar todos los gates con objetivo fijo **y** con
-  Chandelier*. Cuesta **cero ensayos** y **endurece** el listón, porque si una rama falla no hay
-  GO. Pero no contesta la pregunta del operador: no le dice qué doctrina usar, le dice que su
-  estrategia debe funcionar bajo las dos.
-- **Seleccionada** significa: *se corren las dos y se reporta la que gana*. Contesta la pregunta y
-  se paga.
+Se llegó ahí investigando si existía un híbrido legítimo, y conviene dejar por qué no, porque la
+pregunta va a volver.
 
-Y el precio no es 2. «Chandelier» no es un valor, es una familia con al menos dos parámetros
-(`N` barras del máximo y `k` múltiplo del ATR). Una grilla modesta de 3 × 3, más el objetivo fijo,
-son **10 ensayos** por lo que en conversación suena a «una dimensión». Ése es el número que hay que
-declarar.
+**No existe un nivel de objetivo que se pueda derivar.** Se evaluaron los cuatro candidatos que el
+propio modelo ADC + ATR ofrece, y ninguno sobrevive:
+
+| Candidato | Por qué no |
+|---|---|
+| El impulso proyectado, `1,5 × ATR(H1)` | Es el impulso de **ruptura**, trasplantado a un setup de retroceso donde el mercado no viene de comprimir. Y ese nivel ya está medido como perdedor |
+| El punto medio del canal | En tendencia alcista queda **debajo** de la entrada, y el motor ya lo usa como regla de invalidación en contra |
+| El borde del canal | Cruzar el máximo de 50 barras es la señal de **agregar**, no de liquidar (Donchian, base del Turtle) |
+| El ATR restante del día | Es un gate por diseño, decae con el reloj (el objetivo dependería de la hora de la señal) y le impone horizonte de una sesión a algo cuya tenencia mediana es 9,7 h repartida en 2 a 4 sesiones |
+
+**Y hay una razón aritmética que cierra la puerta.** Con el stop inicial en `1,5 × ATR` y el
+trailing a `3,0 × ATR` del máximo, el stop arrastrado **no supera al inicial hasta que el precio
+avanza `1,5 × ATR`**, y alcanza el precio de entrada solo en **`+3,0 × ATR`**. Así que un parcial
+antes de `+3,0 × ATR` no está derivado de nada; y en `+3,0 × ATR` la posición ya es libre de riesgo,
+donde cerrar una parte es lo contrario de lo razonable.
+
+**La fracción a cerrar tampoco tiene anclaje.** Kelly (1956) dimensiona apalancamiento y el
+*volatility targeting* dimensiona el lote inicial; ninguno prescribe liquidaciones parciales. Toda
+fracción es un parámetro libre.
+
+**Medido, además, el híbrido no protege la cuenta**, que era el único argumento serio a su favor.
+Con 1 % de riesgo por operación (o sea 1 R = 1 % de la cuenta), sobre 99 días con operaciones:
+
+| Variante | Peor día | Días ≤ −4 R | Días ≤ −5 R |
+|---|---|---|---|
+| Chandelier puro | −10,00 | 6 | 4 |
+| 33 % en 2,0 R + trailing | −10,00 | 6 | 2 |
+| 50 % en 1,5 R + trailing | −10,00 | 6 | 2 |
+
+El peor día y la cantidad de días que reventarían un límite del 4 % son **idénticos**. El motivo es
+estructural: los días que explotan son días en que todo pierde, y **en una operación perdedora el
+parcial nunca se gatilla**. El híbrido recorta arriba y no protege abajo.
+
+Lo que sí protege la cuenta es otra cosa, y no es la salida: **un peor día de −10 R son diez
+operaciones simultáneas al 1 % perdiendo juntas.** Eso es concurrencia y dimensionamiento, y se
+trata aparte.
+
+**Lo que costó averiguarlo, declarado:** unas **25 variantes de salida comparadas**, que bajo D1 son
+ensayos y van al ledger. Calibrar un híbrido de verdad habría costado **96 combinaciones** (4
+niveles × 4 fracciones × 3 reglas de stop del remanente × 2 políticas de horizonte); con 241
+eventos, cualquier ganadora de esa grilla sería sobreajuste.
+
+**La lección, que es de este proyecto y conviene no volver a pagar:** averiguar si existía el
+híbrido costó unos 25 ensayos y la respuesta fue usar la doctrina que el Playbook ya declaraba, que
+cuesta cero. Es «ambición en construir es gratis; ambición en buscar es cara y no reembolsable»,
+demostrado.
+
+### Dimensiones exigidas que hay que declarar antes de correr, y todavía no tienen valor
+
+Salieron de la misma investigación y **no cuestan ensayos si se declaran como regla**. Cuestan si se
+eligen midiendo.
+
+| Dimensión | Por qué hace falta | Estado |
+|---|---|---|
+| Operaciones simultáneas máximas | Con 1 % por señal, el riesgo del día se acumula: el peor día medido es −10 R | sin declarar |
+| Riesgo por operación en climas de shock (R1, R3) | El Playbook ya cierra el trailing a `2,0 × ATR` y recorta el apalancamiento al 50 % para rally de crudo sin confirmación del cobre; el riesgo unitario no está declarado | sin declarar |
 
 ### `[DECISIÓN HUMANA]` 2 — el presupuesto de ensayos (D4)
 
@@ -192,9 +254,19 @@ D1 dejó explícito que el ledger **no tiene reset sancionado y el listón solo 
 el único freno que existe. Este pre-registro no puede fijarlo: es el techo que el dueño del
 proyecto le pone a su propia búsqueda.
 
-Lo que sí puede decir es el piso implícito de lo pre-registrado acá: **3 setups + 1 por símbolo
-aceptado**, más **10 si la doctrina de salida se declara seleccionada**, más los 5 ya gastados en
-el diagnóstico del 2026-09-07 que corresponde anotar en el ledger cuando se cablee.
+Lo que sí puede decir es el piso implícito de lo pre-registrado acá:
+
+| Concepto | Ensayos |
+|---|---|
+| Elegir cuál de los tres setups se reporta | 3 |
+| Por símbolo, si se acepta un subconjunto | 1 cada uno |
+| La doctrina de salida | **0** (exigida, ver arriba) |
+| Ya gastados el 2026-09-07 y pendientes de anotar | **~30** |
+
+Los ~30 gastados son las cinco salidas del diagnóstico inicial más las ~25 variantes de la
+investigación del híbrido. **No están en el ledger porque el ledger no está cableado**, y ése es
+justamente el punto de la primera precondición: se gastaron de verdad, el sistema no los cuenta, y
+el DSR de la próxima corrida los ignoraría en silencio.
 
 ## Precondiciones técnicas, verificadas contra el código en `ebbf2e6`
 
@@ -287,13 +359,24 @@ Para que un pre-registro sirva tiene que atarse las manos por adelantado:
 
 | # | Qué | Vía | Bloquea |
 |---|---|---|---|
-| 1 | `[DECISIÓN HUMANA]` la doctrina de salida: exigida o seleccionada | decisión | H3 entera |
+| ~~1~~ | ~~La doctrina de salida~~ | ~~decisión~~ | **resuelta el 2026-09-07: exigida** |
 | 2 | `[DECISIÓN HUMANA]` el presupuesto de ensayos (D4) | decisión | todo |
-| 3 | Cablear `record_trial_completions` y derivar `_N_TRIALS_*` de `GridConfig` | ciclo SDD | el conteo honesto de todo |
-| 4 | Salida por trailing en la capa 3 | ciclo SDD | H3, si se declara seleccionada |
-| 5 | Historia suficiente para una ventana institucional | capa 1 | H1, H2 y H3 a ventanas institucionales |
+| 3 | `[DECISIÓN HUMANA]` concurrencia máxima y riesgo unitario en R1/R3 | decisión | nada, pero sin declararlas el resultado no es interpretable |
+| 4 | Cablear `record_trial_completions` y derivar `_N_TRIALS_*` de `GridConfig` | ciclo SDD | el conteo honesto de todo |
+| 5 | **Salida por trailing en la capa 3** | ciclo SDD | **H1, H2 y H3, o sea todo** |
+| 6 | Historia suficiente para una ventana institucional | capa 1 | las tres a ventanas institucionales |
 
-El orden no es negociable en un punto: **3 antes que 4**. Lo demás admite paralelo.
+**Declarar la salida como exigida movió el punto 5 al camino crítico, y conviene ver por qué.**
+Mientras la doctrina estaba en discusión, el trailing en la capa 3 solo bloqueaba a H3 y solo si se
+decidía compararlas. Ahora el trailing **es** la salida del método: sin él, genesis no puede
+representar la estrategia del operador en absoluto, así que no puede evaluar ninguna de las tres
+hipótesis. Pasó de condicional a bloqueante.
+
+Y la decisión **descargó** la prelación que este documento traía. El argumento para poner el ledger
+antes del trailing era que un eje de selección que el sistema no puede contar es peor que no
+tenerlo. Al quedar la salida exigida, el trailing **no agrega ningún eje de búsqueda**: es una
+premisa. Así que 4 y 5 pueden ir en paralelo, y el 4 sigue haciendo falta por los otros ejes que sí
+son de selección (los setups y los símbolos) y porque `_N_TRIALS_SIGNAL` está clavado en 9.
 
 ---
 
