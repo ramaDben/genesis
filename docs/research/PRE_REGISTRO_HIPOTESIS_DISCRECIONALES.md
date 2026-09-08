@@ -238,6 +238,42 @@ híbrido costó unos 25 ensayos y la respuesta fue usar la doctrina que el Playb
 cuesta cero. Es «ambición en construir es gratis; ambición en buscar es cara y no reembolsable»,
 demostrado.
 
+### El hueco que deja la doctrina exigida, declarado
+
+Habilitar la salida sin objetivo fijo tiene una consecuencia que corresponde escribir acá y no
+enterrarla en un artefacto de ciclo: **para una intención sin objetivo, el embudo pre-trade queda
+sin verificación de viabilidad.**
+
+El embudo veta por riesgo/beneficio mínimo, y ese cociente no existe cuando la salida no tiene
+techo. La decisión (2026-09-07, delegada, en el Change #97) es que el veto **no aplica** en ese
+caso, así que quedan dos frenos previos a la operación: la ventana de noticias y los límites de
+lotaje. No hay verificación de calidad de entrada.
+
+**No es aflojar un gate normativo**: los gates go/no-go del torneo (G1-G9, C1-C2, P1-P3) no
+contienen ningún criterio de riesgo/beneficio, y el umbral del embudo es un **default de
+configuración**, no una política declarada. Los gates que deciden un GO miden **desempeño** (PF con
+costos completos, probabilidad de breach, breach diario) y quedan intactos.
+
+**Y no hay criterio medido con el que construir un sustituto.** Sobre las mismas 241 operaciones,
+ninguna cantidad pre-trade separa las buenas de las malas:
+
+| Candidato a freno | Correlación con el resultado | Por cuartiles |
+|---|---|---|
+| ADX de entrada | −0,009 | no monótono: el cuartil más bajo es el mejor (+0,75 R) |
+| Espacio libre al borde del canal | +0,086 | no monótono: el cuartil sin espacio da +0,57 R |
+
+Las señales que entran con menos espacio libre que su propio riesgo (40 % del total) rinden
++0,31 R contra +0,32 R del resto. La hipótesis de que un filtro de asimetría protege de la
+«entrada tardía en agotamiento» es plausible y **no aparece en esta medición**; podría aparecer con
+un obstáculo de temporalidad mayor, que no se midió.
+
+Consecuencia para el conteo: **construir un freno de reemplazo calibrado con estos datos costaría
+ensayos** y no tendría sustento. Se declara el hueco y no se tapa.
+
+Lo que la evidencia sí señala como protección efectiva no es un filtro de entrada: es la
+concurrencia. El peor día medido fue de **−10 R** y viene de operaciones simultáneas, no de la
+salida. Es el issue #96.
+
 ### Dimensiones exigidas que hay que declarar antes de correr, y todavía no tienen valor
 
 Salieron de la misma investigación y **no cuestan ensayos si se declaran como regla**. Cuestan si se
