@@ -254,21 +254,33 @@ contienen ningún criterio de riesgo/beneficio, y el umbral del embudo es un **d
 configuración**, no una política declarada. Los gates que deciden un GO miden **desempeño** (PF con
 costos completos, probabilidad de breach, breach diario) y quedan intactos.
 
-**Y no hay criterio medido con el que construir un sustituto.** Sobre las mismas 241 operaciones,
-ninguna cantidad pre-trade separa las buenas de las malas:
+**Y la protección perdida no está medida. Pero tampoco está refutada: la medición que se usó
+para descartarla era inválida, y corresponde retractarla.**
 
-| Candidato a freno | Correlación con el resultado | Por cuartiles |
-|---|---|---|
-| ADX de entrada | −0,009 | no monótono: el cuartil más bajo es el mejor (+0,75 R) |
-| Espacio libre al borde del canal | +0,086 | no monótono: el cuartil sin espacio da +0,57 R |
+Se midió el ADX de entrada, y ese resultado se sostiene: correlación **−0,009** con el resultado, y
+por cuartiles no monótono, con el cuartil más bajo dando el mejor rendimiento (+0,75 R). Un piso de
+fuerza de tendencia no tiene sustento.
 
-Las señales que entran con menos espacio libre que su propio riesgo (40 % del total) rinden
-+0,31 R contra +0,32 R del resto. La hipótesis de que un filtro de asimetría protege de la
-«entrada tardía en agotamiento» es plausible y **no aparece en esta medición**; podría aparecer con
-un obstáculo de temporalidad mayor, que no se midió.
+Se midió también el «espacio libre hasta el próximo obstáculo» usando el borde del canal Donchian
+de 50 como obstáculo, y salió correlación +0,086 con cuartiles no monótonos. **Ese proxy está mal
+elegido, y este mismo pre-registro dice por qué**: cruzar el máximo de 50 barras es la señal de
+**agregar**, no de liquidar. El borde superior del Donchian no es una resistencia opuesta: es la
+confirmación de una ruptura. Que el cuartil sin espacio libre rindiera mejor (+0,57 R) es
+consistente con que esas señales estaban rompiendo el canal con expansión vigorosa, no con que el
+espacio disponible sea irrelevante.
+
+Así que el mecanismo de la entrada tardía en agotamiento queda **sin probar**, no descartado. Los
+proxies válidos serían extremos de temporalidad superior, máximos y mínimos de la sesión previa, o
+el agotamiento del rango medio diario. **Ninguno existe en el repo**, y la infraestructura de
+liquidez de temporalidad superior pertenece al candidato A, que `inspector.py` tiene prohibido
+importar.
+
+La conclusión operativa no cambia y su fundamento sí: **no hay sustituto construible hoy**, no
+porque los candidatos se hayan medido y hayan fallado, sino porque el único proxy válido no es
+medible en este repo ni alcanzable desde el punto donde el embudo decide.
 
 Consecuencia para el conteo: **construir un freno de reemplazo calibrado con estos datos costaría
-ensayos** y no tendría sustento. Se declara el hueco y no se tapa.
+ensayos** y hoy no hay con qué construirlo. Se declara el hueco y no se tapa.
 
 Lo que la evidencia sí señala como protección efectiva no es un filtro de entrada: es la
 concurrencia. El peor día medido fue de **−10 R** y viene de operaciones simultáneas, no de la
