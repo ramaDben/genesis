@@ -15,11 +15,13 @@ pytestmark = pytest.mark.unit
 def test_load_candidate_b_config_default_empaquetado() -> None:
     config = load_candidate_b_config()
     assert config == CandidateBConfig(
-        n_minutes=15,
+        n_minutes=30,
         atr_stop_frac=1.0,
         risk_pct=0.00375,
         atr_period=14,
         tp_rr_multiple=3.0,
+        rvol_threshold=1.50,
+        rvol_lookback_days=20,
     )
 
 
@@ -69,3 +71,25 @@ def test_load_candidate_b_config_campo_faltante_lanza_error(tmp_path: Path) -> N
 
     with pytest.raises(CandidateBConfigError):
         load_candidate_b_config(path)
+
+
+def test_load_candidate_b_config_rvol_invalido_lanza_error(tmp_path: Path) -> None:
+    payload = {
+        "candidates": {
+            "B": {
+                "n_minutes": 30,
+                "atr_stop_frac": 1.0,
+                "risk_pct": 0.00375,
+                "atr_period": 14,
+                "tp_rr_multiple": 3.0,
+                "rvol_threshold": -0.5,
+                "rvol_lookback_days": 20,
+            }
+        }
+    }
+    path = tmp_path / "rvol_invalido.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(CandidateBConfigError) as exc_info:
+        load_candidate_b_config(path)
+    assert "rvol_threshold debe ser positivo" in str(exc_info.value)

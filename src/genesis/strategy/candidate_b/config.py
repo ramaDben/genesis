@@ -20,10 +20,11 @@ _CONFIG_RESOURCE = "inspector_config.json"
 
 @dataclass(frozen=True, slots=True)
 class CandidateBConfig:
-    """Punto de referencia de configuración del Candidato B (R72, exactamente 5 campos).
+    """Punto de referencia de configuración del Candidato B (R72, R141).
 
     `atr_stop_frac` es el único campo nullable: `None` fuerza la regla primaria de
     stop (extremo opuesto del rango, R66) en lugar de la regla alternativa por ATR.
+    `rvol_threshold` y `rvol_lookback_days` gobiernan el filtro de liquidez Gao et al. (R137).
     """
 
     n_minutes: int
@@ -31,10 +32,12 @@ class CandidateBConfig:
     risk_pct: float
     atr_period: int
     tp_rr_multiple: float
+    rvol_threshold: float = 1.50
+    rvol_lookback_days: int = 20
 
 
 def load_candidate_b_config(path: Path | None = None) -> CandidateBConfig:
-    """Carga `CandidateBConfig` desde `payload["candidates"]["B"]` (R73).
+    """Carga `CandidateBConfig` desde `payload["candidates"]["B"]` (R73, R141).
 
     `path=None` -> recurso empaquetado `genesis.strategy/inspector_config.json`
     (mismo recurso que `load_inspector_funnel_config`, patrón `inspector.py:117-143`,
@@ -54,12 +57,20 @@ def load_candidate_b_config(path: Path | None = None) -> CandidateBConfig:
         payload = json.loads(raw_text)
         section = payload["candidates"]["B"]
         raw_frac = section["atr_stop_frac"]
+        rvol_thresh = float(section.get("rvol_threshold", 1.50))
+        rvol_lookback = int(section.get("rvol_lookback_days", 20))
+        if rvol_thresh <= 0.0:
+            raise ValueError(f"rvol_threshold debe ser positivo, vino {rvol_thresh}")
+        if rvol_lookback < 1:
+            raise ValueError(f"rvol_lookback_days debe ser >= 1, vino {rvol_lookback}")
         return CandidateBConfig(
             n_minutes=int(section["n_minutes"]),
             atr_stop_frac=None if raw_frac is None else float(raw_frac),
             risk_pct=float(section["risk_pct"]),
             atr_period=int(section["atr_period"]),
             tp_rr_multiple=float(section["tp_rr_multiple"]),
+            rvol_threshold=rvol_thresh,
+            rvol_lookback_days=rvol_lookback,
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         message = f"Configuración candidates.B.* inválida/incompleta en '{source}': {exc}"

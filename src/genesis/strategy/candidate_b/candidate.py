@@ -7,6 +7,11 @@ candidato, spec §2.1/§2.5): el sentido capa 2 -> capa 1 se preserva, nunca cap
 capa 3.
 """
 
+import math
+import statistics
+from collections import deque
+from collections.abc import Sequence
+
 from genesis.data.store import AnnotatedBar
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.contract import CONFIG_VERSION, Direction, EntryIntent, register_candidate
@@ -23,6 +28,27 @@ def _infer_direction(bar: AnnotatedBar, epsilon: float) -> Direction | None:
     if diff > epsilon:
         return Direction.LONG
     if -diff > epsilon:
+        return Direction.SHORT
+    return None
+
+
+def _infer_gao_direction(
+    open_price: float, close_price: float, epsilon: float = 1e-7
+) -> Direction | None:
+    """Dirección de referencia por retorno logarítmico acumulado Gao et al. (2018, R136).
+
+    R_open = ln(Close_{M-1} / Open_0).
+    None (doji) si |Close - Open| <= epsilon (medio tick de tolerancia).
+    LONG si R_open > 0; SHORT si R_open < 0.
+    """
+    if open_price <= 0 or close_price <= 0:
+        return None
+    if abs(close_price - open_price) <= epsilon:
+        return None
+    r_open = math.log(close_price / open_price)
+    if r_open > 0:
+        return Direction.LONG
+    if r_open < 0:
         return Direction.SHORT
     return None
 
@@ -58,14 +84,17 @@ class CandidateB:
         *,
         figure: SymbolFigure,
         reference_balance: float,
-        n_minutes: int,
+        n_minutes: int = 30,
         risk_pct: float,
         atr_stop_frac: float | None = None,
         atr_period: int = 14,
         tp_rr_multiple: float = 3.0,
+        rvol_threshold: float = 0.0,
+        rvol_lookback_days: int = 20,
+        initial_daily_volumes: Sequence[float] | None = None,
         config_version: str = CONFIG_VERSION,
     ) -> None:
-        # Constantes derivadas del constructor (R53).
+        # Constantes derivadas del constructor (R53, R141).
         self._figure = figure
         self._reference_balance = reference_balance
         self._n_minutes = n_minutes
@@ -73,6 +102,8 @@ class CandidateB:
         self._atr_stop_frac = atr_stop_frac
         self._atr_period = atr_period
         self._tp_rr_multiple = tp_rr_multiple
+        self._rvol_threshold = rvol_threshold
+        self._rvol_lookback_days = rvol_lookback_days
         self._config_version = config_version
         self._epsilon = 0.5 * 10 ** (-figure.digits)  # medio tick, R56
 
@@ -83,6 +114,17 @@ class CandidateB:
         self._reference_direction: Direction | None = None
         self._signal_emitted_today: bool = False
         self._minute_index: int = 0
+
+        # Ventana de apertura y filtro RVOL Gao et al. (2018, R136, R137, R138).
+        self._open_window_open: float | None = None
+        self._last_open_window_close: float | None = None
+        self._open_window_volume: float = 0.0
+        self._session_rvol: float | None = None
+        self._session_rvol_passed: bool = False
+        self._rvol_evaluated: bool = False
+        self._daily_open_volumes: deque[float] = deque(
+            initial_daily_volumes or [], maxlen=rvol_lookback_days
+        )
 
         # Estado ATR-Wilder-14 incremental, continuo across días (R54, NO reseteado).
         self._atr_value: float | None = None
@@ -95,14 +137,22 @@ class CandidateB:
 
     def on_bar(self, bar: AnnotatedBar) -> list[EntryIntent]:
         """Procesa una barra ya cerrada; retorna cero o una `EntryIntent` (R55, orden estricto)."""
-        # 1. RESET DIARIO (R55.1) — el estado ATR (paso 2) NO se resetea.
+        # 1. RESET DIARIO (R55.1, R137) — el estado ATR (paso 2) NO se resetea.
         if bar.trading_day != self._current_trading_day:
+            if self._current_trading_day is not None and self._minute_index >= self._n_minutes:
+                self._daily_open_volumes.append(self._open_window_volume)
             self._current_trading_day = bar.trading_day
             self._range_high = None
             self._range_low = None
             self._reference_direction = None
             self._signal_emitted_today = False
             self._minute_index = 0
+            self._open_window_open = None
+            self._last_open_window_close = None
+            self._open_window_volume = 0.0
+            self._session_rvol = None
+            self._session_rvol_passed = False
+            self._rvol_evaluated = False
 
         # 2. ATR (R55.2): incondicional si in_session, incluso ya emitida la señal.
         if bar.in_session:
@@ -112,23 +162,61 @@ class CandidateB:
         if not bar.in_session:
             return []
 
-        # 4. DIRECCIÓN DE REFERENCIA (R55.4, R56): solo en la 1.ª barra in_session del día.
-        if self._minute_index == 0:
-            self._reference_direction = _infer_direction(bar, self._epsilon)
-
-        # 5. FORMACIÓN DEL RANGO (R55.5, R57): idx en [0, n_minutes).
+        # 4. FORMACIÓN DEL RANGO Y VENTANA DE APERTURA (R55.5, R57, R136): idx en [0, n_minutes).
         if self._minute_index < self._n_minutes:
+            if self._minute_index == 0:
+                self._open_window_open = bar.open
             self._range_high = (
                 bar.high if self._range_high is None else max(self._range_high, bar.high)
             )
             self._range_low = bar.low if self._range_low is None else min(self._range_low, bar.low)
+            bar_vol = float(getattr(bar, "tick_volume", getattr(bar, "volume", 0.0)))
+            self._open_window_volume += bar_vol
+            self._last_open_window_close = bar.close
             self._minute_index += 1
             return []
 
-        # 6. GATILLO (R55.6, R58): idx >= n_minutes (rango ya congelado).
-        if self._signal_emitted_today or self._reference_direction is None:
+        # 5. EVALUACIÓN DE DIRECCIÓN Y RVOL GAO ET AL. (R136, R137, R138):
+        # al inicio de idx >= n_minutes.
+        if not self._rvol_evaluated:
+            self._rvol_evaluated = True
+            # Dirección Gao et al. (2018)
+            if self._open_window_open is not None:
+                close_ref = (
+                    self._last_open_window_close
+                    if self._last_open_window_close is not None
+                    else bar.close
+                )
+                self._reference_direction = _infer_gao_direction(
+                    self._open_window_open, close_ref, epsilon=self._epsilon
+                )
+            else:
+                self._reference_direction = None
+
+            # Filtro RVOL
+            if self._rvol_threshold <= 0.0:
+                self._session_rvol_passed = True
+                self._session_rvol = 1.0
+            elif len(self._daily_open_volumes) < self._rvol_lookback_days:
+                self._session_rvol_passed = False
+                self._session_rvol = None
+            else:
+                baseline_vol = statistics.median(self._daily_open_volumes)
+                if baseline_vol > 0:
+                    self._session_rvol = self._open_window_volume / baseline_vol
+                else:
+                    self._session_rvol = 0.0
+                self._session_rvol_passed = self._session_rvol >= self._rvol_threshold
+
+        # 6. GATILLO (R55.6, R58, R139): idx >= n_minutes (rango congelado y condiciones validadas).
+        if (
+            self._signal_emitted_today
+            or self._reference_direction is None
+            or not self._session_rvol_passed
+        ):
             self._minute_index += 1
             return []
+
         intent = self._evaluate_trigger(bar)
         self._minute_index += 1
         return [intent] if intent is not None else []

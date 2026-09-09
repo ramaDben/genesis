@@ -25,6 +25,7 @@ def _formed_candidate(
     risk_pct: float = 0.00375,
     reference_balance: float = 100_000.0,
     atr_period: int = 14,
+    rvol_threshold: float = 0.0,
 ) -> CandidateB:
     candidate = CandidateB(
         figure=us500_figure,
@@ -34,9 +35,10 @@ def _formed_candidate(
         atr_stop_frac=atr_stop_frac,
         atr_period=atr_period,
         tp_rr_multiple=tp_rr_multiple,
+        rvol_threshold=rvol_threshold,
     )
     first = (4500.0, 4500.1, 4499.9, 4501.0)
-    rest = [(4500.0, 4500.1, 4499.9, 4500.0)] * (_N_MINUTES - 1)
+    rest = [(4500.0, 4500.1, 4499.9, 4501.0)] * (_N_MINUTES - 1)
     for i, (open_, high, low, close) in enumerate([first, *rest]):
         candidate.on_bar(
             make_annotated_bar(
@@ -121,9 +123,10 @@ def test_distancia_stop_no_positiva_lanza_candidate_b_state_error(
         n_minutes=_N_MINUTES,
         risk_pct=0.00375,
         atr_stop_frac=None,
+        rvol_threshold=0.0,
     )
     first = (4500.0, 4500.1, 4499.9, 4501.0)
-    rest = [(4500.0, 4500.1, 4499.9, 4500.0)] * (_N_MINUTES - 1)
+    rest = [(4500.0, 4500.1, 4499.9, 4501.0)] * (_N_MINUTES - 1)
     for i, (open_, high, low, close) in enumerate([first, *rest]):
         candidate.on_bar(
             make_annotated_bar(
