@@ -1738,3 +1738,323 @@ Riesgos nuevos de este Change:
 - `.agents/rules/architecture-conventions.md`, `.agents/rules/eval-tdd-conventions.md`,
   `.agents/rules/tooling-conventions.md` — convenciones de proceso SDD.
 - `CLAUDE.md` (raíz) — arquitectura de 4 capas, flujo SDD, convenciones de commits/testing.
+
+<!-- change:97-salida-por-trailing-estructural-chandelier-en-la-capa-3 -->
+# Specification — el Chandelier como política de capa 3, con ancla desde la apertura
+
+Change #97 (Issue #97). Dominio `backtest`. Contrato de entrada: `idea.md` + `proposal.md` de este
+Change. Este documento fija los requisitos normativos (R) y los criterios de aceptación
+ejecutables (A). Las decisiones de variante de implementación son de `design.md`.
+
+## Objetivo
+
+Que la capa 3 pueda representar la salida exigida por el método (Chandelier `(N = 22, k = 3,0)`
+monótono), de modo que una corrida de validación evalúe la estrategia del operador tal como está
+declarada. La **regla** del trailing es de capa 3 e igual para todos los candidatos; lo único que la
+intención comunica es si su setup tiene objetivo fijo o no.
+
+## Alcance
+
+### IN
+
+- La regla del trailing en la capa 3: una sola, obligatoria, no parametrizable por el candidato.
+- Estado del máximo (o mínimo) por **posición**, con la ventana anclada en la apertura.
+- Actualización del stop efectivo dentro del bucle de barra, antes de resolver el fill.
+- Registro de los movimientos del stop en el `Ledger`.
+- Un motor de ATR y un motor de máximo rodante compartidos en `strategy/common/`.
+- Tests de propiedad, golden e integración.
+
+### OUT (YAGNI explícito)
+
+- Cierres parciales y objetivos fijos de cualquier tipo.
+- Tenencia interdiaria: el cierre forzado de sesión sigue vigente y sin cambios.
+- Calibrar `(N, k)`, o exponerlos como eje de grilla.
+- Trailing por régimen (el Playbook ceñido a `2,0 × ATR` para shock precautorio queda para otro
+  Change; acá `k` es una constante).
+- Corregir el gate de fricción inerte (`spread` nunca emitido) ni el conteo literal de ensayos
+  (`_N_TRIALS_*`). Ambos anotados en `idea.md` y ajenos a este Change.
+
+## Requisitos funcionales
+
+**R1 · La política es de capa 3 y sus constantes viven en el perfil de riesgo.** Ningún candidato
+declara, parametriza ni puede sustituir la salida. Las dos constantes del Chandelier viajan juntas
+como par: fijar solo el múltiplo deja el nivel indeterminado.
+
+**R2 · La fórmula.** Para una posición larga, con `H` el conjunto de máximos de las **velas H1
+cerradas desde la apertura** de la posición, acotado a las últimas `N`:
+
+`nivel = max(H) - k * ATR_14`
+
+Para una posición corta, con `L` los mínimos análogos: `nivel = min(L) + k * ATR_14`.
+
+**R2bis · La geometría es horaria y la ejecución es de minuto.** El simulador itera velas **M1**
+(`strategy/contract.py:8-10`), y el par `(N, k)` está calibrado sobre **H1**. El ATR y el extremo
+rodante se alimentan **solo cuando se cierra una vela H1 agregada**; el nivel se aplica y el fill se
+resuelve con resolución M1. Alimentar el estado con la barra M1 suelta daría un ATR de 14 minutos y
+una ventana de 22 minutos: no es el Chandelier del método, y ningún criterio de aceptación de una
+versión anterior de este documento lo habría detectado.
+
+**R2ter · El agregador se alimenta con TODAS las barras M1, no solo las de sesión.** Es la
+convención que ya rige para el ATR por temporalidad agregada: el motor del candidato A empuja cada
+barra al agregador sin filtrar (`candidate_a/smc/engine.py:169`), y el ATR se actualiza desde la
+vela agregada.
+
+**Filtrar por sesión rompería el agregador.** `BarAggregator.push` emite una vela H1 cuando
+`minute % 60 == 59` y **no resetea el acumulador en ningún otro caso**
+(`candidate_a/smc/timeframe.py:109-125`). Si se le entregan solo barras en sesión, un cierre de
+sesión que no cae en el minuto 59 deja un acumulador abierto que la sesión siguiente **extiende**,
+produciendo una vela H1 que cruza la noche y cuyo rango verdadero incluye el salto de apertura. O
+sea: filtrar por sesión no evita la contaminación por saltos, la concentra en una sola vela
+monstruosa.
+
+Ojo con la comparación que motivó una versión anterior de este requisito: `candidate_b` sí filtra
+con `if bar.in_session` (`candidate_b/candidate.py:108-109`), y está bien **para él**, porque su ATR
+es M1 y se actualiza barra por barra sin agregación. El ATR del trailing es H1 agregado, así que le
+corresponde la convención del candidato A. Y `IncrementalAtr` declara ser «continuo cross-día
+(NUNCA reseteado)» (`candidate_a/smc/atr.py:12`), que es coherente con alimentarlo sin filtrar.
+
+**R3 · Monotonía (`ratchet`), en las dos direcciones.** En largos el stop efectivo es
+`max(stop_previo, nivel)`; en cortos, `min(stop_previo, nivel)`. El stop **nunca** se mueve en
+contra de la posición.
+
+**R4 · El stop inicial es el piso.** El stop efectivo nunca queda peor que el stop inicial que
+entregó `risk_levels`. Se deriva de R3 y se declara aparte porque es la ley de riesgo: el
+dimensionamiento del lote se calculó con esa distancia, y aflojarla invalidaría el 1 % declarado.
+
+**R5 · Ancla desde la apertura.** La ventana **nunca** incorpora barras anteriores a la apertura de
+la posición. Mientras la posición tiene menos de `N` barras cerradas de vida, la ventana es más
+corta. Medido sobre 367 señales reales, sin este requisito el `ratchet` adoptaría un nivel derivado
+de barras no vividas en el **47 %** de los casos, y en el **4 %** ese nivel caería del lado ganador
+de la entrada, produciendo una salida inmediata con una ganancia que nunca ocurrió.
+
+**R6 · Solo barras cerradas hasta `t-1`.** El máximo, el mínimo y el ATR que determinan el stop
+aplicable a la barra `t` se calculan **exclusivamente** con barras cerradas hasta `t-1`. El `high`
+o el `low` de la barra en curso **no** pueden participar del nivel con el que se resuelve el fill
+de esa misma barra.
+
+**R7 · Orden dentro del bucle de barra.** La actualización del stop ocurre en el paso de gestión de
+posiciones abiertas, **antes** de resolver el fill de la barra en curso. El cierre forzado de
+sesión, el proceso de entradas nuevas y la evaluación de breaches conservan su posición relativa.
+
+**R8 · La posición sigue siendo inmutable.** `OpenPosition` conserva `frozen=True, slots=True`. La
+actualización se materializa construyendo una posición nueva y reemplazándola en su lugar dentro
+del estado de la cuenta. Ningún consumidor debe poder observar una posición con el stop
+desactualizado después de la actualización de la barra.
+
+**R9 · Cada movimiento del stop queda registrado.** El `Ledger` incorpora un tipo de entrada que
+identifica la posición, la barra, el stop anterior y el nuevo. Todo fill resuelto contra un stop
+movido tiene que ser explicable por el registro.
+
+**R10 · Un solo motor de ATR.** La política consume el motor de ATR compartido; no se agrega una
+tercera implementación. El motor promovido conserva su semántica actual (Wilder, continuo, nunca
+reseteado) y su contrato de calentamiento.
+
+**R11 · Sin calentamiento no hay trailing, y no hay excepción.** Si el ATR aún no está calentado, el
+stop efectivo permanece en el stop inicial. La ausencia de trailing en esa ventana **no** es un
+error: es el estado correcto. Levantar una excepción cerraría la corrida por un estado legítimo.
+
+**R12 · Determinismo.** Dos corridas con la misma configuración, el mismo dataset y las mismas
+semillas producen exactamente la misma secuencia de movimientos de stop.
+
+**R13 · La política es obligatoria.** Un candidato sin la salida no es evaluable. Hoy el único
+ejecutable es B.
+
+**R14 · La identidad de posición es única entre ventanas.** Cada ventana del WFA corre su propia
+instancia de `Simulator` (`validation/wfa.py:251`) y los ledgers se cosen después en
+`_stitch_oos_ledgers` (`validation/wfa.py:401-426`). Un
+contador local a la instancia produciría identificadores duplicados en el ledger cosido, así que la
+identidad incorpora la procedencia de la corrida y la ventana.
+
+**R15 · Los parámetros del trailing entran en el hash del perfil de riesgo.** Si `trailing_lookback`
+y `trailing_atr_mult` no participan de `risk_profile_hash()` (`backtest/risk_profile.py:73`), dos
+perfiles distintos comparten identidad, contaminando la `RunProvenance` (`backtest/ledger.py:83`) y
+el `trial_id` del ledger de ensayos, que la consume (`validation/trial_ledger.py:41`).
+
+Ojo con **cómo** hay que hacerlo: `risk_profile_hash()` no serializa el `dataclass`, arma un
+diccionario canónico **campo por campo a mano** (`backtest/risk_profile.py:80-88`). Sumar un campo
+al perfil y olvidarlo ahí no rompe nada visible, que es justo el modo de fallo que este requisito
+existe para impedir. Lo verifica A23.
+
+**R16 · La actualización no puede corromper la lista de posiciones.** El paso de gestión no escribe
+por índice en una lista que `_close_position` acorta en la misma pasada (`simulator.py:619`).
+
+**R17 · La remoción de una posición cerrada es del llamador, no de la liquidación.** Liquidar
+(costos, dinero, `Ledger`) y remover de `AccountState.open_positions` son responsabilidades
+separadas. Pasarle a la liquidación la posición **actualizada** mientras la lista todavía contiene
+la anterior hace fallar `remove` por igualdad de valor: `OpenPosition` es un `dataclass` congelado
+y el stop movido lo vuelve un objeto distinto.
+
+**R18 · El agregador de temporalidad se descarta en el cierre de sesión.** `BarAggregator` emite
+solo cuando `minute % 60 == 59` y no resetea en ningún otro caso
+(`candidate_a/smc/timeframe.py:109-125`). En un símbolo cuya sesión no termina en el minuto 59
+—GER40 cierra 17:30 de Berlín, `data/sessions.py:64-69`— el acumulador quedaría abierto y la sesión
+siguiente lo extendería, emitiendo una vela «H1» que cruza la noche y cuyo rango verdadero contiene
+el salto de apertura. La hora parcial final **no emite vela**.
+
+**R19 · El extremo rodante de una posición solo consume velas cuyo `open_time` sea igual o
+posterior a su apertura.** Se deriva de R5 y se declara aparte porque **la agregación lo viola por
+construcción**: una posición abierta a las 14:35 recibiría la vela de 14:00-14:59, cuyo máximo
+puede ser anterior a su apertura. La hora de entrada se saltea entera.
+
+**R20 · La vela agregada se despacha a TODAS las posiciones vivas del símbolo.** Un `IncrementalAtr`
+y un `BarAggregator` por símbolo, un extremo rodante por posición: relación 1:N. Alimentar solo a
+una posición cuando hay dos abiertas del mismo símbolo es un error silencioso.
+
+**R21 · `position_id` es el primer campo de `OpenPosition` y no tiene valor por defecto.** Un campo
+con default no puede preceder a campos sin default (`TypeError` de `dataclass`), y ponerlo al final
+con un centinela permite que el centinela colisione como clave de estado y se filtre al artefacto.
+Las tres fábricas de test que construyen por posición se actualizan.
+
+**R22 · El embudo autoriza una intención sin objetivo fijo.** `inspect()` DEBE autorizarla cuando no
+cae en ventana de noticias y su lotaje es válido, y DEBE seguir vetando por `INSUFFICIENT_RR` cuando
+el cociente existe y queda bajo el umbral. `proposed_rr` es `float | None` y `_compute_rr` devuelve
+`None` si y solo si `take_profit is None`.
+
+Estaba redactado como «R17bis» **dentro de la sección de preguntas abiertas**, junto a la
+resolución de Q-D. Un requisito normativo archivado bajo una pregunta es un requisito que se pierde:
+vive acá, con los demás, y Q-D lo referencia.
+
+## Criterios de aceptación (evals ejecutables)
+
+**A1 · Monotonía en largos.** Sobre una serie sintética arbitraria, la secuencia de stops efectivos
+de una posición larga es no decreciente.
+
+**A2 · Monotonía en cortos.** La secuencia es no creciente. Se exige aparte de A1 porque un signo
+invertido es un error que *mejora* el resultado y no rompe nada visible.
+
+**A3 · El piso del stop inicial.** Con una serie que solo se mueve en contra, el stop efectivo es
+en todo momento igual al stop inicial: el trailing no lo afloja nunca.
+
+**A4 · Anti-anticipación del stop.** Extensión de la propiedad central del spec §9 al stop: mutar
+cualquier barra posterior a `t` **no cambia** el stop efectivo aplicado en `t`. Es property test con
+`hypothesis`, no un caso puntual.
+
+**A5 · La barra en curso no participa.** Caso construido donde el `high` de la barra `t` es el
+máximo de toda la serie: el stop aplicado en `t` es el que se derivó al cierre de `t-1`, y el fill
+de `t` se resuelve contra ese. Si el `high` de `t` participara, el stop sería más alto y el fill
+distinto: el test distingue las dos versiones.
+
+**A6 · El ancla no mira antes de la apertura.** Serie con un máximo pronunciado `N-1` barras antes
+de la entrada: el nivel de las primeras barras de vida **ignora** ese máximo. Contra-caso: con el
+ancla sin anclar, el mismo escenario produce un stop del lado ganador de la entrada y una salida
+inmediata; el test verifica que eso **no** ocurre.
+
+**A7 · Golden test de fill con stop movido.** Mini-dataset donde el precio avanza, el stop sube, y
+después retrocede hasta tocarlo: el fill se resuelve al stop movido y no al inicial, con el precio
+exacto esperado.
+
+**A8 · El registro explica el fill.** Para el escenario de A7, el `Ledger` contiene la secuencia de
+movimientos, y el precio del fill coincide con el último stop registrado.
+
+**A9 · Sin calentamiento, sin trailing.** Con menos barras que el período del ATR, el stop efectivo
+es el inicial y **no** se levanta ninguna excepción.
+
+**A10 · Determinismo.** Dos corridas idénticas producen secuencias de movimientos byte a byte
+iguales.
+
+**A11 · Ningún consumidor ve el stop viejo.** Después de la actualización de una barra, toda lectura
+del estado de la cuenta devuelve la posición con el stop nuevo.
+
+**A12 · El cierre forzado de sesión sigue intacto.** La batería existente de cierre por sesión pasa
+sin cambios: ninguna posición sobrevive el borde de sesión por efecto del trailing.
+
+**A13 · Regresión del torneo.** La suite completa pasa, y los tests del candidato B que hoy dependen
+de niveles congelados siguen siendo válidos o se actualizan con su motivo escrito.
+
+**A14 · Un salto de ATR no afloja el stop.** Sobre una posición ganadora, se inyecta una expansión
+brusca de volatilidad: el nivel recalculado se aleja del precio y el stop efectivo **no retrocede**.
+Verifica que el `ratchet` se aplica **después** del recálculo y no antes; el orden inverso pasa los
+casos puntuales y falla acá.
+
+**A15 · La geometría es horaria.** El nivel no cambia entre dos barras M1 pertenecientes a la misma
+vela H1, y sí cambia al cerrarse la hora. Distingue una implementación alimentada con M1 de una
+alimentada con H1, que es la que corresponde.
+
+**A16 · La lista de posiciones no se corrompe.** Con tres posiciones abiertas y la primera cerrando
+su fill en la misma pasada, las otras dos conservan su identidad y quedan con el stop actualizado.
+Contra-caso: la escritura por índice produce `IndexError` con dos posiciones y sobrescribe la tercera
+con tres. Segundo contra-caso: liquidar pasando la posición actualizada mientras la
+liquidación remueve por valor levanta `ValueError`.
+
+**A17 · El embudo autoriza sin objetivo.** Una intención con `take_profit = None`, fuera de ventana
+de noticias y con lotaje válido, se autoriza. Contra-caso: con el veto sin condicionar, la misma
+intención se rechaza por `INSUFFICIENT_RR` y la corrida termina en cero operaciones.
+
+**A18 · Ninguna vela agregada cruza sesiones.** Sobre un símbolo cuyo cierre no cae en el minuto 59,
+ninguna vela H1 emitida tiene su `open_time` y su `close_time` en días de sesión distintos.
+Contra-caso: sin descartar el agregador en el cierre, aparece una vela que abarca la tarde de un día
+y la mañana del siguiente.
+
+**A19 · La hora de entrada no contamina el extremo.** Posición abierta a mitad de hora, con un
+máximo pronunciado en esa misma hora **anterior** a la apertura: el extremo rodante no lo incorpora
+y el stop efectivo no queda del lado ganador de la entrada.
+
+**A20 · Dos posiciones del mismo símbolo reciben la misma vela.** Con dos posiciones vivas del mismo
+símbolo y aperturas distintas, las dos actualizan su extremo al cerrar la vela H1, cada una
+respetando su propio filtro de `open_time`.
+
+**A21 · Liquidar sin remover no deja una posición fantasma.** Tras el cierre forzado de fin de
+sesión, `AccountState.open_positions` queda **vacía**, y el criterio lo afirma directamente.
+
+**Y el guardia no sirve de mecanismo, aunque parezca el natural.** `SessionBoundaryError`
+(`simulator.py:456-466`) exige `bar.timestamp_utc > close_utc` **y** que el día ya figure en
+`_session_closed_days`. El cierre forzado corre en esa misma barra, así que en la barra de cierre
+ordinaria el guardia es **inerte**: no se evalúa hasta la barra siguiente del mismo día de sesión,
+que en el último tramo de la jornada puede no existir. Un criterio que esperara la excepción ahí
+pasaría en verde por la razón equivocada. Ejercitar el guardia exige inyectar una barra sintética
+posterior a `close_utc` del mismo día, y es un caso aparte.
+
+**A22 · `position_id` no se repite en el ledger cosido.** Sobre una corrida de walk-forward con al
+menos dos ventanas que abran posiciones, los identificadores del ledger que produce
+`_stitch_oos_ledgers` (`validation/wfa.py:401-426`) no tienen repetidos. Contra-caso: un
+identificador que solo numere dentro de la ventana colisiona al coser. **Verifica R14, que no tenía
+criterio.**
+
+**A23 · El hash del perfil distingue los parámetros del trailing.** Dos `RiskProfile` que difieran
+solo en `trailing_lookback`, o solo en `trailing_atr_mult`, producen `risk_profile_hash()` distinto.
+Contra-caso: con el diccionario canónico sin los campos nuevos el hash coincide, y dos
+configuraciones distintas comparten `trial_id`. **Verifica R15, que no tenía criterio.**
+
+## Riesgos
+
+1. **Anticipación por geometría.** `LookaheadError` protege el reloj, no la geometría; ninguna
+   excepción existente caza este error. Cubierto por A4 y A5, y es el motivo de que sean dos
+   criterios y no uno.
+2. **La propiedad central del spec §9 no cubría el stop.** Se extiende explícitamente en A4.
+3. **Formato de artefacto.** El tipo de entrada nuevo del `Ledger` rompe la comparación directa con
+   artefactos de corridas anteriores.
+4. **Referencias a la posición vieja.** El reemplazo posicional exige barrer los consumidores del
+   estado de la cuenta. Cubierto por A11.
+5. **El signo en cortos.** Cubierto por A2, y se declara como riesgo aparte porque su falla es
+   silenciosa y favorable.
+6. **Interacción con el drawdown trailing de la firma.** Son dos cosas distintas con el mismo
+   nombre; el trailing de la firma se ancla en el pico de equity y no se toca. Riesgo de confusión
+   en la lectura de resultados, no de implementación.
+
+## Preguntas abiertas
+
+- **Q-A · Dónde vive el estado por posición.** Una estructura auxiliar del simulador indexada por
+  identidad de posición, o un objeto de gestión por posición. Es decisión de `design.md`.
+- **Q-B · Qué hace la política cuando el ATR cambia entre barras.** El nivel se recalcula con el
+  ATR corriente, así que un ATR que baja **acerca** el stop y uno que sube lo alejaría, pero R3 lo
+  impide. Hay que dejar escrito que la monotonía gana sobre el recálculo.
+- **Q-C · El re-export del módulo promovido.** Si `candidate_a` conserva un alias o se actualizan
+  sus importadores. Decisión de `design.md`.
+- **Q-D · RESUELTA el 2026-09-07: el veto por R:R no aplica sin objetivo fijo.** El requisito que
+  esto impone es **R22**, y su criterio es A17. `proposed_rr` pasa
+  a `float | None` y el veto solo se evalúa cuando hay cociente. **No es aflojar un gate
+  normativo**: los gates go/no-go (G1-G9, C1-C2, P1-P3,
+  `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md:546-569`) no contienen ningún criterio de
+  riesgo/beneficio, y el `min_rr = 2,0` es un **default de embudo** que aparece como valor de un
+  ejemplo de configuración (`.pulse/specs/strategy/spec.md:919`, R19 exige «valores default
+  explícitos»). Los gates de resultado que sí deciden un GO (G3, G7, P3) quedan intactos. Decisión
+  delegada por el director; fundamento completo, la alternativa descartada y lo que se pierde, en
+  `design.md` §12 H6.
+
+## Referencias
+
+- `idea.md` y `proposal.md` de este Change.
+- Pre-registro y decisión de doctrina: PR #95, Refs #88.
+- `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md:459` (el spec ya lo promete) y §9
+  (propiedad central de anti-anticipación).
+- LeBeau & Lucas (1992), origen del par `(N = 22, k = 3,0)`.
