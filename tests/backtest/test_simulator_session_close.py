@@ -47,8 +47,15 @@ def _build_simulator(
     )
 
 
-def _open_position(entry_time: datetime, *, stop_loss: float, take_profit: float) -> OpenPosition:
+def _open_position(
+    entry_time: datetime,
+    *,
+    position_id: str = "pos-1",
+    stop_loss: float,
+    take_profit: float | None = 110.0,
+) -> OpenPosition:
     return OpenPosition(
+        position_id=position_id,
         candidate_id="B",
         symbol="US500",
         direction=Direction.LONG,

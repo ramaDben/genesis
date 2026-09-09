@@ -7,6 +7,7 @@ from genesis.backtest.ledger import (
     BreachEvent,
     BreachKind,
     Ledger,
+    TrailingStopMoved,
     reconstruct_equity_series,
 )
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile, load_risk_profile
@@ -26,6 +27,7 @@ __all__ = [
     "SessionBoundaryError",
     "SimulationClock",
     "Simulator",
+    "TrailingStopMoved",
     "iter_ticks",
     "load_risk_profile",
     "reconstruct_equity_series",

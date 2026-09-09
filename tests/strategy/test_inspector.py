@@ -72,6 +72,24 @@ def test_inspect_authorized_cuando_nada_dispara() -> None:
     assert verdict.rejection_reason is None
 
 
+def test_criterio_a17_inspect_autoriza_sin_tp_proposed_rr_none() -> None:
+    """Criterio A17 / R22: Intención sin objetivo (proposed_rr=None) se autoriza."""
+    profile = load_firm_profile()
+    verdict = inspect(
+        _intent(),
+        symbol=_SYMBOL,
+        intent_time=datetime(2024, 3, 1, 12, 0, tzinfo=UTC),
+        proposed_rr=None,
+        figure=_figure(),
+        firm_profile=profile,
+        news_events=(),
+        config=_config(min_rr=2.0),
+    )
+    assert verdict == AUTHORIZED
+    assert verdict.authorized is True
+    assert verdict.rejection_reason is None
+
+
 def test_inspect_news_window_rechaza() -> None:
     profile = load_firm_profile()
     event_time = datetime(2024, 3, 1, 14, 30, tzinfo=UTC)

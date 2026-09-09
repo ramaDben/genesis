@@ -87,23 +87,25 @@ def inspect(
     *,
     symbol: str,
     intent_time: datetime,
-    proposed_rr: float,
+    proposed_rr: float | None,
     figure: SymbolFigure,
     firm_profile: FirmProfile,
     news_events: Sequence[EconomicEvent],
     config: InspectorFunnelConfig,
 ) -> InspectorVerdict:
-    """Decide si `intent` se autoriza o se rechaza contra la ficha de símbolo/firma (R13).
+    """Decide si `intent` se autoriza o se rechaza contra la ficha de símbolo/firma (R13, R22).
 
     Orden determinista de motivos (primer motivo que dispara gana):
     `NEWS_WINDOW` -> `INSUFFICIENT_RR` -> `LOT_SIZE_OUT_OF_BOUNDS`; si nada dispara,
     retorna `AUTHORIZED`.
+    Si `proposed_rr is None` (salida sin TP fijo, ej. trailing Chandelier), el veto
+    `INSUFFICIENT_RR` no se evalúa (H6, R22).
     """
     windows = news_windows(news_events, symbol, firm_profile)
     if any(start <= intent_time <= end for start, end in windows):
         return InspectorVerdict(authorized=False, rejection_reason=RejectionReason.NEWS_WINDOW)
 
-    if proposed_rr < config.min_rr:
+    if proposed_rr is not None and proposed_rr < config.min_rr:
         return InspectorVerdict(authorized=False, rejection_reason=RejectionReason.INSUFFICIENT_RR)
 
     if _is_lot_size_out_of_bounds(intent, figure, config):

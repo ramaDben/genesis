@@ -29,26 +29,40 @@ class MaxLossLimitKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RiskProfile:
-    """Ficha propia de riesgo de la capa 3 (R11).
+    """Ficha propia de riesgo de la capa 3 (R11, Change #97).
 
     No duplica campos ya expuestos por `FirmProfile` (`daily_loss_limit_pct`,
     `daily_reset_time` se leen de ahí); `weekend_holding_allowed` no tiene equivalente
-    en `FirmProfile` (spec §1.3).
+    en `FirmProfile` (spec §1.3). Parámetros de salida Chandelier: `trailing_lookback`
+    y `trailing_atr_mult` viajan juntos y son obligatorios.
     """
 
     max_loss_limit_pct: float
     max_loss_limit_kind: MaxLossLimitKind
     weekend_holding_allowed: bool
+    trailing_lookback: int = 22
+    trailing_atr_mult: float = 3.0
+
+    def __post_init__(self) -> None:
+        if self.trailing_lookback < 1:
+            raise BacktestConfigError(
+                f"trailing_lookback debe ser >= 1, recibido: {self.trailing_lookback!r}"
+            )
+        if self.trailing_atr_mult <= 0.0:
+            raise BacktestConfigError(
+                f"trailing_atr_mult debe ser > 0.0, recibido: {self.trailing_atr_mult!r}"
+            )
 
 
 def load_risk_profile(path: Path | None = None) -> RiskProfile:
     """Carga `RiskProfile` desde `path`, o desde el recurso empaquetado por defecto (R12).
 
     `path=None` -> recurso empaquetado `genesis.backtest/risk_profile.json` (patrón
-    `load_firm_profile`). Defaults del recurso empaquetado (spec §1.3):
+    `load_firm_profile`). Defaults del recurso empaquetado (spec §1.3, Change #97):
     `max_loss_limit_pct=10.0`, `max_loss_limit_kind=STATIC`,
-    `weekend_holding_allowed=True`. Lanza `BacktestConfigError` con el campo faltante
-    en el mensaje ante configuración inválida o incompleta (fail-fast).
+    `weekend_holding_allowed=True`, `trailing_lookback=22`, `trailing_atr_mult=3.0`.
+    Lanza `BacktestConfigError` con el campo faltante en el mensaje ante
+    configuración inválida o incompleta (fail-fast).
     """
     if path is not None:
         raw_text = path.read_text(encoding="utf-8")
@@ -64,6 +78,8 @@ def load_risk_profile(path: Path | None = None) -> RiskProfile:
             max_loss_limit_pct=float(payload["max_loss_limit_pct"]),
             max_loss_limit_kind=MaxLossLimitKind(payload["max_loss_limit_kind"]),
             weekend_holding_allowed=bool(payload["weekend_holding_allowed"]),
+            trailing_lookback=int(payload["trailing_lookback"]),
+            trailing_atr_mult=float(payload["trailing_atr_mult"]),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         message = f"Ficha de riesgo inválida/incompleta en '{source}': {exc}"
@@ -71,14 +87,16 @@ def load_risk_profile(path: Path | None = None) -> RiskProfile:
 
 
 def risk_profile_hash(profile: RiskProfile) -> str:
-    """Hash `sha256` canónico de `profile` sobre JSON ordenado (R13, patrón `firm_profile_hash`).
+    """Hash `sha256` canónico de `profile` sobre JSON ordenado (R13, R15, Change #97).
 
     Determinista: la misma ficha produce siempre el mismo hash; se incorpora a
-    `RunProvenance` (T6, R45).
+    `RunProvenance` (T6, R45). Incluye `trailing_lookback` y `trailing_atr_mult`.
     """
     canonical = {
-        "max_loss_limit_pct": profile.max_loss_limit_pct,
         "max_loss_limit_kind": profile.max_loss_limit_kind.value,
+        "max_loss_limit_pct": profile.max_loss_limit_pct,
+        "trailing_atr_mult": profile.trailing_atr_mult,
+        "trailing_lookback": profile.trailing_lookback,
         "weekend_holding_allowed": profile.weekend_holding_allowed,
     }
     raw = json.dumps(canonical, ensure_ascii=False, sort_keys=True).encode("utf-8")
