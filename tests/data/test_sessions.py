@@ -21,6 +21,7 @@ def test_sessions_table_has_the_eight_rows() -> None:
         "EURUSD",
         "GBPUSD",
         "USDJPY",
+        "BTCUSDT",
     }
 
 
@@ -39,9 +40,9 @@ def test_sessions_table_market_timezones() -> None:
 
 def test_session_window_unsupported_symbol_raises_key_error_with_context() -> None:
     with pytest.raises(KeyError) as exc_info:
-        session_window("BTCUSD", date(2024, 3, 15))
+        session_window("INVALID_SYM", date(2024, 3, 15))
     message = str(exc_info.value)
-    assert "BTCUSD" in message
+    assert "INVALID_SYM" in message
     for valid_symbol in (
         "US500",
         "NAS100",
@@ -51,6 +52,7 @@ def test_session_window_unsupported_symbol_raises_key_error_with_context() -> No
         "EURUSD",
         "GBPUSD",
         "USDJPY",
+        "BTCUSDT",
     ):
         assert valid_symbol in message
 

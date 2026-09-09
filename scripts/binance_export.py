@@ -162,9 +162,7 @@ def export_binance_m1(
         )
 
         out_path = store.write_chunk(df, symbol, Granularity.M1, actual_window, metadata)
-        print(
-            f"  [{month}] Guardado: {out_path.name} ({len(df):,} barras, h:{chunk_hash[:8]})"
-        )
+        print(f"  [{month}] Guardado: {out_path.name} ({len(df):,} barras, h:{chunk_hash[:8]})")
         downloaded += 1
 
     print("\n" + "=" * 50)

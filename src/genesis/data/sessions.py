@@ -71,6 +71,7 @@ SESSIONS: Mapping[str, SessionSpec | FixedUtcWindowSpec] = {
     "EURUSD": FixedUtcWindowSpec(symbol="EURUSD", open_utc=time(12, 0), close_utc=time(17, 0)),
     "GBPUSD": FixedUtcWindowSpec(symbol="GBPUSD", open_utc=time(12, 0), close_utc=time(17, 0)),
     "USDJPY": FixedUtcWindowSpec(symbol="USDJPY", open_utc=time(12, 0), close_utc=time(17, 0)),
+    "BTCUSDT": FixedUtcWindowSpec(symbol="BTCUSDT", open_utc=time(13, 30), close_utc=time(20, 0)),
 }
 """4 filas normativas del spec §2.3 (índices) + 4 filas del spec §2.x (oro/majors, R92).
 
