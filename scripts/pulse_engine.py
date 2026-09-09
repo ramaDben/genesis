@@ -72,15 +72,26 @@ def _repo_root() -> Path:
 def _docker_argv(root: Path) -> list[str]:
     """Mismos flags que el `.mcp.json` del plugin: el engine espera exactamente este entorno."""
     return [
-        _binario("docker"), "run", "-i", "--rm",
-        "--user", f"{os.getuid()}:{os.getgid()}",
-        "-v", f"{root}:/work",
-        "-v", "pulse-venv:/work/.venv",
-        "-v", "uv_warm_cache:/tmp/uv-cache",
-        "-w", "/work",
-        "-e", "PULSE_WORKSPACE_ROOT=/work",
-        "-e", "PULSE_SQLITE_PATH=/work/.pulse/state.sqlite",
-        "-e", "UV_HTTP_TIMEOUT=1800",
+        _binario("docker"),
+        "run",
+        "-i",
+        "--rm",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "-v",
+        f"{root}:/work",
+        "-v",
+        "pulse-venv:/work/.venv",
+        "-v",
+        "uv_warm_cache:/tmp/uv-cache",
+        "-w",
+        "/work",
+        "-e",
+        "PULSE_WORKSPACE_ROOT=/work",
+        "-e",
+        "PULSE_SQLITE_PATH=/work/.pulse/state.sqlite",
+        "-e",
+        "UV_HTTP_TIMEOUT=1800",
         IMAGE,
     ]
 
@@ -104,14 +115,18 @@ class _EngineSession:
         self._stdout = self._proc.stdout
 
     def __enter__(self) -> _EngineSession:
-        self._send({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "genesis/pulse_engine.py", "version": "1.0"},
-            },
-        })
+        self._send(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "genesis/pulse_engine.py", "version": "1.0"},
+                },
+            }
+        )
         self._await(1)
         self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         return self

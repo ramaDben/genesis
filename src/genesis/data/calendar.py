@@ -62,6 +62,7 @@ SYMBOL_CURRENCIES: Mapping[str, frozenset[str]] = {
     "NAS100": frozenset({"USD"}),
     "US30": frozenset({"USD"}),
     "GER40": frozenset({"EUR"}),
+    "BTCUSDT": frozenset({"USD"}),
 }
 """Divisas cuyos eventos de alto impacto afectan a cada símbolo convencional."""
 

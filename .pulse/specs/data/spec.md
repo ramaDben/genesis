@@ -872,3 +872,140 @@ Ninguna pregunta de alcance queda abierta (resueltas en `proposal.md`). Quedan p
   (Riesgo 3).
 - `.pulse/changes/archive/51-fix-validation-.../spec.md` — referencia de formato/estructura usada
   para este documento.
+
+---
+
+# Change #100: Soporte institucional de BTCUSDT (Binance Futures) en la Capa 1 y Pipeline de Validación
+
+## 1. Requisitos Normativos
+
+- **R144 (DEBE). Sesión Institucional de BTCUSDT en `sessions.py`:**
+  `src/genesis/data/sessions.py` DEBE incluir una entrada normativa para `BTCUSDT` en `SESSIONS`:
+  `"BTCUSDT": FixedUtcWindowSpec(symbol="BTCUSDT", open_utc=time(13, 30), close_utc=time(20, 0))`
+  Las horas corresponden a la ventana bursátil de contado de Wall Street (09:30 a 16:00 NY), de lunes a viernes, garantizando la mayor concentración de liquidez y previniendo riesgo overnight.
+
+- **R145 (DEBE). Ficha Canónica `SymbolFigure` para Binance Futures USDT-M:**
+  La ficha extendida de `BTCUSDT` DEBE tener exactamente los 10 campos normativos del dataclass cerrado, sin campos sintéticos ni no soportados:
+  `symbol="BTCUSDT"`, `tick_value=0.10`, `tick_size=0.10`, `volume_step=0.001`, `stops_level=0`, `freeze_level=0`, `digits=1`, `swap_long=0.0`, `swap_short=0.0`, `swap_rollover_day=0`.
+  Invariante: $\text{value\_per\_point} = \frac{\text{tick\_value}}{\text{tick\_size}} = 1.0$.
+
+- **R146 (DEBE). Perfil de Firma Institucional `binance_futures.json`:**
+  DEBE versionarse `src/genesis/data/profiles/binance_futures.json` con:
+  `name="binance_futures"`, `server_tz="UTC"`, `daily_reset_time="00:00:00"`, `daily_reset_tz="UTC"`, `daily_loss_limit_pct=5.0`.
+  `daily_reset_time="00:00:00"` garantiza que las barras intradía de la sesión 13:30 a 20:00 UTC se asignen correctamente al día calendario correspondiente.
+
+- **R147 (DEBE). Calendario Económico y Divisa Relevante:**
+  `src/genesis/data/calendar.py` DEBE mapear `BTCUSDT` en `SYMBOL_CURRENCIES` como `frozenset({"USD"})`, asegurando que las noticias macro de alto impacto en el dólar apliquen bracketing si se ejecuta con filtro de noticias.
+
+- **R148 (DEBE). Enriquecimiento Determinista de Metadatos Sidecar:**
+  Los 30 archivos `.meta.json` de `data/raw/BTCUSDT/m1/*/*.meta.json` DEBEN contener la `SymbolFigure` canónica de R145, permitiendo su recuperación determinista vía `_symbol_figure_from_store` sin requerir terminal MT5 en vivo.
+
+- **R149 (DEBE). Aislamiento de Capas e Invariantes de No-Regresión (R89):**
+  La integración de `BTCUSDT` en la Capa 1 no debe acoplarse con la lógica interna de `genesis.backtest`, `genesis.strategy` ni `genesis.validation`. La suite completa de pruebas unitarias existentes debe mantenerse al 100% verde.
+
+
+<!-- change:100-soporte-institucional-de-btcusdt-binance-futures-en-la-capa-1-y -->
+# Spec: Soporte institucional de BTCUSDT (Binance Futures) en la Capa 1 y Pipeline de Validación
+
+## Objetivo y Alcance
+
+Formalizar los requisitos normativos para que el activo **BTCUSDT** (Binance Futures USDT-M) cuente con soporte nativo de primera clase en la Capa 1 (`genesis.data`), permitiendo su consumo determinista por el motor de backtest y el pipeline de validación institucional de Genesis (`scripts/run_pipeline.py`).
+
+Este cambio se circunscribe estrictamente al dominio `data` y utilitarios asociados, sin alterar la lógica de cálculo de las capas superiores (R89).
+
+---
+
+## Requisitos Funcionales
+
+### R144 — Sesión Institucional de BTCUSDT en `sessions.py`
+`src/genesis/data/sessions.py` DEBE incluir una entrada normativa para `BTCUSDT` en su registro/resolución de sesiones por símbolo:
+1. Modelo: `FixedUtcWindowSpec`.
+2. Horario de apertura: `13:30:00` UTC.
+3. Horario de cierre: `20:00:00` UTC.
+4. Días operativos: Lunes a viernes (`weekday in (0, 1, 2, 3, 4)`).
+5. Las barras fuera de esta ventana o en fines de semana DEBEN ser filtradas o marcadas como fuera de sesión institucional, garantizando la consistencia del rango de apertura intradía (ORB) y la liquidación de posiciones antes del corte.
+
+### R145 — Ficha Canónica `SymbolFigure` para Binance Futures
+La especificación canónica para `BTCUSDT` DEBE satisfacer:
+```python
+SymbolFigure(
+    symbol="BTCUSDT",
+    digits=2,
+    tick_size=0.10,
+    tick_value=0.10,
+    volume_step=0.001,
+    volume_min=0.001,
+    stops_level=0,
+    freeze_level=0,
+    swap_long=0.0,
+    swap_short=0.0,
+    swap_rollover_day=0,
+)
+```
+Cualquier cálculo de valor por punto (`tick_value / tick_size`) DEBE dar como resultado exacto `1.0` ($1 USD de fluctuación de precio por cada 1.0 BTC de volumen).
+
+### R146 — Perfil de Firma Institucional Binance Futures
+DEBE crearse el archivo `src/genesis/data/profiles/binance_futures.json` válido conforme al esquema `FirmProfile`:
+1. `name`: `"binance_futures"`.
+2. `server_tz`: `"UTC"`.
+3. `daily_reset_time`: `"20:00"` (hora militar UTC alineada al cierre de la sesión de contado de Wall Street).
+4. `daily_loss_limit`: `0.05` (5%).
+5. `max_loss_limit`: `0.10` (10%).
+6. `commission_per_lot`: `0.0` (o equivalente modelado a nivel de spread/fee).
+7. `spread_pips`: `0.1` ($0.10 spread base).
+8. `slippage_ticks`: `1` ($0.10).
+
+### R147 — Enriquecimiento de Metadatos Sidecar (`.meta.json`)
+Los 30 archivos `.meta.json` ubicados en `data/raw/BTCUSDT/m1/*/*.meta.json` DEBEN actualizarse:
+1. Reemplazar `"symbol_figure": null` por el diccionario canónico de `SymbolFigure` fijado en R145.
+2. Preservar intactos `symbol="BTCUSDT"`, `timeframe="m1"`, conteo de filas, fechas de inicio/fin y hashes SHA-256 de las series de datos.
+3. Permitir que `_symbol_figure_from_store` en `scripts/run_pipeline.py` resuelva la ficha sin requerir fuentes MT5 en vivo.
+
+### R148 — Preservación de Invariantes y Aislamiento de Capas (R89)
+1. Ninguna modificación en `genesis.data` debe forzar cambios acoplados en `genesis.backtest`, `genesis.strategy` o `genesis.validation`.
+2. El runner institucional `scripts/run_pipeline.py` debe poder ejecutarse pasando `--symbol BTCUSDT` y `--firm-profile src/genesis/data/profiles/binance_futures.json` sin producir excepciones no controladas.
+3. La suite completa de pruebas unitarias existentes (749+ tests) DEBE mantenerse en verde.
+
+---
+
+## Criterios de Aceptación (BDD)
+
+### A1 — Resolución de Sesión para BTCUSDT
+```gherkin
+DADO que se importa get_session_spec desde genesis.data.sessions
+CUANDO se solicita la sesión para "BTCUSDT"
+ENTONCES se retorna una FixedUtcWindowSpec con open_utc=time(13, 30) y close_utc=time(20, 0)
+Y un timestamp en fin de semana (sábado/domingo) retorna is_open=False
+```
+
+### A2 — Invariante de Valor por Punto en SymbolFigure
+```gherkin
+DADO el payload canónico de BTCUSDT
+CUANDO se instancia SymbolFigure(**payload)
+ENTONCES tick_value / tick_size == 1.0
+Y volume_step == 0.001
+Y digits == 2
+```
+
+### A3 — Carga de Perfil de Firma
+```gherkin
+DADO el archivo src/genesis/data/profiles/binance_futures.json
+CUANDO se invoca FirmProfile.from_file(path)
+ENTONCES profile.name == "binance_futures"
+Y profile.server_tz == ZoneInfo("UTC")
+Y profile.daily_reset_time == time(20, 0)
+```
+
+### A4 — Reconstrucción de Ficha desde Store
+```gherkin
+DADO el almacén data/raw/BTCUSDT/m1/ con metadatos enriquecidos
+CUANDO se ejecuta _symbol_figure_from_store(store_path, "BTCUSDT")
+ENTONCES se obtiene la SymbolFigure idéntica a R145 sin lanzar RuntimeError
+```
+
+### A5 — Integridad de Suite
+```gherkin
+DADO el repositorio con los cambios de Capa 1
+CUANDO se ejecuta pytest
+ENTONCES 100% de los tests pasan sin fallas ni regresiones
+```
