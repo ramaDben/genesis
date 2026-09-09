@@ -22,16 +22,20 @@ def _formed_candidate(
 ) -> CandidateB:
     """Candidato con rango ya congelado (`_range_high=4505.0`, `_range_low=4498.0`)."""
     candidate = CandidateB(
-        figure=us500_figure, reference_balance=100_000.0, n_minutes=_N_MINUTES, risk_pct=0.00375
+        figure=us500_figure,
+        reference_balance=100_000.0,
+        n_minutes=_N_MINUTES,
+        risk_pct=0.00375,
+        rvol_threshold=0.0,
     )
-    # 1.ª barra fija la dirección (o doji si direction is None) y ya contribuye al rango.
     if direction is Direction.LONG:
-        first = (4500.0, 4500.1, 4499.9, 4501.0)
+        formation_close = 4501.0
     elif direction is Direction.SHORT:
-        first = (4500.0, 4500.1, 4499.9, 4499.0)
+        formation_close = 4499.0
     else:
-        first = (4500.0, 4500.1, 4499.9, 4500.0005)
-    rest = [(4500.0, 4500.1, 4499.9, 4500.0)] * (_N_MINUTES - 1)
+        formation_close = 4500.0005
+    first = (4500.0, 4500.1, 4499.9, formation_close)
+    rest = [(4500.0, 4500.1, 4499.9, formation_close)] * (_N_MINUTES - 1)
     bars = [first, *rest]
     for i, (open_, high, low, close) in enumerate(bars):
         candidate.on_bar(
@@ -39,7 +43,6 @@ def _formed_candidate(
                 BASE_TIME + timedelta(minutes=i), open_=open_, high=high, low=low, close=close
             )
         )
-    # Forzamos el rango exacto del ejemplo numérico del spec, sin reabrir la formación.
     candidate._range_high = _RANGE_HIGH
     candidate._range_low = _RANGE_LOW
     return candidate

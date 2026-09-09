@@ -110,6 +110,7 @@ def test_simulator_run_produce_ledger_con_candidate_id_b() -> None:
         reference_balance=100_000.0,
         n_minutes=_N_MINUTES,
         risk_pct=0.00375,
+        rvol_threshold=0.0,
     )
     simulator = _build_simulator(candidate, symbol_figure=symbol_figure)
 

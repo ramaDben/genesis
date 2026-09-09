@@ -75,11 +75,13 @@
       }
     },
     "B": {
-      "n_minutes": 15,
+      "n_minutes": 30,
       "atr_stop_frac": 1.0,
       "risk_pct": 0.00375,
       "atr_period": 14,
-      "tp_rr_multiple": 3.0
+      "tp_rr_multiple": 3.0,
+      "rvol_threshold": 1.50,
+      "rvol_lookback_days": 20
     }
   }
 }

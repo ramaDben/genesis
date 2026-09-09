@@ -2067,3 +2067,75 @@ verificación temporal con `reveal_type(CandidateB)` DEBE reportar `<class 'Cand
 - Issue #39; PR #29 (CI run 30420132741, `Found 19 diagnostics`).
 - `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` §2.1/§9/§11.1 y PA-3;
   `.agents/rules/architecture-conventions.md`, `.agents/rules/eval-tdd-conventions.md`.
+
+<!-- change:98-redise-o-institucional-del-candidato-b-market-intraday-momentum -->
+# Specification: Rediseño institucional del Candidato B (Market Intraday Momentum Gao et al. 2018 + Filtro RVOL)
+
+SSoT: `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` — §2.1, §2.3, §3, §5.1, §8, §9.
+Este documento formaliza `idea.md` y `proposal.md` en requisitos normativos verificables y **continúa** la numeración `R#` del delta-spec de `strategy` (`.pulse/specs/strategy/spec.md`, que llega hasta R135) empezando en **R136**.
+
+---
+
+## 1. Objetivo y Alcance
+
+### 1.1 Objetivo
+Sustituir la heurística de sesgo direccional de 1 minuto en `CandidateB` por el modelo microestructural de **Gao et al. (2018, *Market Intraday Momentum*)** con filtro de régimen por volumen relativo institucional ($\text{RVOL} \ge 1.50$), garantizando viabilidad frente a los costos de fricción del exchange.
+
+### 1.2 Alcance IN
+- `src/genesis/strategy/candidate_b/candidate.py`: Rediseño de `CandidateB` implementando `StrategyCandidate` y `RiskLevelsProvider`.
+- `src/genesis/strategy/candidate_b/config.py`: Parámetros `opening_window_minutes`, `rvol_threshold` y `rvol_lookback_days`.
+- `tests/strategy/candidate_b/`: Pruebas unitarias, property tests con `hypothesis` y tests de invarianza temporal (§9 del spec).
+
+### 1.3 Alcance OUT
+- Modificaciones al simulador de capa 3 (`simulator.py`) o a la lógica de trailing Chandelier (gobernadas por Change #97).
+- Optimización automática de hiperparámetros (Decisión D1: ensayo único registrado).
+
+---
+
+## 2. Requisitos Normativos
+
+### 2.1 Lógica de Señal y Ventana de Apertura
+
+- **R136 (DEBE). Determinación de Dirección por Retorno Acumulado de Apertura ($R_{\text{open}}$):**
+  `CandidateB` DEBE acumular las primeras $M$ barras M1 de la sesión ($t \in [0, M-1]$, default $M=30$).
+  En el minuto $M$, la dirección se calcula como:
+  $$R_{\text{open}} = \ln\left(\frac{C_{M-1}}{O_0}\right)$$
+  - Si $R_{\text{open}} > 10^{-7}$: Dirección `OrderSide.BUY`.
+  - Si $R_{\text{open}} < -10^{-7}$: Dirección `OrderSide.SELL`.
+  - Si $|R_{\text{open}}| \le 10^{-7}$: Dirección indefinida; ninguna orden DEBE ser emitida en la sesión.
+
+- **R137 (DEBE). Filtro de Volumen Relativo Institucional ($\text{RVOL}$):**
+  `CandidateB` DEBE mantener un buffer rodante forward-only con los volúmenes totales de apertura de los últimos $K$ días operativos cerrados (default $K=20$).
+  En el minuto $M$, DEBE calcular:
+  $$\text{RVOL} = \frac{V_{\text{open}, d}}{\text{Mediana}(V_{\text{open}, d-K \dots d-1})}$$
+  - Si $\text{RVOL} \ge 1.50$: La sesión queda habilitada para operar.
+  - Si $\text{RVOL} < 1.50$: La sesión se clasifica como *baja liquidez* y `on_bar` DEBE retornar `None` para todas las barras restantes de la jornada.
+
+- **R138 (DEBE). Inicialización y Manejo de Warmup:**
+  Durante los primeros $K$ días operativos del activo ($d < K$), `CandidateB` DEBE acumular los volúmenes de apertura sin emitir señales (`on_bar` retorna `None`), asegurando que la mediana se calcule sobre exactamente $K$ observaciones previas.
+
+- **R139 (DEBE). Gatillo de Ruptura Intradía ($t \ge M$):**
+  Una vez cumplida la condición $\text{RVOL} \ge 1.50$ y con dirección establecida:
+  - Para `BUY`: Si `bar.close > H_open`, emitir `EntryIntent(side=BUY, ...)`.
+  - Para `SELL`: Si `bar.close < L_open`, emitir `EntryIntent(side=SELL, ...)`.
+  - `CandidateB` DEBE emitir a lo sumo **1 `EntryIntent` por sesión**.
+
+- **R140 (DEBE). Niveles de Riesgo (`RiskLevelsProvider`):**
+  Inmediatamente tras emitir `EntryIntent`, `CandidateB.risk_levels(intent)` DEBE retornar:
+  - Para `BUY`: `stop_loss = L_open` (o derivado por ATR según config), `take_profit = entry + RR * (entry - stop_loss)`.
+  - Para `SELL`: `stop_loss = H_open` (o derivado por ATR según config), `take_profit = entry - RR * (stop_loss - entry)`.
+
+### 2.2 Configuración y Contratos
+
+- **R141 (DEBE). Extensión de `CandidateBConfig`:**
+  `CandidateBConfig` DEBE incluir los siguientes campos inmutables:
+  - `opening_window_minutes: int = 30` (validado $\ge 5$).
+  - `rvol_threshold: float = 1.50` (validado $> 0.0$).
+  - `rvol_lookback_days: int = 20` (validado $\ge 5$).
+
+- **R142 (DEBE). Invarianza Temporal y Anti-anticipación (§9 Spec):**
+  Cualquier mutación de barras con timestamp $t' > t$ NO DEBE alterar la salida de `on_bar(t)`.
+  El cálculo de $R_{\text{open}}$ y $\text{RVOL}$ DEBE depender exclusivamente de las barras $[0, M-1]$ de la sesión actual y de los días $[d-K, d-1]$ previos cerrados.
+
+- **R143 (DEBE). Disciplina Estadística (Decisión D1):**
+  Esta formulación constituye **1 único ensayo** formal para el ledger de validación de Genesis.

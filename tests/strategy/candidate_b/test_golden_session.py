@@ -24,6 +24,7 @@ def _new_candidate(us500_figure: SymbolFigure) -> CandidateB:
         risk_pct=0.00375,
         atr_stop_frac=None,
         tp_rr_multiple=3.0,
+        rvol_threshold=0.0,
     )
 
 
@@ -32,9 +33,9 @@ def _run_formation(
     *,
     first_close: float,
 ) -> None:
-    """15 barras de formación; la 1.ª fija la dirección (`first_close` vs `open=4500.0`)."""
+    """15 barras de formación; fija la dirección acumulada (`first_close` vs `open=4500.0`)."""
     first = (4500.0, 4500.1, 4499.9, first_close)
-    rest = [(4500.0, 4500.1, 4499.9, 4500.0)] * (_N_MINUTES - 1)
+    rest = [(4500.0, 4500.1, 4499.9, first_close)] * (_N_MINUTES - 1)
     for i, (open_, high, low, close) in enumerate([first, *rest]):
         candidate.on_bar(
             make_annotated_bar(

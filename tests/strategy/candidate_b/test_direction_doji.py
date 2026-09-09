@@ -19,26 +19,35 @@ def _candidate(figure: SymbolFigure, *, n_minutes: int = 15) -> CandidateB:
         reference_balance=100_000.0,
         n_minutes=n_minutes,
         risk_pct=0.00375,
+        rvol_threshold=0.0,
     )
 
 
 def test_primera_barra_doji_dentro_de_tolerancia_no_fija_direccion(
     us500_figure: SymbolFigure,
 ) -> None:
-    candidate = _candidate(us500_figure)
+    candidate = _candidate(us500_figure, n_minutes=1)
     bar = make_annotated_bar(
-        BASE_TIME, open_=4500.00, close=4500.003, high=4500.01, low=4499.99, in_session=True
+        BASE_TIME, open_=4500.00, close=4500.00001, high=4500.01, low=4499.99, in_session=True
     )
     candidate.on_bar(bar)
+    bar2 = make_annotated_bar(
+        BASE_TIME + timedelta(minutes=1), open_=4500.00, close=4500.00, in_session=True
+    )
+    candidate.on_bar(bar2)
     assert candidate._reference_direction is None
 
 
 def test_primera_barra_close_supera_epsilon_fija_long(us500_figure: SymbolFigure) -> None:
-    candidate = _candidate(us500_figure)
+    candidate = _candidate(us500_figure, n_minutes=1)
     bar = make_annotated_bar(
         BASE_TIME, open_=4500.00, close=4500.01, high=4500.02, low=4499.99, in_session=True
     )
     candidate.on_bar(bar)
+    bar2 = make_annotated_bar(
+        BASE_TIME + timedelta(minutes=1), open_=4500.01, close=4500.01, in_session=True
+    )
+    candidate.on_bar(bar2)
     assert candidate._reference_direction is Direction.LONG
 
 

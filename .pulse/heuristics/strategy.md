@@ -30,3 +30,11 @@
 **Contexto:** Cierre del Change #39 (dominio strategy); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-08-01T03:33:27.047641+00:00; tests_passed_at=2026-08-01T03:53:56.176206+00:00; artefactos: /work/.pulse/changes/39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables/idea.md, /work/.pulse/changes/39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables/proposal.md, /work/.pulse/changes/39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables/design.md, /work/.pulse/changes/39-fix-strategy-los-protocolos-de-config-declaran-miembros-mutables/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de strategy.
+### Heurística: cierre Change #98 strategy [#98 · strategy · 2026-09-09]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 98-redise-o-institucional-del-candidato-b-market-intraday-momentum
+**Contexto:** Cierre del Change #98 (dominio strategy); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-09-09T00:28:28.454010+00:00; tests_passed_at=2026-09-09T00:37:41.552500+00:00; artefactos: /work/.pulse/changes/98-redise-o-institucional-del-candidato-b-market-intraday-momentum/idea.md, /work/.pulse/changes/98-redise-o-institucional-del-candidato-b-market-intraday-momentum/proposal.md, /work/.pulse/changes/98-redise-o-institucional-del-candidato-b-market-intraday-momentum/design.md, /work/.pulse/changes/98-redise-o-institucional-del-candidato-b-market-intraday-momentum/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de strategy.

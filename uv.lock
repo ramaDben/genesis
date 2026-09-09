@@ -130,6 +130,7 @@ dev = [
     { name = "bandit" },
     { name = "deptry" },
     { name = "hypothesis" },
+    { name = "pulse-hooks-lib" },
     { name = "pydantic" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -154,6 +155,7 @@ dev = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "deptry", specifier = ">=0.25.1" },
     { name = "hypothesis", specifier = ">=6.165.5" },
+    { name = "pulse-hooks-lib", directory = ".agents/hooks/_lib" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
@@ -374,6 +376,20 @@ sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
 ]
+
+[[package]]
+name = "pulse-hooks-lib"
+version = "0.1.0"
+source = { directory = ".agents/hooks/_lib" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "pyarrow"
