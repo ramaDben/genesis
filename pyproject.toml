@@ -1,6 +1,6 @@
 [project]
 name = "genesis"
-version = "0.1.18"
+version = "0.2.0"
 description = "Pipeline de validación institucional para prop firms: torneo de candidatos de estrategia bajo gates mecánicos (Spec Génesis v1.4)."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -29,6 +29,7 @@ dev = [
   "tokei-pie>=1.2.2",
   "ty>=0.0.64",
   "vulture>=2.16",
+  "pulse-hooks-lib",
 ]
 
 [build-system]
@@ -110,3 +111,6 @@ per_rule_ignores = { DEP001 = ["MetaTrader5", "metatrader5"], DEP002 = ["MetaTra
 [tool.bandit]
 exclude_dirs = ["tests", ".agents/hooks/_lib/tests", ".venv", "venv"]
 skips = ["B101", "B105", "B404", "B603", "B607"]
+
+[tool.uv.sources]
+pulse-hooks-lib = { path = ".agents/hooks/_lib", editable = false }
