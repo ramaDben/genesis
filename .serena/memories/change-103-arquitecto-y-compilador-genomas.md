@@ -1,7 +1,7 @@
 # Change #103 — Compilador de Genomas Declarativos y Arquitecto de Estrategias (Fase 1)
 
 Fecha: 2026-09-10
-Estado: Fase `propose` iniciada.
+Estado: Fase `apply` completada con éxito. En fase `review`.
 Issue: [#103](https://github.com/ramaDben/genesis/issues/103)
 Rama: `feat/103-arquitecto-compilador-genomas`
 Precedentes y referencias:
@@ -24,7 +24,41 @@ El Director (Benjamín) y el Arquitecto (Agente) acordaron el protocolo de inter
 
 ---
 
-## 2. Artefactos Inicializados en Pulse
-- `.pulse/changes/103-compilador-de-genomas-declarativos-y-arquitecto-de-estrategias-fase-1/idea.md` (cierre de fase `explore`)
-- `.pulse/changes/103-compilador-de-genomas-declarativos-y-arquitecto-de-estrategias-fase-1/proposal.md` (fase `propose`)
-- `.pulse/changes/103-compilador-de-genomas-declarativos-y-arquitecto-de-estrategias-fase-1/state.yaml` (fase activa: `propose`)
+## 2. Componentes Construidos (Fase Apply)
+
+1. **Jerarquía de Errores de Dominio (`src/genesis/strategy/genome/errors.py`)**:
+   - `GenomeValidationError`: base de errores de validación sintáctica o de tipos.
+   - `MissingAcademicProvenanceError`: levantado inmediatamente si falta `paper_ref` o si `fidelity` no es canónico (criterio D1).
+   - `CompiledCandidateStateError`: violaciones de invariantes en ejecución de estrategia compilada.
+
+2. **Esquema Inmutable y Parser Fail-Fast (`src/genesis/strategy/genome/schema.py`)**:
+   - `GenomeFidelity` (`StrEnum`: `canonical`, `interpreted`, `optimized`, `combined`).
+   - Dataclasses inmutables con `frozen=True, slots=True`: `GenomeMetadata`, `GenomeUniverse`, `GenomeAlpha`, `GenomeRiskExit`, `StrategyGenome`.
+   - Función pura `parse_genome(source: Path | str | Mapping[str, Any]) -> StrategyGenome` con validación estricta de procedencia y tipado.
+
+3. **Candidato Compilado (`src/genesis/strategy/genome/candidate.py`)**:
+   - `CompiledGenomeCandidate`: implementa `StrategyCandidate` (`on_bar` forward-only) y `RiskLevelsProvider` (`risk_levels` con pop-on-read).
+   - Soporte para momentum Gao et al. (2018), filtro de liquidez institucional RVOL y trailing Chandelier con SL dinámico.
+
+4. **Compilador Puro (`src/genesis/strategy/genome/compiler.py`)**:
+   - `compile_genome(source) -> GenomeCandidateFactory`: callable compatible con el protocolo `CandidateFactory`.
+   - Inyecta `raw_config` para el cálculo invariante y determinista del hash `trial_id` en el `TrialLedger` (Capa 4).
+
+5. **Caso Testigo Canónico B.1 (`candidates/specs/candidate_b1_orb.yaml`)**:
+   - Especificación formal con procedencia académica (Gao et al. 2018), universo US500 M15, ORB 30 min, RVOL > 1.0 y Chandelier 22 / 3.0 ATR.
+
+---
+
+## 3. Criterios de Aceptación y Resultados CI (804 Tests Pasando)
+
+- **A1 / A2 (Sintaxis y Procedencia D1)**: 100% verificado en `tests/strategy/genome/test_parser.py` y `test_schema.py`.
+- **A3 / A4 (CandidateFactory e Invarianza de Hash)**: Verificado en `tests/strategy/genome/test_compiler.py`. Dos compilaciones con claves reordenadas producen exactamente el mismo SHA-256 de 64 caracteres.
+- **A5 (Equivalencia Matemática B vs B.1)**: Verificado en `tests/strategy/genome/test_b1_equivalence.py`. 100% de coincidencia bit a bit en 5.000 barras sintéticas deterministas y 5.000 barras reales de US500.
+- **A6 (Anti-leakage / Forward-only)**: Verificado en `tests/strategy/genome/test_candidate.py`.
+- **Suite Institucional Completa**:
+  - `uv run pytest`: **804 passed**, 1 skipped, **0 failures**.
+  - `uv run ruff check .`: **All checks passed**.
+  - `uv run ty check`: **All checks passed**.
+  - `uv run deptry src/`: **Success! No dependency issues found**.
+  - `uv run bandit -c pyproject.toml -r src/`: **0 issues**.
+  - `uv run vulture`: **0 issues**.
