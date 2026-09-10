@@ -1,5 +1,6 @@
 """Jerarquía de excepciones propia del Candidato A (`candidates.A.*`, R106, R110)."""
 
+from genesis.strategy.common.errors import IncrementalAtrStateError
 from genesis.strategy.errors import GenesisStrategyError
 
 
@@ -11,10 +12,5 @@ class CandidateAConfigError(GenesisStrategyError):
     """
 
 
-class SmcEngineStateError(GenesisStrategyError):
-    """Invariante interna imposible del motor `smc_engine`.
-
-    Se lanza, por ejemplo, cuando se consulta el valor de un `IncrementalAtr` antes de
-    su calentamiento (mismo criterio que `CandidateBStateError`). El mensaje debe
-    incluir el contexto explícito (campo/valor) que originó la violación.
-    """
+# Alias del error de estado para preservar compatibilidad con código existente
+SmcEngineStateError = IncrementalAtrStateError

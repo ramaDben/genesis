@@ -59,15 +59,21 @@ def _simulator(
     )
 
 
-def _position(*, sizing_hint: float = 0.1) -> OpenPosition:
+def _position(
+    *,
+    position_id: str = "pos-1",
+    sizing_hint: float = 0.1,
+    take_profit: float | None = 120.0,
+) -> OpenPosition:
     return OpenPosition(
+        position_id=position_id,
         candidate_id="B",
         symbol="US500",
         direction=Direction.LONG,
         entry_time=_ENTRY_TIME,
         entry_price=100.0,
         stop_loss=90.0,
-        take_profit=120.0,
+        take_profit=take_profit,
         sizing_hint=sizing_hint,
     )
 

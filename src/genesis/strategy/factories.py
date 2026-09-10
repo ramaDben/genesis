@@ -14,7 +14,7 @@ uniforme**, que es lo que permite inyectar un candidato que nadie escribió a ma
 """
 
 from collections.abc import Mapping
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_b.candidate import CandidateB
@@ -22,6 +22,7 @@ from genesis.strategy.contract import StrategyCandidate
 from genesis.strategy.errors import CandidateFactoryError
 
 
+@runtime_checkable
 class CandidateFactory(Protocol):
     """Construye un `StrategyCandidate` a partir de parámetros nombrados.
 
@@ -70,6 +71,8 @@ def candidate_b_factory(
         n_minutes=int(_require(params, "n_minutes", "B")),
         atr_stop_frac=float(_require(params, "atr_stop_frac", "B")),
         risk_pct=float(_require(params, "risk_pct", "B")),
+        rvol_threshold=float(params.get("rvol_threshold", 0.0)),
+        rvol_lookback_days=int(params.get("rvol_lookback_days", 20)),
     )
 
 

@@ -17,12 +17,14 @@ _BAR_TIME = datetime(2024, 1, 2, 14, 31, tzinfo=UTC)
 
 def _position(
     *,
+    position_id: str = "pos-1",
     direction: Direction = Direction.LONG,
     entry_price: float = 100.0,
     stop_loss: float = 90.0,
-    take_profit: float = 110.0,
+    take_profit: float | None = 110.0,
 ) -> OpenPosition:
     return OpenPosition(
+        position_id=position_id,
         candidate_id="B",
         symbol="US500",
         direction=direction,

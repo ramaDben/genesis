@@ -25,6 +25,7 @@ import pandas as pd
 from genesis.backtest.clock import SimulationClock
 from genesis.backtest.costs import CostsConfig, commission_for, slippage_for, spread_for, swap_for
 from genesis.backtest.errors import BacktestConfigError, SessionBoundaryError
+from genesis.backtest.exit_policy import _TrailingState
 from genesis.backtest.ledger import (
     CONFIG_VERSION,
     BreachEvent,
@@ -33,6 +34,7 @@ from genesis.backtest.ledger import (
     Ledger,
     RejectionRecord,
     RunProvenance,
+    TrailingStopMoved,
 )
 from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile, risk_profile_hash
 from genesis.backtest.ticks import (
@@ -47,6 +49,9 @@ from genesis.data.profile import FirmProfile, firm_profile_hash
 from genesis.data.sessions import session_window
 from genesis.data.store import AnnotatedBar, iter_bars
 from genesis.data.symbols import SymbolFigure
+from genesis.strategy.common.atr import IncrementalAtr
+from genesis.strategy.common.rolling_extreme import RollingExtreme
+from genesis.strategy.common.timeframe import BarAggregator, Timeframe
 from genesis.strategy.contract import Direction, EntryIntent, StrategyCandidate
 from genesis.strategy.inspector import InspectorFunnelConfig, inspect
 
@@ -66,22 +71,23 @@ class RiskLevelsProvider(Protocol):
     implementan este puerto además de `StrategyCandidate`.
     """
 
-    def risk_levels(self, intent: EntryIntent) -> tuple[float, float]:
+    def risk_levels(self, intent: EntryIntent) -> tuple[float, float | None]:
         """Retorna `(stop_loss, take_profit)` para `intent`, recién emitido por `on_bar`."""
         ...
 
 
 @dataclass(frozen=True, slots=True)
 class OpenPosition:
-    """Identidad inmutable de una posición abierta durante la simulación."""
+    """Identidad inmutable de una posición abierta durante la simulación (Change #97)."""
 
+    position_id: str
     candidate_id: str
     symbol: str
     direction: Direction
     entry_time: datetime
     entry_price: float
     stop_loss: float
-    take_profit: float
+    take_profit: float | None
     sizing_hint: float
 
 
@@ -133,7 +139,10 @@ def _resolve_fill_from_ticks(
     for tick in ticks_in_bar_window(bar, day_ticks):
         if _touches_stop_loss(position.direction, tick.last, position.stop_loss):
             return ResolvedFill(price=position.stop_loss, timestamp_utc=tick.timestamp_utc)
-        if _touches_take_profit(position.direction, tick.last, position.take_profit):
+        if (
+            position.take_profit is not None
+            and _touches_take_profit(position.direction, tick.last, position.take_profit)
+        ):
             return ResolvedFill(price=position.take_profit, timestamp_utc=tick.timestamp_utc)
     return None
 
@@ -143,14 +152,20 @@ def _resolve_fill_fallback(position: OpenPosition, bar: AnnotatedBar) -> Resolve
     direction = position.direction
     if _is_adverse_gap(direction, bar.open, position.stop_loss):
         return ResolvedFill(price=bar.open, timestamp_utc=bar.timestamp_utc)
-    if _is_favorable_gap(direction, bar.open, position.take_profit):
+    if (
+        position.take_profit is not None
+        and _is_favorable_gap(direction, bar.open, position.take_profit)
+    ):
         return ResolvedFill(price=position.take_profit, timestamp_utc=bar.timestamp_utc)
 
     sl_in_range = bar.low <= position.stop_loss <= bar.high
-    tp_in_range = bar.low <= position.take_profit <= bar.high
+    tp_in_range = (
+        position.take_profit is not None
+        and bar.low <= position.take_profit <= bar.high
+    )
     if sl_in_range:
         return ResolvedFill(price=position.stop_loss, timestamp_utc=bar.timestamp_utc)
-    if tp_in_range:
+    if tp_in_range and position.take_profit is not None:
         return ResolvedFill(price=position.take_profit, timestamp_utc=bar.timestamp_utc)
     return None
 
@@ -187,9 +202,14 @@ def _resolve_entry_fill(
 
 
 def _compute_rr(
-    direction: Direction, reference_price: float, stop_loss: float, take_profit: float
-) -> float:
-    """R:R propuesto para el embudo Inspector, a partir de `bar.close` como referencia."""
+    direction: Direction, reference_price: float, stop_loss: float, take_profit: float | None
+) -> float | None:
+    """R:R propuesto para el embudo Inspector, a partir de `bar.close` como referencia.
+
+    Retorna `None` si `take_profit is None` (salida estructural sin TP fijo, Change #97).
+    """
+    if take_profit is None:
+        return None
     if direction is Direction.LONG:
         risk = reference_price - stop_loss
         reward = take_profit - reference_price
@@ -288,6 +308,10 @@ class Simulator:
         self._intraday_peak_equity = starting_balance
         self._all_time_peak_equity = starting_balance
         self._session_closed_days: set[date] = set()
+        self._position_counter: int = 0
+        self._aggregator = BarAggregator()
+        self._atr = IncrementalAtr(period=14)
+        self._trailing_states: dict[str, _TrailingState] = {}
 
         candidate_id = getattr(candidate, "candidate_id", "?")
         provenance = RunProvenance(
@@ -350,13 +374,70 @@ class Simulator:
         if not self.account.account_exhausted:
             self._process_new_entries(bar, day_ticks, coverage)
 
+        # (6) NUEVO: alimentar el agregador con la barra, SIN condicionar a sesión (§3);
+        # si cerró una vela H1, alimentar el ATR del símbolo y despacharla a cada
+        # posición viva de ese símbolo, que la acepta o descarta por `open_time` (§2b).
+        self._update_h1_aggregation(bar)
+
     def _manage_open_positions(
         self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
     ) -> None:
-        for position in list(self.account.open_positions):
+        survivors: list[OpenPosition] = []
+        atr_val = self._atr.value() if self._atr.is_warmed() else None
+        for position in self.account.open_positions:
+            state = self._trailing_states.get(position.position_id)
+            if state is None:
+                state = _TrailingState(
+                    rolling_extreme=RollingExtreme(lookback=self.risk_profile.trailing_lookback),
+                    current_stop=position.stop_loss,
+                )
+                self._trailing_states[position.position_id] = state
+
+            new_stop = state.update_stop(
+                direction=position.direction,
+                atr=atr_val,
+                atr_mult=self.risk_profile.trailing_atr_mult,
+            )
+            if new_stop != position.stop_loss:
+                self.ledger.append(
+                    TrailingStopMoved(
+                        position_id=position.position_id,
+                        symbol=self.symbol,
+                        timestamp_utc=bar.timestamp_utc,
+                        stop_previo=position.stop_loss,
+                        stop_nuevo=new_stop,
+                    )
+                )
+                position = replace(position, stop_loss=new_stop)
+
             fill = _resolve_fill(position, bar, day_ticks, coverage)
             if fill is not None:
                 self._close_position(position, fill)
+                self._trailing_states.pop(position.position_id, None)
+            else:
+                survivors.append(position)
+        self.account.open_positions[:] = survivors
+
+    def _update_h1_aggregation(self, bar: AnnotatedBar) -> None:
+        """Paso (6): alimenta el agregador H1 con todas las barras M1 sin filtrar (R6, Change #97).
+
+        Al cierre de cada vela H1, alimenta el ATR del símbolo y despacha la vela a cada
+        posición viva de ese símbolo, que la acepta o descarta según su `entry_time`.
+        """
+        emitted_bars = self._aggregator.push(bar)
+        for agg_bar in emitted_bars:
+            if agg_bar.timeframe == Timeframe.H1:
+                self._atr.update(agg_bar.high, agg_bar.low, agg_bar.close)
+                for pos in self.account.open_positions:
+                    state = self._trailing_states.get(pos.position_id)
+                    if state is not None and agg_bar.open_time >= pos.entry_time:
+                        if pos.direction is Direction.LONG:
+                            state.rolling_extreme.update(agg_bar.high)
+                        else:
+                            state.rolling_extreme.update(agg_bar.low)
+        if bar.timestamp_utc >= bar.session_close_utc:
+            # R18: descarta el acumulador al cierre de sesión para evitar velas quiméricas
+            self._aggregator = BarAggregator()
 
     def _floating_pnl(self, position: OpenPosition, price: float) -> float:
         """P&L no realizado de `position` a `price` (bruto, sin costos), en dinero."""
@@ -452,6 +533,7 @@ class Simulator:
                 self._register_weekend_breaches(bar)
             self._force_close_all_positions(bar, day_ticks, coverage)
             self._session_closed_days.add(bar.trading_day)
+            self._aggregator = BarAggregator()
 
         if (
             bar.timestamp_utc > close_utc
@@ -493,6 +575,8 @@ class Simulator:
             if fill is None:
                 fill = ResolvedFill(price=bar.close, timestamp_utc=bar.timestamp_utc)
             self._close_position(position, fill)
+        self.account.open_positions.clear()
+        self._trailing_states.clear()
 
     def _process_new_entries(
         self, bar: AnnotatedBar, day_ticks: list[TickRow], coverage: bool
@@ -532,7 +616,7 @@ class Simulator:
         day_ticks: list[TickRow],
         coverage: bool,
         stop_loss: float,
-        take_profit: float,
+        take_profit: float | None,
     ) -> None:
         entry_fill = _resolve_entry_fill(intent, bar, day_ticks, coverage)
         ticks_window = ticks_in_bar_window(bar, day_ticks) if coverage else None
@@ -551,7 +635,10 @@ class Simulator:
         entry_cost = commission + cost_points
         self.account.balance -= entry_cost
 
+        self._position_counter += 1
+        position_id = f"{self.ledger.provenance.dataset_hash[:8]}-{self._position_counter}"
         position = OpenPosition(
+            position_id=position_id,
             candidate_id=intent.candidate_id,
             symbol=self.symbol,
             direction=intent.direction,
@@ -562,6 +649,10 @@ class Simulator:
             sizing_hint=intent.sizing_hint,
         )
         self.account.open_positions.append(position)
+        self._trailing_states[position.position_id] = _TrailingState(
+            rolling_extreme=RollingExtreme(lookback=self.risk_profile.trailing_lookback),
+            current_stop=stop_loss,
+        )
         self.ledger.append(
             FillRecord(
                 candidate_id=intent.candidate_id,
@@ -580,6 +671,8 @@ class Simulator:
         exit_fill = _resolve_fill(position, bar, day_ticks, coverage)
         if exit_fill is not None:
             self._close_position(position, exit_fill)
+            self.account.open_positions.remove(position)
+            self._trailing_states.pop(position.position_id, None)
 
     def _close_position(self, position: OpenPosition, fill: ResolvedFill) -> None:
         # Mismo modelo monetario que el equity flotante, escrito una sola vez: si las dos
@@ -616,7 +709,7 @@ class Simulator:
             )
         )
         self._register_news_breaches(position, fill)
-        self.account.open_positions.remove(position)
+        self._trailing_states.pop(position.position_id, None)
 
     def _register_news_breaches(self, position: OpenPosition, fill: ResolvedFill) -> None:
         """R27/ADR-G7: un `BreachEvent(NEWS)` por cada ventana que intersecta la tenencia.

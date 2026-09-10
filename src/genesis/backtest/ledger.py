@@ -83,7 +83,18 @@ class RunProvenance:
     risk_profile_hash: str
 
 
-Decision = RejectionRecord | FillRecord | BreachEvent
+@dataclass(frozen=True, slots=True)
+class TrailingStopMoved:
+    """Evento de modificación efectiva de stop loss por trailing Chandelier (Change #97)."""
+
+    position_id: str
+    symbol: str
+    timestamp_utc: datetime
+    stop_previo: float
+    stop_nuevo: float
+
+
+Decision = RejectionRecord | FillRecord | BreachEvent | TrailingStopMoved
 """Tipo suma del `payload` de una entrada del ledger (ADR-G9, spec §9 pregunta abierta)."""
 
 
