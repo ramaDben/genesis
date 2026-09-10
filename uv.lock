@@ -146,7 +146,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "metatrader5", marker = "sys_platform == 'win32'", specifier = ">=5.0.5735" },
+    { name = "metatrader5", marker = "sys_platform == 'win32'", specifier = ">=5.0.6180" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "pandas", specifier = ">=3.0.5" },
     { name = "pyarrow", specifier = ">=24.0.0" },
@@ -261,13 +261,13 @@ wheels = [
 
 [[package]]
 name = "metatrader5"
-version = "5.0.5735"
+version = "5.0.6180"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/51/4a70004f8af537393861c31a3c211f818b8199fea8baf8c0b1f571d67c56/metatrader5-5.0.5735-cp314-cp314-win_amd64.whl", hash = "sha256:b69765be2eece9f884b60b6d008c7608ad77d7bfc5fbfbb8c23e3e3bb8dc88ba", size = 49590, upload-time = "2026-04-04T16:44:12.306Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/44/6354e8f17760467b26b781da0ca41e67e70c95e91badd06a43250d3f1487/metatrader5-5.0.6180-cp314-cp314-win_amd64.whl", hash = "sha256:9cbaf92dc525cb7bdeac7656d9a1b3e9e467dd9d34eb3a0107b58d651be3a5fc", size = 49531, upload-time = "2026-09-05T04:59:48.952Z" },
 ]
 
 [[package]]
