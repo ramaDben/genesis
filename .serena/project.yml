@@ -55,7 +55,7 @@ default_modes:
 # initial prompt for the project. It will always be given to the LLM upon activating the project
 # (contrary to the memories, which are loaded on demand).
 initial_prompt: "You are working on genesis, a Python 3.14 systematic-trading validation
-  pipeline for prop firms (Spec Génesis v1.4, the SSoT at docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md;
+  pipeline for prop firms (Spec Génesis v1.5, the SSoT at docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md;
   versions v1.1 to v1.3 remain in docs/ only as history — never cite them as reference).
   The system runs a tournament of strategy candidates (A: CT sweep-fade, B: intraday
   ORB on indices — priority, C: TSMOM — deferred) through identical mechanical gates
@@ -81,7 +81,7 @@ initial_instructions: "Integrate the available MCP toolchain: serena for LSP-bac
   memory for persistent knowledge graph context, filesystem for codebase navigation,
   plus the user-scope github, context7 and sequential-thinking servers. GitHub issues/labels
   encode the SDD phases (state:1-explore … state:8-close); hydrate context from issues
-  before implementing. Honor docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+  before implementing. Honor docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
   as the single source of truth; gates are never relaxed. Before touching code or
   answering, call list_memories and read the ones whose names look relevant — they are
   the cross-session context channel and are versioned in .serena/memories/. Do the same
