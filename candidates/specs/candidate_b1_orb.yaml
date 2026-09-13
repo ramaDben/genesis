@@ -1,0 +1,26 @@
+﻿metadata:
+  id: "CANDIDATE-B1-ORB"
+  author: "Gao et al."
+  paper_ref: "SSRN: Gao, Han, Li & Zhou (2018) Market Intraday Momentum"
+  economic_rationale: "Desbalance de inventario y flujo institucional en la primera media hora de apertura de Wall Street."
+  fidelity: "canonical"
+
+universe:
+  symbol: "US500"
+  timeframe: "M15"
+  session: "US_EQUITY_OPEN"
+
+alpha:
+  regime_filter:
+    kind: "rvol"
+    threshold: 1.0
+    lookback_days: 10
+  entry_trigger:
+    kind: "opening_range_breakout"
+    range_minutes: 30
+
+risk_exit:
+  kind: "chandelier_trailing"
+  params:
+    lookback_bars: 22
+    atr_multiplier: 3.0
