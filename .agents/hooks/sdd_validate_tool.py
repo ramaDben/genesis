@@ -73,6 +73,39 @@ _ALWAYS_ALLOWED_GLOBS: list[str] = [
 # Canonical write-tool names (normalized)
 _WRITE_TOOLS: frozenset[str] = frozenset({"Write", "Edit", "MultiEdit", "ApplyPatch"})
 
+# Herramientas que ejecutan un comando de shell.
+#
+# Eran un bypass completo: `run_command` con `sed -i src/genesis/...` escribía
+# sin pasar por ninguna allowlist (medido el 2026-09-12).  El agujero existía
+# también para el `Bash` de Claude Code; se tapan los dos de una vez.
+_COMMAND_TOOLS: frozenset[str] = frozenset({"RunCommand"})
+
+_COMMAND_TOOL_MAP: dict[str, str] = {
+    "run_command": "RunCommand",      # antigravity
+    "run_terminal_cmd": "RunCommand",
+    "Bash": "RunCommand",             # claude code
+    "shell": "RunCommand",            # codex
+    "execute_shell_command": "RunCommand",  # serena
+}
+
+# Rutas que ningún comando puede tocar fuera de la fase `apply`.
+_COMMAND_PROTECTED = re.compile(r"(?:^|[\s'\"=(/])(?:\./)?(src|tests)/")
+
+# Construcciones de shell que escriben.  Heurística deliberada: reconocer
+# "esto muta un archivo" en shell arbitrario es indecidible, así que esto NO es
+# una garantía, es una red.  La garantía dura vive en `permissions.deny` de
+# Antigravity (`write_file(src/)`, `command(regex:...)`), que se evalúa con
+# precedencia `Deny > Ask > Allow` y no depende de este parser.
+#
+# Limitaciones conocidas y aceptadas: variables (`$D/x.py`), heredocs, base64,
+# `python -c "open(...,'w')"`, y cualquier indirección pasan.  Se cubre el caso
+# accidental y el perezoso, no al adversario decidido.
+_COMMAND_WRITERS = re.compile(
+    r"(?:>>?\s|\btee\b|\bsed\b[^|;]*\s-[a-zA-Z]*i|\bcp\b|\bmv\b|\brm\b|\btruncate\b"
+    r"|\bdd\b|\bpatch\b|\btouch\b|\bchmod\b|\bmkdir\b|\bln\b"
+    r"|\bgit\s+(?:apply|checkout|restore|clean|stash)\b)"
+)
+
 # Maps surface tool names to canonical forms
 _TOOL_NAME_MAP: dict[str, str] = {
     "write_file": "Write",
@@ -212,11 +245,17 @@ def _block(client: str, reason: str) -> dict:
     """Construye la respuesta de bloqueo en el dialecto del cliente.
 
     Claude Code y Codex comparten forma: ``permissionDecision: "deny"`` dentro de
-    ``hookSpecificOutput``.  Gemini/Antigravity usan ``reject``/``rejectReason``.
+    ``hookSpecificOutput``.  Gemini usa ``reject``/``rejectReason``.
+    Antigravity CLI usa ``decision``/``reason`` **en la raíz**.
 
     Hasta el 2026-09-05 la rama de Claude emitía el dialecto de Gemini, así que
     **el bloqueo se ignoraba en silencio** y la escritura procedía igual.  Era el
     único cliente cuya rama nunca se había ejercitado.
+
+    El 2026-09-12 se encontró el mismo fallo en la rama de Antigravity, que
+    emitía el dialecto de Gemini: agy habría ignorado todo bloqueo.  La forma
+    correcta está en https://antigravity.google/docs/hooks/ — el vocabulario es
+    ``allow | deny | ask | force_ask | deny_unless_prior_grant``.
     """
     if client in ("claude", "codex"):
         return {
@@ -226,8 +265,67 @@ def _block(client: str, reason: str) -> dict:
                 "permissionDecisionReason": reason,
             }
         }
-    # gemini / antigravity
+    if client == "antigravity":
+        return {"decision": "deny", "reason": reason}
+    # gemini
     return {"hookSpecificOutput": {"reject": True, "rejectReason": reason}}
+
+
+# ---------------------------------------------------------------------------
+# Command tools
+# ---------------------------------------------------------------------------
+
+
+def _command_text(args: dict) -> str:
+    """Devuelve el comando a ejecutar, mirando las claves de cada superficie."""
+    for key in ("CommandLine", "command", "Command", "cmd", "shell_command"):
+        val = args.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    return ""
+
+
+def _check_command(client: str, name: str, t_args: dict, phase: str) -> dict:
+    """Decide sobre una ejecución de shell.
+
+    Durante `apply` los comandos sobre `src/`/`tests/` son legítimos (es la fase
+    que los habilita).  Fuera de `apply`, un comando que además de nombrar esas
+    rutas trae una construcción de escritura se bloquea.
+
+    Un comando ilegible se PERMITE, a diferencia de una herramienta de escritura
+    sin rutas.  No es incoherencia: una herramienta de escritura escribe por
+    definición, un comando no.  Denegar todo comando que no se pueda parsear
+    equivale a denegar `ls`, y un guardián que inutiliza la sesión se apaga al
+    día siguiente.  La capa dura para este caso es `permissions.deny` de
+    Antigravity, que no depende de este parser.
+    """
+    command = _command_text(t_args)
+    if not command:
+        log(
+            f"sdd-validate: {name!r} sin comando legible en {sorted(t_args)}, "
+            "PERMITIDO (ver docstring)"
+        )
+        return _allow()
+
+    if phase == "apply":
+        log(f"sdd-validate: PERMITIDO {name} (fase apply habilita src/ y tests/)")
+        return _allow()
+
+    toca = _COMMAND_PROTECTED.search(command)
+    escribe = _COMMAND_WRITERS.search(command)
+    if toca and escribe:
+        reason = (
+            f"BLOQUEADO: {name} parece escribir en '{toca.group(1)}/' durante la fase "
+            f"'{phase}'. Comando: {command[:200]!r}. "
+            "Un cambio bajo `src/genesis/**` o `tests/**` exige un change activo en "
+            "fase `apply` — pasa por el ciclo SDD (ver CLAUDE.md). Si el comando no "
+            "escribe, reformulalo para que no dispare la heurística, o hacelo en la fase correcta."
+        )
+        log(f"sdd-validate: {reason}")
+        return _block(client, reason)
+
+    log(f"sdd-validate: PERMITIDO {name} (no escribe en rutas protegidas, fase {phase})")
+    return _allow()
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +335,11 @@ def _block(client: str, reason: str) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Pulse SDD write-guard hook")
-    ap.add_argument("--client", default="gemini", choices=["gemini", "claude", "codex"])
+    ap.add_argument(
+        "--client",
+        default="gemini",
+        choices=["gemini", "claude", "codex", "antigravity"],
+    )
     args = ap.parse_args()
 
     payload = read_payload()
@@ -255,6 +357,13 @@ def main() -> int:
     # (p. ej. `mcp__serena__replace_symbol_body`), así que hay que quitar el
     # prefijo antes de consultar el mapa o toda escritura vía MCP se cuela.
     bare = re.sub(r"^mcp__[^_]+(?:_[^_]+)*__", "", name)
+
+    # Herramientas de shell: camino propio.  No traen "ruta" en los argumentos,
+    # así que el chequeo por globs no las alcanza — hay que leer el comando.
+    if _COMMAND_TOOL_MAP.get(bare, _COMMAND_TOOL_MAP.get(name)) in _COMMAND_TOOLS:
+        emit_response(_check_command(args.client, name, t_args, read_phase()))
+        return 0
+
     canonical = _TOOL_NAME_MAP.get(bare, _TOOL_NAME_MAP.get(name, name))
     if canonical not in _WRITE_TOOLS:
         log(f"sdd-validate: {name!r} is not a write tool, allowing")
