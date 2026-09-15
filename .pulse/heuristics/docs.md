@@ -30,3 +30,11 @@
 **Contexto:** Cierre del Change #20 (dominio docs); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-07-12T15:28:41.985256+00:00; tests_passed_at=2026-07-12T15:40:48.985199+00:00; artefactos: /work/.pulse/changes/20-docs-spec-backfill-de-la-ficha-ftmo-valores-confirmados-por-el-s/idea.md, /work/.pulse/changes/20-docs-spec-backfill-de-la-ficha-ftmo-valores-confirmados-por-el-s/proposal.md, /work/.pulse/changes/20-docs-spec-backfill-de-la-ficha-ftmo-valores-confirmados-por-el-s/design.md, /work/.pulse/changes/20-docs-spec-backfill-de-la-ficha-ftmo-valores-confirmados-por-el-s/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de docs.
+### Heurística: cierre Change #106 docs [#106 · docs · 2026-09-12]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 106-spec-v1-5-reorientar-el-torneo-de-cfds-mt5-a-futuros-cme-en-prop
+**Contexto:** Cierre del Change #106 (dominio docs); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-09-12T02:06:07.514373+00:00; tests_passed_at=2026-09-12T04:12:46.244015+00:00; artefactos: /work/.pulse/changes/106-spec-v1-5-reorientar-el-torneo-de-cfds-mt5-a-futuros-cme-en-prop/idea.md, /work/.pulse/changes/106-spec-v1-5-reorientar-el-torneo-de-cfds-mt5-a-futuros-cme-en-prop/proposal.md, /work/.pulse/changes/106-spec-v1-5-reorientar-el-torneo-de-cfds-mt5-a-futuros-cme-en-prop/design.md, /work/.pulse/changes/106-spec-v1-5-reorientar-el-torneo-de-cfds-mt5-a-futuros-cme-en-prop/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de docs.

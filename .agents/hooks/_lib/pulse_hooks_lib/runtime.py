@@ -100,22 +100,35 @@ def tool_name(payload: dict[str, Any], client: str) -> str:
 
     - **claude** / **codex**: ``tool_name`` (snake_case)
     - **gemini**: ``toolName`` o ``call.name``
+    - **antigravity**: ``toolCall.name`` (camelCase)
 
     Hasta el 2026-09-05 la rama de Claude leía únicamente ``toolName``.  Claude
     Code envía ``tool_name``, así que el nombre salía vacío y el guardián
     permitía la operación sin siquiera mirarla.  Se aceptan ambas formas para no
     volver a depender de qué dialecto usa cada superficie.
+
+    MISMO FALLO, OTRA SUPERFICIE (medido el 2026-09-12): Antigravity CLI envía
+    ``toolCall: {name, args}``.  Ninguna de las formas anteriores lo cubría, así
+    que el nombre salía vacío y ``sdd_validate_tool`` respondía "no tool name
+    found, allowing": **agy escribía en `src/genesis/**` sin gate y sin ruido**.
+    Por eso ``toolCall`` se inspecciona para TODOS los clientes y no detrás de un
+    ``if client == ...``: hacer depender un control de seguridad de que el flag
+    ``--client`` esté bien puesto ya falló dos veces.
     """
     for key in ("tool_name", "toolName"):
         name = payload.get(key)
         if name:
             return str(name)
 
+    # antigravity — https://antigravity.google/docs/hooks/
+    tool_call = payload.get("toolCall")
+    if isinstance(tool_call, dict) and tool_call.get("name"):
+        return str(tool_call["name"])
+
     # gemini alternative representation
-    if client == "gemini":
-        call = payload.get("call")
-        if isinstance(call, dict):
-            return str(call.get("name", ""))
+    call = payload.get("call")
+    if isinstance(call, dict) and call.get("name"):
+        return str(call["name"])
 
     return ""
 
@@ -125,10 +138,20 @@ def tool_args(payload: dict[str, Any], client: str) -> dict[str, Any]:
 
     - **claude** / **codex**: ``tool_input`` (dict, o str en codex)
     - **gemini**: ``toolArgs`` o ``call.args``
+    - **antigravity**: ``toolCall.args``
 
     Misma corrección que en :func:`tool_name` (2026-09-05): Claude Code envía
-    ``tool_input``, no ``toolInput``.
+    ``tool_input``, no ``toolInput``.  Y misma razón que allí para mirar
+    ``toolCall`` sin condicionar al cliente (2026-09-12).
     """
+    # antigravity — se mira primero y para todos los clientes: ningún otro
+    # dialecto usa esta clave, así que no hay ambigüedad posible.
+    tool_call = payload.get("toolCall")
+    if isinstance(tool_call, dict):
+        args = tool_call.get("args")
+        if isinstance(args, dict):
+            return args
+
     if client in ("claude", "codex"):
         for key in ("tool_input", "toolInput"):
             raw = payload.get(key)

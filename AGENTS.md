@@ -4,7 +4,7 @@ Guía para agentes LLM trabajando en este repo. Complementa `CLAUDE.md` (comando
 
 ## Fuente de verdad
 
-`docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` es el SSoT. Los umbrales go/no-go (gates G/C/P/T) son normativos: **nunca se relajan**; un NO-GO honesto es un éxito del proceso.
+`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` es el SSoT. Los umbrales go/no-go (gates G/C/P/T) son normativos: **nunca se relajan**; un NO-GO honesto es un éxito del proceso.
 
 ## Ciclo SDD (8 fases, orquestado por pulse-engine)
 

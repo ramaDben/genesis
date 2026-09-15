@@ -165,7 +165,7 @@ export nuevo antes de comparar resultados entre datasets.
 
 ## Documentación
 
-- **SSoT vigente**: [`docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`](docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md) — arquitectura, umbrales go/no-go definitivos, manejo de errores, estrategia de testing y gobernanza.
+- **SSoT vigente**: [`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md`](docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md) — arquitectura, umbrales go/no-go definitivos, manejo de errores, estrategia de testing y gobernanza.
 - Las versiones v1.1 a v1.3 se conservan en `docs/` solo como historial. **No las uses como referencia.**
 - Investigación en curso (RFC, **no** normativo): [`docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md`](docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md) — propuesta para convertir el torneo en un laboratorio de estrategias publicadas, con la semántica de conteo de ensayos que el arquitecto necesita.
 - Todo cambio de alcance se valida contra el spec; los gates no se relajan.

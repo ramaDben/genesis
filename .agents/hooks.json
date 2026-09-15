@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "Hooks de Antigravity CLI (agy) para genesis. Ubicación fijada por agy:",
+    "<workspace>/.agents/hooks.json  —  https://antigravity.google/docs/hooks/",
+    "",
+    "POR QUÉ EXISTE (medido el 2026-09-12, no supuesto)",
+    "",
+    "genesis está en `trustedWorkspaces` de agy y su `toolPermission` es",
+    "`always-proceed`. Con este archivo en `{}`, agy podía escribir en",
+    "`src/genesis/**` sin fase, sin gate y sin ruido: el guardián no reconocía",
+    "el payload `toolCall{name,args}` y respondía `no tool name found, allowing`.",
+    "Es el modo de fallo de los precedentes #68/#69, automatizado.",
+    "",
+    "MATCHER `.*` A PROPÓSITO",
+    "",
+    "Un matcher estrecho es exactamente cómo se coló `run_command` hasta hoy.",
+    "Se paga ~1,5 s de arranque de WSL por llamada a herramienta; es el precio",
+    "de que ninguna herramienta nueva de agy entre sin pasar por el guardián.",
+    "Si el costo molesta, se acota DESPUÉS de medir, no antes.",
+    "",
+    "SEGUNDA CAPA",
+    "",
+    "Este hook es la capa blanda. La dura es `permissions.deny` en el",
+    "settings.json de agy, que se evalúa con precedencia `Deny > Ask > Allow` y",
+    "no depende de que este script arranque bien."
+  ],
+  "genesis-sdd-guard": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "wsl -d Ubuntu -- bash -lc 'cd \"$HOME/genesis\" && exec uv run .agents/hooks/sdd_validate_tool.py --client antigravity'",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

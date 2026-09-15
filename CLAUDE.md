@@ -2,9 +2,31 @@
 
 ## Qué es este proyecto
 
-Pipeline de validación institucional para prop firms: un **torneo de candidatos de estrategia** (A: CT sweep-fade, B: ORB intradía en índices — prioridad, C: TSMOM — diferido) bajo gates mecánicos idénticos (G/C/P/T). **SSoT**: `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` — todo cambio de alcance se valida contra el spec, los gates nunca se relajan.
+Pipeline de validación institucional para prop firms: un **torneo de candidatos de estrategia** (A: CT sweep-fade, B: ORB intradía en índices — prioridad, C: TSMOM — diferido) bajo gates mecánicos idénticos (G/C/P/T). **SSoT**: `docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` — todo cambio de alcance se valida contra el spec, los gates nunca se relajan.
 
-**Visión de largo plazo** (contexto para decidir alcance, no alcance vigente): las 4 capas son agnósticas a la estrategia, así que genesis es un **evaluador de caja negra** — el torneo A/B/C es el primer caso de uso, no el techo. El destino es una búsqueda automatizada de candidatos, condicionada a un **ledger de ensayos persistente** ([#53](https://github.com/ramaDben/genesis/issues/53)) que alimente el `n_trials` del DSR: hoy solo cuenta la grilla interna de una corrida, y sin ese contador honesto G4 dejaría de proteger en silencio. El ledger va antes que el arquitecto. Ver el README para los dos invariantes ya decididos (genoma declarativo, señal de retorno sin OOS).
+**Visión de largo plazo** (contexto para decidir alcance, no alcance vigente): las 4 capas son
+agnósticas a la estrategia, así que genesis es un **evaluador de caja negra** — el torneo A/B/C es
+el primer caso de uso, no el techo. El destino es una búsqueda automatizada de candidatos.
+
+Sus dos prerrequisitos **ya están construidos**, y eso cambia el orden de trabajo que este archivo
+declaraba antes:
+
+- El **ledger de ensayos persistente** ([#53](https://github.com/ramaDben/genesis/issues/53),
+  cerrado el 2026-08-11) alimenta el `n_trials` del DSR. `validation/trial_ledger.py` está cableado
+  en `validation/verdict.py`, que suma `ledger_extra_trials` sobre la grilla interna de la corrida.
+  Sin ese contador honesto G4 dejaría de proteger en silencio; ya no es el caso.
+- El **arquitecto, Fase 1** ([#103](https://github.com/ramaDben/genesis/issues/103), mergeado el
+  2026-09-10) trajo el compilador de genomas declarativos (`strategy/genome/`).
+
+Lo que falta ya no es el orden, son los controles. El **Gate 0** de admisión teórica todavía no
+tiene ejecutor mecánico ([#105](https://github.com/ramaDben/genesis/issues/105),
+[#107](https://github.com/ramaDben/genesis/issues/107)): hoy conviven dos esquemas de metadata en
+`candidates/specs/` y nada los valida. Y varias decisiones del RFC del laboratorio
+([#57](https://github.com/ramaDben/genesis/issues/57)) siguen abiertas — **D2** incluida, que el
+código resolvió por elusión (`CANDIDATE_REGISTRY` sigue indexado por letra y el camino de genomas
+simplemente no lo usa). Ver `mem:auditoria-alineacion-issues-2026-09-14`.
+
+Ver el README para los dos invariantes ya decididos (genoma declarativo, señal de retorno sin OOS).
 
 ## Arquitectura (4 capas agnósticas a la estrategia, `src/genesis/`)
 
@@ -148,9 +170,17 @@ que un agente que arranca sin contexto entiende el estado real del proyecto.
   función o una cifra, verificarlo contra el código actual antes de afirmarlo. Cuando algo
   cambie, actualizar la memoria existente en vez de acumular duplicados.
 
+## Admisión Teórica de Candidatos (Gate 0)
+
+Ninguna estrategia o hipótesis de trading se implementa ni se somete al pipeline sin superar el **Gate 0** documentado en `docs/PROTOCOLO_ADMISION_ESTRATEGIAS.md`.
+Todo candidato requiere justificación en dos fuentes independientes antes de codificar:
+1. **Academia canónica (SSRN/JFE/JF)**: Paper formal, autores y mecanismo económico/microestructural del edge.
+2. **Cuantitativa libre (AQR/Man AHL/Alpha Architect)**: Operativa institucional, clusters de volatilidad y modos de falla.
+
 ## Convenciones
 
 - Commits: `<type>(<domain>): <subject>`, cerrando issues con `Refs #<n>`.
 - Testing según spec §9: unit+property (`hypothesis`), golden tests, integración, estadístico. Propiedad central: ningún output de `on_bar(t)` cambia si se mutan barras posteriores a `t`.
 - Docs y docstrings en español; identificadores en inglés.
 - Reglas detalladas en `.agents/rules/` y plantillas en `.agents/templates/`.
+

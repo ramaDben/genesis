@@ -45,7 +45,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|mcp__serena__(replace_symbol_body|replace_lines|replace_in_files|insert_after_symbol|insert_before_symbol|insert_at_line|delete_lines|rename_symbol|safe_delete_symbol)|mcp__filesystem__(write_file|edit_file)",
+        "matcher": "Bash|mcp__serena__execute_shell_command|Write|Edit|MultiEdit|NotebookEdit|mcp__serena__(replace_symbol_body|replace_lines|replace_in_files|insert_after_symbol|insert_before_symbol|insert_at_line|delete_lines|rename_symbol|safe_delete_symbol)|mcp__filesystem__(write_file|edit_file)",
         "hooks": [
           {
             "type": "command",

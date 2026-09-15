@@ -1126,3 +1126,1079 @@ ENTONCES la suite existente pasa en verde (excepción doc-only de `.agents/rules
    tres punteros a v1.1 (deuda documental preexistente, no introducida por este change),
    eso ampliaría el alcance doc-only declarado en el issue — requiere decisión explícita
    antes de `design`.
+
+<!-- change:106-spec-v1-5-reorientar-el-torneo-de-cfds-mt5-a-futuros-cme-en-prop -->
+# Specification: SPEC v1.5 — reorientar el SSoT del torneo a futuros CME en prop de futuros
+
+Change #106 (Issue #106). Dominio `docs`. Fase `specify`.
+
+> Contrato de entrada: `idea.md` (problema y hallazgos verificados) y `proposal.md` (Decisiones 1–7).
+> SSoT a suceder: `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` (729 líneas, vigente).
+> Este documento fija **qué secciones se tocan, con qué texto, y cómo se verifica**. No decide nada
+> que no esté ya decidido en `proposal.md`, salvo las tres inconsistencias que la redacción exacta
+> hizo visibles — R13, R14 y R12 — elevadas al gate humano en la última sección.
+
+---
+
+## Objetivo
+
+Producir `docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` como SSoT vigente, describiendo el
+torneo sobre **futuros CME operados en una prop firm de futuros (MyFundedFutures Rapid EOD 50K)** en
+lugar de índices CFD sobre MT5 en firmas tipo The5ers/FTMO, y migrar los punteros versionados que lo
+referencian. Sin tocar `src/**` ni `tests/**`, y sin relajar ningún umbral G/C/P/T.
+
+## Alcance
+
+### IN
+
+1. `docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` — archivo **nuevo**, sucesor completo de
+   v1.4, con changelog explícito v1.4 → v1.5 al inicio.
+2. Migración de los punteros al SSoT en archivos `*.md` versionados: `CLAUDE.md:5`, `AGENTS.md:7`,
+   `README.md:168`, `docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md:615`.
+*(`docs/PROTOCOLO_ADMISION_ESTRATEGIAS.md` quedó verificado y **fuera** de esta lista: no referencia
+el SSoT por nombre de archivo, ni el universo CFD, ni las firmas históricas — ver R16.)*
+
+### OUT (no-alcance explícito)
+
+1. **Todo `src/**` y `tests/**`.** Incluye el puntero al SSoT en el docstring de
+   `src/genesis/strategy/contract.py:1`, que **queda apuntando a v1.4** — ver R16.
+2. La implementación de `TRAILING_EOD`, la denominación en dólares del `max_loss_limit`, el
+   congelamiento del umbral, el DLL con semántica de pausa y el balance inicial 0 con saldo negativo.
+   Change posterior de capa 3.
+3. El exportador CME, el empalme de continuos, las sesiones CME, el registro de fichas por venue.
+   Change posterior de capa 1.
+4. El presupuesto de contratos compartido entre símbolos en tiempo real (engancha con #96).
+5. Revertir el parche de `src/genesis/data/metadata.py` (`tick_size = 10^-digits`).
+6. Medir M2K y decidir su admisión al universo.
+7. Implementar el cálculo de C3 en capa 4 (el spec lo define y lo ancla; el código va en otro change).
+8. Corregir la fidelidad declarada de `candidates/specs/candidate_b1_orb.yaml` (issue #107).
+
+---
+
+## Requisitos funcionales
+
+### R1 — Vehículo: archivo nuevo v1.5, no addendum, no edición in-place
+
+Se crea `docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md`. El v1.4 **no se modifica ni se
+borra**: queda como histórico, igual que v1.1, v1.2 y v1.3, que siguen presentes en `docs/`.
+Precedente: change #20 (v1.3 → v1.4), que estableció "archivo nuevo, no addendum, para que el
+`git log` muestre el documento completo en cada versión".
+
+Encabezado del archivo nuevo:
+
+- **Fecha**: 2026-09-11
+- **Estado**: definitivo (SSoT vigente). Reemplaza íntegramente al v1.4.
+- **Objetivo de negocio**: sin cambio de redacción respecto de v1.4.
+
+### R2 — Changelog v1.4 → v1.5
+
+Bloque `### Changelog v1.4 → v1.5` inmediatamente después del encabezado, **antes** del changelog
+v1.3 → v1.4, que se conserva íntegro junto con los anteriores.
+
+El changelog debe abrir declarando la naturaleza del cambio —**reorientación de destino operativo,
+no backfill**— y distinguirlo del precedente #20, que sí fue backfill doc-only sin cambio de rumbo.
+Debe enumerar, con numeración propia, las secciones tocadas: §1 (nuevo §1.0), §1.1, §1.3, §2.3, §2.x,
+§4.1, §7.2, §7.3, §7.5, §7.6, §11.1. Debe cerrar con:
+
+- **Qué NO cambia**: gates G1–G9, C1–C2, P1–P2, P4–P6, T1–T2 (umbrales idénticos); §2.1 contrato
+  plugin; §3 arquitectura; §5 capas 2–3; §6 flujo de validación y presupuesto de grid; §8 errores;
+  §9 testing; §10 incubación.
+- **Fuera de alcance**, con la lista de OUT de arriba.
+
+### R3 — §1.0 (nuevo) — Criterio normativo de admisión de firmas
+
+Sección nueva, insertada entre el encabezado de `## 1. Modelo de negocio y restricciones prop` y
+`### 1.1. Ficha de la firma`, numerada **§1.0**.
+
+Contenido normativo:
+
+> Una firma solo es admisible como firma objetivo de Génesis si **permite ejecución automatizada**.
+> Sin esa condición un veredicto GO no es ejecutable y el pipeline entero produce un número que nadie
+> puede usar. El criterio es previo a la ficha: una firma que prohíbe automatizar no se modela.
+
+Más el relevamiento del 2026-09-11, con cita textual y la conclusión de sector:
+
+| Firma | Automatización | Cita oficial (leída en su sitio, 2026-09-11) |
+|---|---|---|
+| Apex Trader Funding | ❌ | *"No Automation or Algorithm Usage allowed"* |
+| Take Profit Trader | ❌ | UTP #1 *"No Trading Bots or Algos"*; PRO: *"All trades must be manually executed"* |
+| The5ers Futures | ❌ | *"No. These practices are strictly forbidden."* |
+| MyFundedFutures | ✅ | *"Traders may make use of automated trading strategies tailored to their own specific settings…"* |
+| Topstep | ✅ | API oficial de pago; **prohíbe VPS/VPN/servidores remotos** |
+| Tradeify | ✅ | Con verificación (propiedad demostrable, video en vivo activando el código) |
+
+> **Tres de seis firmas relevadas lo prohíben.** No es una anécdota de una firma: es una
+> característica del sector, y significa que la premisa de Génesis —validar sistemas mecánicos— es
+> compatible con una minoría de la industria. El criterio de §1.0 es la consecuencia normativa.
+
+Debe incluir la nota de procedencia: relevamiento sobre páginas oficiales, no agregadores; los
+agregadores que encabezan la búsqueda afirmaban lo contrario para Apex y Take Profit Trader.
+
+### R4 — §1.1 — Ficha de firma extendida (`prop_profile.json`)
+
+La tabla de campos mínimos se reemplaza por la versión extendida. Filas modificadas y nuevas:
+
+| Campo | v1.4 | v1.5 |
+|---|---|---|
+| `max_loss_limit` | `%` + `static \| trailing` | **monto absoluto en divisa de la cuenta** + `static \| trailing_intraday \| trailing_eod` |
+| `threshold_lock_at` | — | **nuevo**: nivel de balance/equity donde el umbral trailing deja de moverse |
+| `daily_loss_limit` | obligatorio, `%` | **opcional**, monto absoluto, con semántica declarada `breach \| pause` |
+| `payout_buffer` | — | **nuevo**: beneficio realizado exigido antes del primer retiro |
+| `min_net_profit_between_payouts` | — | **nuevo** |
+| `max_lots`, `max_positions` | escalares por símbolo | **`contract_budget`**: presupuesto **compartido entre instrumentos y en tiempo real**, con equivalencia declarada (10 micros = 1 mini) |
+| `news_restrictions` | ventanas por fase | ventanas + **lista T1 explícita** + variación entre evaluación y fondeada |
+| `funded_starting_balance` | — | **nuevo**: la etapa fondeada puede arrancar en 0, con saldo negativo permitido |
+| `automation_allowed` | — | **nuevo**, booleano, con cita de la fuente. Falso ⇒ la firma no es admisible (§1.0) |
+
+Además, dos notas normativas obligatorias:
+
+1. **Semántica de doble tiempo de `trailing_eod`**: el umbral se **calcula** al cierre de la sesión
+   sobre el balance de cierre, y se **aplica contra equity flotante** intradía. No es un detalle de
+   implementación: decide si un trade que sube y devuelve rompe la cuenta.
+2. **Bloqueo explícito de la simulación multi-activo concurrente**: `contract_budget` se **declara**
+   en la ficha, pero el spec **prohíbe** simular varios instrumentos concurrentemente contra un
+   presupuesto compartido hasta que exista el árbitro de exposición (#96). Sin él la capa 3 daría por
+   ejecutadas operaciones que la cuenta real rechazaría, y **sobreestimaría `p_pass`** — el único
+   número que el proyecto existe para producir.
+
+La nota de v1.4 sobre `equity_basis` resuelto como `equity` para The5ers se conserva, marcada como
+aplicable a las fichas históricas de §1.3.1/§1.3.2.
+
+### R5 — §1.3 — Ficha de firma activa: MyFundedFutures Rapid EOD 50K
+
+Nueva subsección **§1.3.0**, colocada **antes** de The5ers y FTMO, marcada como **ficha activa**.
+Todos los valores provienen de `help.myfundedfutures.com` leído el 2026-09-11 (fuente primaria); cada
+fila cita su origen.
+
+**Etapa evaluación (Rapid EOD, 50K):**
+
+| Campo | Valor |
+|---|---|
+| `automation_allowed` | **true** — *"Traders may make use of automated trading strategies…"* (sin HFT) |
+| Objetivo de profit | **$3.000** |
+| `max_loss_limit` | **$2.000**, tipo **`trailing_eod`** |
+| `threshold_lock_at` | **balance inicial + $100** (50K ⇒ $52.100; alcanzado al cerrar sobre $52.000). Política única |
+| `daily_loss_limit` | **ninguno** |
+| `contract_budget` | **3 mini / 30 micro**, total y compartido entre instrumentos, en tiempo real |
+| `consistency_rule` | **30%** — condición de **terminación**, no de fallo: excederla obliga a operar más días |
+| `min_profitable_days` | **4 días mínimos** |
+| `news_restrictions` | T1 **permitido** en evaluación; flat 2 min antes / 2 min después de cualquier dato |
+| `challenge_cost` | **no verificado** — ver §11.1 |
+
+**Etapa sim funded (Rapid EOD):**
+
+| Campo | Valor |
+|---|---|
+| `funded_starting_balance` | **$0**, saldo negativo permitido hasta que el MLL suba a breakeven ("expected and normal") |
+| `max_loss_limit` | **$2.000**, **`trailing_eod`** (no cambia de tipo al fondearse) |
+| `contract_budget` | 3 mini / 30 micro |
+| `news_restrictions` | T1 **prohibido** |
+| Cuentas fondeadas | **3** |
+| `profit_split` | **90/10** |
+| `payout_buffer` | **$2.100** antes del primer retiro |
+| `min_net_profit_between_payouts` | **$500** |
+| `payout_cycle` | **diario, sin tope** |
+| Consistencia de payout | **ninguna** |
+
+**Nota normativa obligatoria — por qué Rapid EOD y no Rapid estándar:**
+
+> El plan Rapid **estándar** cambia el drawdown de EOD a **intraday trailing (HWM de equity)** al
+> pasar a fondeada. Se pasaría la evaluación bajo una regla y se operaría bajo otra, más dura. Eso
+> invalida la validación justo cuando empieza a importar: el `p_pass` medido no describiría la
+> cuenta que se opera. Rapid **EOD** conserva el mismo tipo de drawdown en las dos etapas.
+
+**Nota normativa obligatoria — hedging y su ambigüedad declarada:**
+
+> MFFU prohíbe el hedging solo sobre el **mismo subyacente** (ejemplo suyo: NQ contra MNQ), y su
+> texto dice *"hedging through different unrelated assets is permitted"*. **MES, MNQ y MYM son
+> *related* aunque no compartan subyacente**, y MFFU remite a la regla 534 de CME sobre wash trades.
+> La ambigüedad entre "mismo subyacente" y "no relacionados" **no se resuelve leyendo**: queda en
+> §11.1 como pendiente a confirmar con soporte **antes** de operar direcciones opuestas dentro del
+> clúster de índices. Mientras no se confirme, el spec **no autoriza** posiciones simultáneas de
+> signo opuesto entre MES, MNQ y MYM.
+
+**Nota de riesgo de plataforma (nueva, aplicable a cualquier firma):**
+
+> Si la firma reescribe su rulebook, la validación **caduca**: el `trial_id`, el `firm_profile_hash`
+> y el `p_pass` quedan describiendo un contrato que ya no existe. Apex demostró en 2026 que las
+> firmas lo hacen (todo su producto anterior quedó etiquetado "Legacy"). La ficha de firma registra
+> la **fecha de lectura** de cada parámetro, y una ficha con más de 6 meses debe reverificarse contra
+> fuente primaria antes de emitir un veredicto.
+
+### R6 — §1.3.1 y §1.3.2 — The5ers y FTMO conservadas, marcadas como históricas
+
+Las fichas de The5ers y FTMO se **conservan íntegras**, sin editar sus valores, precedidas de una
+nota: son **fichas históricas del régimen CFD/MT5**, no admisibles bajo §1.0 en su producto de
+futuros, y se mantienen porque los artefactos y veredictos ya producidos están condicionados a ellas
+(§7.5, no-transferibilidad). El patrón multi-firma `--firm`/`--profile` se conserva: la ficha de MFFU
+es la **activa**, no la única posible.
+
+Nota de matiz obligatoria sobre The5ers: su página general de prácticas prohibidas **sí** permite EAs
+con código fuente propio, pero eso aplica a su producto **CFD**; su producto de **futuros** los
+prohíbe. Dos regímenes distintos en la misma firma — el criterio de §1.0 se evalúa **por producto**,
+no por marca.
+
+### R7 — §2.3 — Candidato B: universo CME y tabla de sesiones
+
+La fila *Universo* de la tabla normativa pasa de `CFDs de índices: US500, NAS100, US30, GER40` a
+**`Futuros CME: MES, MNQ, MYM, MGC (front month sin ajustar) — ver §2.x`**.
+
+La tabla *Sesiones de contado por índice* se reemplaza por una tabla de **anclaje del rango de
+apertura por instrumento**:
+
+| Instrumento | Ancla del rango de apertura | Cierre de la ventana operativa | Nota DST / estado |
+|---|---|---|---|
+| MES | Apertura de contado del S&P 500 — **14:30 UTC** (horario estándar) | 21:00 UTC | DST US (NY): en EDT las horas UTC se desplazan −1 h. Sin cambio respecto de v1.4 |
+| MNQ | Apertura de contado del Nasdaq 100 — **14:30 UTC** | 21:00 UTC | Ídem |
+| MYM | Apertura de contado del Dow 30 — **14:30 UTC** | 21:00 UTC | Ídem |
+| MGC | **PENDIENTE — no verificado** | **PENDIENTE** | Ver nota obligatoria abajo |
+
+**Nota normativa obligatoria — el oro no tiene apertura de contado:**
+
+> El Candidato B define su rango de apertura sobre la **apertura de contado** del subyacente. Los
+> tres micro-índices la tienen (la apertura del mercado de acciones). **MGC no.** El oro de COMEX
+> cotiza en Globex casi 23 horas y no existe una "apertura de contado" análoga. El ancla del rango de
+> apertura de MGC **queda declarada como pendiente**, a resolver contra la **página de producto
+> oficial de CME** (fuente primaria) en el change de capa 1, junto con la tabla de sesiones. No se
+> rellena con memoria del modelo.
+>
+> Consecuencia de alcance declarada: **mientras el ancla de MGC no esté verificada, el Candidato B
+> no puede correrse sobre MGC.** Eso no excluye a MGC del universo del torneo —su admisión es por
+> propiedades intrínsecas del activo (§2.x), no por la estrategia—; excluye a MGC del **universo
+> efectivo del Candidato B** hasta que el ancla se cierre. El universo efectivo de cada corrida se
+> registra en la metadata del artefacto.
+>
+> **El denominador de C1 NO se contrae** (normativo). Un instrumento que no se puede evaluar cuenta
+> como **no superado**, no como ausente: con el universo de §2.x, C1 ≥ 60% sigue exigiendo **3 de 4**
+> aunque MGC no sea evaluable, lo que obliga al Candidato B a pasar en **los tres micro-índices**.
+> Contraer el denominador a los evaluables convertiría un pendiente de datos en una rebaja del gate
+> —2 de 3 = 67% pasaría, cuando 2 de 4 = 50% no— y permitiría que un sistema mono-factorial de renta
+> variable estadounidense (MES + MNQ, correlación de retornos 0,947) superara C1 sin validación
+> cruzada real. **Un pendiente no es una excepción.**
+
+El bloque *Propiedades estructurales* se re-deriva: la estimación de ~700–1.000 apuestas/año se
+mantiene **solo** para los tres micro-índices sobre la misma sesión RTH, y se marca como **estimación
+heredada del régimen CFD, a re-medir sobre datos CME reales** en el change de capa 1. Ver R14.
+
+El bloque de evidencia académica del Candidato B se conserva **sin cambios de redacción**. La
+discrepancia entre `fidelity: canonical` declarada en `candidates/specs/candidate_b1_orb.yaml` y lo
+que Gao, Han, Li & Zhou (2018) realmente documenta se trata en el **issue #107**, fuera de este
+change.
+
+### R8 — §2.x — Universos por candidato
+
+- **Universo del Candidato B** pasa a MES, MNQ, MYM, MGC, con tabla de símbolo/subyacente/multiplicador
+  en vez de nombre MT5/alias. El multiplicador se deriva de la ficha (`tick_value / tick_size`), no se
+  transcribe a mano.
+- **Criterio de admisión al universo (nuevo, normativo), intrínseco al activo:**
+
+  > Un instrumento entra al universo del torneo por sus **propiedades propias**: liquidez y
+  > profundidad de libro suficientes, costo de transacción aceptable respecto del tick, existencia de
+  > contrato **micro** que permita dimensionar contra el umbral de la firma, y ficha de contrato
+  > **pública y auditable**. La **correlación no es criterio de admisión**: ponerla aquí acoplaría el
+  > SSoT —agnóstico a la estrategia por diseño— a un candidato concreto, porque la estructura de
+  > correlación de un ORB no es la de un CT sweep-fade ni la de un TSMOM. La correlación se gobierna
+  > en capa 4 con el gate C3 (§7.2), por candidato.
+
+- **Tamaño mínimo del universo para emitir veredicto (nuevo, normativo).** Hueco preexistente en
+  v1.4, detectado al preguntar si se puede correr sobre un solo símbolo. C1 es un **porcentaje** del
+  universo del candidato, y con un universo de un solo símbolo **pasar en ese símbolo da 100% ≥ 60%:
+  C1 se satisface trivialmente**. La única evaluación se valida a sí misma, y el gate que sostiene
+  toda la validación cruzada entre instrumentos deja de decir nada:
+
+  > Ninguna campaña sobre un universo de **un solo instrumento** puede emitir veredicto GO, GO-PARCIAL
+  > ni GO-ACOTADO. **C1 solo tiene contenido con `|U| ≥ 2`**, y ese es el mínimo normativo. No es una
+  > constante elegida: es el punto exacto en que C1 deja de ser vacío.
+
+  Observación que el spec debe declarar, porque el umbral **no** endurece de forma monótona con el
+  tamaño: `|U| = 2` exige **2 de 2** (100%), más estricto que `|U| = 3` (2 de 3) y que `|U| = 4`
+  (3 de 4). Un universo chico no es un universo indulgente — salvo en el caso degenerado de 1.
+
+  **Dos defensas más, que ya existen y conviene escribir juntas:**
+
+  1. **El universo vive en el SSoT.** Achicar el universo de un candidato es un cambio de §2.x, o sea
+     un change del ciclo SDD con gate humano. No es un parámetro de corrida.
+  2. **Achicarlo después de medir es selección.** Por D1 (§2.x.1), restringir el universo habiendo
+     visto resultados cuenta como ensayo y suma al denominador del DSR. Elegir el símbolo que anduvo
+     bien y declararlo "el universo" es el caso de manual que el ledger (#53) existe para atrapar.
+
+  **Lo que sí está permitido con un solo símbolo:** corridas **exploratorias o de diagnóstico** que
+  **no emiten veredicto** — el precedente es el diagnóstico de señal desnuda de §2.2.1. Quedan
+  registradas en el ledger como ensayos, con la misma consecuencia sobre el DSR de cualquier búsqueda.
+
+- **M2K (micro Russell)**: fuera del universo v1.5 **por falta de datos**, no por criterio. Entra en
+  v1.6 por vía declarada de antemano: a priori por los criterios intrínsecos de arriba, o
+  condicionado a medición **contando cada evaluación como ensayo de selección** (§7, R9).
+- **Universos de los Candidatos A y C**: se conservan las tablas de v1.4 **sin editar valores**,
+  precedidas de una nota que las marca como **heredadas del régimen CFD/MT5 y no vigentes bajo la
+  firma activa**; se re-derivan cuando cada candidato entre en alcance. El no-objetivo heredado sobre
+  el `SymbolFigure` real de oro/majors se conserva textualmente.
+
+### R9 — §2.x / §7 — Régimen D1 declarado: selección, y se paga
+
+Subsección nueva **§2.x.1 — Régimen de búsqueda sobre el universo (D1)**, normativa:
+
+> El propósito del universo múltiple es **buscar en qué instrumentos funciona un candidato**, no
+> exigir que funcione en todos. Bajo la regla D1 ratificada —*cuenta como ensayo toda dimensión sobre
+> la que SELECCIONAS; no cuenta ninguna sobre la que EXIGES*— eso es **selección**: **cada instrumento
+> del universo cuenta como un ensayo** y suma al denominador del DSR.
+
+Más la consecuencia operativa, que es lo que este requisito obliga a escribir:
+
+> **El ledger de ensayos persistente (issue #53) pasa de deseable a prerrequisito.** La selección
+> entre instrumentos ocurre **entre corridas**; hoy `n_trials` solo cuenta la grilla interna de una.
+> Sin ledger se buscaría en cuatro instrumentos y el DSR se enteraría de uno, y **G4 dejaría de
+> proteger en silencio**. Ninguna campaña sobre el universo de §2.x puede emitir veredicto antes de
+> que el ledger exista.
+
+Sustento a citar, con volumen y páginas (verificado contra fuente):
+
+- Bailey & López de Prado (2014), *The Deflated Sharpe Ratio*, SSRN 2460551.
+- White (2000), *Econometrica* 68:1097–1126; Sullivan, Timmermann & White (1999), *J. Finance*
+  54:1647–1692.
+- Bailey, Borwein, López de Prado & Zhu (2014), *Notices of the AMS* 61(5):458–471 (*Minimum
+  Backtest Length*).
+- Harvey, Liu & Zhu (2016), *RFS* 29(1):5–68.
+
+Nota obligatoria sobre no-colapsabilidad de contadores: los ensayos del régimen CFD/MT5 **no son
+comparables** con los del régimen CME y no deben acumularse en el mismo denominador. El cambio de
+ficha de firma y de universo cambia `candidate_config` y por lo tanto el `trial_id`; eso es correcto
+y deseado (D2/R5, sin lista blanca).
+
+### R10 — §4.1 — Capa 1 sin MT5
+
+1. **Invariante de cuenta**: se conserva el texto y se añade que con CME el proveedor de datos es
+   **independiente del broker**, de modo que el invariante "cuenta de datos ≠ cuenta de capital" y el
+   guard `AccountScopeError` quedan **trivialmente satisfechos**. Se documenta la simplificación en
+   vez de arrastrar una defensa que ya no defiende nada; el guard **no se elimina** (eso sería tocar
+   `src/**`).
+2. **Empalme de continuos**: front month **sin ajustar**; corte decidido por volumen pero **aplicado
+   únicamente en la frontera de cierre de sesión, nunca intradía**. Justificación a escribir: si el
+   cruce de volumen cae dentro de RTH, cortar ahí corrompe el rango de apertura de ese mismo día; un
+   ORB intradía nunca sostiene a través del roll; y el ajuste hacia atrás corrompe los niveles de
+   precio de los que depende el rango.
+3. **El salto de nivel en el roll se declara, no se ignora** (normativo): sin ajuste, la serie tiene
+   un gap artificial de base/carry en cada vencimiento. El spec debe especificar cómo lo tratan los
+   indicadores con memoria multi-día (ATR de dimensionamiento, filtros de volatilidad, rangos
+   previos). No declararlo inyecta volatilidad falsa cuatro veces al año, en marzo, junio, septiembre
+   y diciembre.
+
+   **v1.5 toma la decisión, no la delega** (corregido tras la revisión independiente): la barra de
+   empalme se **marca en la metadata y se excluye** del cómputo de todo indicador con memoria
+   multi-día; el lookback **no se reinicia**, se saltea la barra contaminada. Delegarlo al change de
+   capa 1 habría dejado un hueco normativo con consecuencia cuantitativa directa: el ATR **dimensiona
+   la posición en dólares**, así que un gap de base/carry contaminando el lookback deforma el sizing
+   de decenas de sesiones posteriores, y las dos alternativas dan ATR distintos. Reiniciar el lookback
+   además destruye historia útil cuatro veces al año sin necesidad.
+
+   El change de capa 1 puede **anular** esta elección únicamente con evidencia medida sobre datos CME
+   reales, registrada como delta al spec — no por conveniencia de implementación.
+4. **`tick_volume` cambia de semántica**: de conteo de ticks (MT5) a **volumen negociado real** (CME).
+   Misma columna, significado distinto, y `strategy/common/vwap_engine.py` ya la consume como si
+   fuera volumen. El spec exige un **marcador explícito en la metadata del export** (`volume_kind`):
+   dos datasets donde la misma columna significa cosas distintas no pueden convivir sin marca.
+5. **Proveedor de datos**: decisión **abierta declarada** (Databento / Rithmic / Tradovate / CME
+   DataMine), no resuelta aquí. Va a §11.1.
+6. La fila de `mt5_export.py` en la tabla de §4 se marca como **componente del régimen histórico**;
+   su reemplazo (exportador CME) se nombra pero no se especifica — change de capa 1.
+
+### R11 — §7.2 — C3: restricción de dimensionamiento de canasta, **no** gate de muerte
+
+**Corrección de fondo (2026-09-11, decisión del dueño).** Las dos versiones anteriores de este
+requisito colapsaban dos preguntas distintas en un mismo veredicto:
+
+| Pregunta | La responde | Qué significa fallar |
+|---|---|---|
+| ¿El edge **generaliza** entre instrumentos? | **C1** (≥ 60% del universo pasa G1–G9) | No hay ventaja robusta ⇒ **NO-GO** |
+| ¿La canasta **entra** en el presupuesto de la cuenta? | **C3** | No alcanza el capital para operar tantos a la vez ⇒ **se opera una canasta más chica** |
+
+Matar a un candidato por la segunda es emitir "no hay ventaja" cuando lo que ocurre es "no alcanza el
+colchón". Son diagnósticos distintos y el spec debe separarlos. **C1 y C3 son ortogonales**: un
+candidato puede tener edge en 3 de 4 instrumentos (C1 ✓) y aun así solo poder operar 1 a la vez.
+
+Por lo tanto **C3 deja de ser un gate de pase/fallo y pasa a ser una restricción normativa de
+dimensionamiento**: no decide si el candidato vive, decide **cuántos instrumentos puede llevar la
+cuenta simultáneamente**. Se añade a §7.2 junto a C1 y C2, que no se tocan, marcada explícitamente
+como restricción y no como gate:
+
+| # | Criterio | Umbral definitivo | Efecto al incumplirse |
+|---|---|---|---|
+| C3 | Drawdown conjunto intradía p95 en **días de señal simultánea**, sobre la canasta operada | ≤ 50% del `max_loss_limit` | **Se reduce la canasta**, no se emite NO-GO |
+
+**Cómo se determina la canasta (normativo, sin búsqueda):**
+
+> Para cada tamaño `k ∈ [1, |supervivientes|]`, la composición de la canasta la fija una **regla
+> declarada antes de la campaña** (§2.x.1, #88) — una sola canasta por tamaño, nunca un conjunto de
+> alternativas. Se evalúa C3 sobre **todas** esas canastas y se define
+>
+> `k_max = max { k : C3(k) ≤ 50% del max_loss_limit }`
+>
+> **No se desciende parando en el primer tamaño que cumple.** Esa versión anterior presuponía
+> monotonía —que si `k` no cumple, `k+1` tampoco— y la monotonía **no se sostiene**: el p95 no es
+> subaditivo, y sobre todo el conjunto de condicionamiento *cambia con `k`*, porque "días de señal
+> simultánea" es un conjunto distinto para cada canasta. Además, podar el miembro menos correlacionado
+> (MGC frente a los tres índices) puede **empeorar** la cola conjunta en lugar de mejorarla. Evaluar
+> todos los `k` cuesta cuatro corridas y elimina el supuesto.
+>
+> **Con `k = 1` no hay cola conjunta y C3 queda vacío**, porque no existe simultaneidad con nadie.
+> C3 **no** se transforma en otro gate ahí: simplemente no aplica, y la protección la dan dos gates
+> que ya existen y que sí corren sobre un instrumento único —
+> **P3** (a nivel de cuenta: probabilidad de que la pérdida intradía de un solo día consuma el colchón;
+> con `k = 1` la cuenta *es* ese instrumento, así que P3 mide exactamente la cota intradía que C3
+> mediría) y **G6** (MC MaxDD multi-día p95 ≤ 50% del `max_loss_limit`).
+>
+> *Corrección registrada:* la versión anterior afirmaba que C3 con `k = 1` "degenera en G6". Es falso
+> y lo detectó la segunda revisión independiente: C3 mide excursión **intradía** por medición directa
+> sobre días condicionados, G6 mide MaxDD **multi-día acumulado** por Monte Carlo. No son la misma
+> magnitud. El gate que cubre el hueco es **P3**, no G6 — y solo existe como cobertura porque la
+> primera revisión corrigió que P3 es de cuenta y vinculante. **C3 no emite NO-GO en ningún caso.**
+
+**El presupuesto que ata es el colchón, no el techo de contratos:**
+
+> El `contract_budget` de Rapid EOD (30 micros) **no restringe**: cuatro micro-índices están lejísimos
+> del techo. Lo que restringe es el colchón de $2.000, vía el riesgo por trade. Por lo tanto `k_max`
+> **no es un dato de la firma: es el resultado de una calibración que el proyecto controla**, y el
+> spec exige reportar la pareja (`risk_pct`, `k_max`) con fecha de pre-registro, no solo `k_max`.
+
+#### La grilla de riesgo de v1.4 queda **anulada** para futuros prop (PA-106-5, ampliado)
+
+La segunda revisión independiente convirtió lo que yo había anotado como un hueco de definición en un
+hallazgo bastante peor. Hay **dos** denominadores posibles y **los dos rompen**:
+
+| Denominador | Qué da con la grilla `{0,25%, 0,375%, 0,5%}` de §2.3/§6.2 | Veredicto |
+|---|---|---|
+| **% del balance** (v1.4) | En sim funded el balance **arranca en $0** y puede ir negativo | **Indefinido** |
+| **% del nominal** ($50.000) | $125 / $187,50 / $250 por trade — o sea **6,25% a 12,5% del colchón real de $2.000 en un solo trade**, y cuatro stops simultáneos = $500 a $1.000, hasta el 50% de la cuenta en una mañana | **Operable pero temerario** |
+| **% del `max_loss_limit`** ($2.000) | $5 / $7,50 / $10 por trade. Un stop ordinario de 50 puntos en MNQ cuesta **$100 por micro**; 4 ticks de MES ya son $5 | **Físicamente inoperable** |
+
+Ninguna de las tres sirve. **v1.5 decide el denominador y declara la grilla pendiente de re-derivación,
+con las dos cotas que la acotan** — no inventa números:
+
+> **Denominador normativo del sizing en fichas de futuros prop: el `max_loss_limit`** (el colchón), que
+> es el presupuesto real de la cuenta y no depende de un balance que puede ser cero o negativo.
+>
+> Los valores de la grilla de `risk_pct` **no se heredan de v1.4**: quedan pendientes de re-derivación
+> contra las distancias de stop reales en datos CME, sujetos a dos cotas que el spec sí fija:
+>
+> - **Piso de operabilidad**: `risk_per_trade ≥` el costo de un stop típico del candidato en **un**
+>   contrato micro. Por debajo de eso el sizing no puede expresarse en contratos enteros.
+> - **Techo de canasta**: `k_max × risk_per_trade ≤ 50% del max_loss_limit`, que es C3 escrito como
+>   restricción de sizing en vez de como medición.
+>
+> La grilla debe caber entre las dos cotas. Si no cabe ninguna configuración, la conclusión es que la
+> cuenta es demasiado chica para el candidato — y eso se reporta, no se fuerza.
+
+**Esto también toca §6.2**: el presupuesto `N_trials_IS = 27` (3×3×3) supone tres valores de
+`risk_pct`. Si la re-derivación deja menos de tres valores operables, el conteo de trials cambia y el
+sanity-check de G4 debe rehacerse. Queda declarado junto con R14.
+
+Y un **requisito de reporte sin umbral**, que no es un gate:
+
+> La matriz de correlación OOS del P&L diario entre los instrumentos de la canasta y su **número
+> efectivo de apuestas** `n_eff = n / (1 + (n−1)·ρ̄)` se **reportan obligatoriamente** en el artefacto
+> del veredicto. El veredicto declara la amplitud efectiva de la canasta; no se le aplica umbral.
+
+**Por qué un solo gate y no dos** (corrección posterior a la revisión independiente; ver PA-106-3):
+
+El umbral de C3 **≤ 50% del `max_loss_limit`** es la **forma exacta de G6**, aplicada a la canasta
+conjunta restringida a días de señal simultánea en vez de a un símbolo aislado. Es un anclaje real: el
+mismo número, la misma magnitud (drawdown contra el presupuesto de la firma) y la misma dirección de
+consecuencia.
+
+El anclaje que **se descarta** es el que había propuesto para un gate de Pearson: `C3a < 0.3` "porque
+T2 usa 0.3". No se sostiene por tres razones, y las tres importan:
+
+1. **Poblaciones distintas.** T2 mide correlación entre **candidatos estratégicos** diseñados para no
+   parecerse. C3a habría medido correlación entre **activos** operados por la **misma** estrategia.
+   Dos índices de gran capitalización estadounidense con el mismo gatillo a la misma hora comparten
+   una beta de mercado estructural; su línea base no es la de dos estrategias distintas.
+2. **Consecuencia radicalmente asimétrica.** Fallar T2 **no descalifica** a nadie: se descarta el
+   ensemble y se opera el mejor individual. Fallar C3a habría sido **NO-GO fatal** de todo el
+   candidato, y además con poda prohibida. Tomar prestado el número mientras se invierte la
+   consecuencia no es un anclaje: es un número con otra vida.
+3. **Redundancia con los gates P.** `prop_sim` simula la **cuenta conjunta**; la correlación ya está
+   incorporada en P1–P5 por construcción. Un gate de Pearson aparte no agregaba protección — agregaba
+   una condición de muerte sobre una magnitud que el pipeline ya valora en otro lado.
+
+Lo que sí faltaba, y es lo que C3 aporta, es una cota **explícita y legible sobre la cola conjunta**,
+que ni Pearson ni el promedio de `prop_sim` exhiben.
+
+**Nota normativa obligatoria — por qué el gate mira la cola y no Pearson:**
+
+> Correlación lineal baja del P&L **no es independencia**. En la medición que motivó este gate, las
+> señales del ORB coinciden en dirección el **88%** de los días entre MES y MNQ; un shock macro a los
+> pocos minutos de la apertura golpea los stops de los tres índices a la vez, y ahí la **dependencia
+> de cola tiende a 1**. Sobre un umbral trailing de $2.000 ese es el escenario de ruina, y ninguna
+> correlación de Pearson lo captura. Un gate de Pearson habría mirado hacia el lado equivocado.
+
+**Nota normativa obligatoria — C3 es computable sin el árbitro de exposición (#96):**
+
+> C3 se calcula por **superposición de las curvas de equity intradía por símbolo**, restringida a los
+> días de señal simultánea. Esa superposición **ignora el `contract_budget` compartido**, y por eso
+> es una **cota superior conservadora**: la cuenta real no habría podido sostener más posiciones de
+> las que el presupuesto permite, nunca menos. C3 por lo tanto **no depende de #96** y no cae bajo el
+> bloqueo de simulación concurrente de §1.1. Lo que sí depende de #96 es **operar** la canasta y
+> emitir cualquier gate P sobre ella — ver §11.1, donde #96 queda listado como bloqueante.
+
+**Lo que sustituye a la prohibición de poda (normativo):**
+
+La versión anterior prohibía reducir la canasta y convertía el incumplimiento en NO-GO. Eso era el
+error conceptual que este requisito corrige. Pero la razón por la que existía esa prohibición sigue
+siendo válida —**reducir la canasta es elegir, y elegir es data mining si se hace mirando el
+resultado**—, así que se sustituye por tres reglas que atacan el mismo riesgo sin matar al candidato:
+
+1. **La reducción es por tamaño, no por búsqueda.** Se desciende desde el universo completo y se para
+   en el primer `k` que cumple. Está prohibido evaluar subconjuntos alternativos del mismo tamaño
+   hasta dar con uno que pase: eso sí sería minería, y de la cara.
+2. **La composición de la canasta la fija una regla declarada antes de la campaña** (#88), y el tipo
+   de regla determina qué hace falta para que sea admisible:
+   - **Regla intrínseca** (mayor liquidez, menor costo relativo al tick, mayor número de trades): no
+     mira desempeño, **no agrega ensayos**, admisible siempre.
+   - **Regla de desempeño** ("el mejor por Sharpe / PF / P&L"): es **selección**. Admisible
+     **únicamente si el ledger de ensayos (#53) está operativo y alimenta el `n_trials` de G4** con
+     los instrumentos evaluados. *La corrección aquí importa:* yo había escrito que ya "está pagada"
+     por §2.x.1, y eso confunde el **principio** con el **mecanismo**. §2.x.1 declara que cada
+     instrumento cuenta como ensayo; el mecanismo que lo hace efectivo es el ledger, que **no
+     existe**. Hoy G4 se calcula por símbolo sobre su propia grilla y no ve los otros tres, y T1
+     deflacta por número de **candidatos**, no de instrumentos. Sin ledger, una regla de desempeño no
+     está pagada: está sin contabilizar.
+   - §2.x.1 ya prohíbe emitir veredicto sin ledger, así que el caso no debería presentarse — pero
+     escribirlo como "está pagada" invitaba a olvidarse de por qué.
+3. **La reducción se declara en el veredicto.** Una canasta recortada por capital produce un GO con
+   canasta chica, no un GO a secas: ver R13(d).
+
+**Recomendación explícita del spec, no obligación:** elegir "el mejor por métrica" es la opción más
+ruidosa que hay. DeMiguel/Garlappi/Uppal y Bates & Granger dicen lo mismo desde hace décadas — el
+ganador de la muestra es en parte suerte. Cuando el capital obliga a quedarse con uno, una regla
+**intrínseca** (el más líquido, el de menor costo relativo al tick) es preferible a una de desempeño,
+porque no agrega ensayos y no hereda el sesgo del ganador. El spec **registra la recomendación y deja
+la elección de la regla al pre-registro**, que es donde corresponde.
+
+**Evidencia del porqué, a incluir en el spec como tal — no como justificación del universo:**
+
+Dos mediciones sobre `data/raw/*/m1/`, ventana 2025-10-30 → 2026-06-30:
+
+| Par | Corr. de **retornos** (130 d) | Corr. del **resultado ORB** (170 d) |
+|---|---|---|
+| MES–MNQ | 0,947 | 0,281 |
+| MES–MYM | 0,847 | 0,445 |
+| MES–MGC | 0,435 | 0,131 |
+| MNQ–MYM | 0,684 | 0,099 |
+| MNQ–MGC | 0,407 | 0,162 |
+| MYM–MGC | 0,429 | 0,033 |
+
+Límites de la medición, a declarar textualmente en el spec: N = 170 ⇒ error estándar ≈ 0,077, o sea
+los valores bajo ~0,15 no se distinguen de cero **ni de 0,25**; ventana de 8 meses y un solo régimen;
+el proxy de ORB no tiene stops, costos, filtro RVOL ni salida Chandelier. **La medición no fija
+ningún umbral** — el umbral de C3 viene del anclaje a G6; la medición justifica por qué el gate existe
+y por qué mira la cola y no Pearson. Los mismos números entran además, sin umbral, en el requisito de
+reporte de amplitud efectiva.
+
+### R12 — §7.3 — Gate P3 anclado al control vinculante de la ficha
+
+La fila P3 se reemplaza por:
+
+| # | Criterio | Umbral definitivo |
+|---|---|---|
+| P3 | P(en un mes fondeado, la pérdida intradía de **un solo día** consuma el **colchón disponible hasta el umbral vinculante** al inicio de ese día) | < 2% |
+
+Con la definición normativa:
+
+> El **umbral vinculante** es el `daily_loss_limit` de la ficha si está declarado, y el
+> `max_loss_limit` trailing si no lo está. En MFFU Rapid EOD 50K el denominador arranca en **$2.000**
+> y es una cantidad que el simulador ya sigue: la distancia entre el equity y el umbral trailing, que
+> varía a lo largo del camino y **se congela** cuando el umbral se bloquea (`threshold_lock_at`).
+
+Justificación a escribir, de las dos salidas descartadas:
+
+> Marcar P3 como **N/A** porque Rapid EOD no tiene límite diario sería un **bypass**: una estrategia
+> que pierde $1.800 en una mañana y recupera $1.700 a la tarde no viola ninguna regla de MFFU, pero
+> está a $200 de liquidar la cuenta, y sacaría GO. **Inventar** un límite diario propio metería una
+> constante de política de riesgo dentro del SSoT, que debe ser mecánico y derivado del contrato.
+
+Delimitación frente a P4, explícita:
+
+> **P3 es de un día** — la cola izquierda de la distribución diaria; atrapa la estrategia de buen
+> camino promedio con un día catastrófico cada tanto. **P4 es del camino** — la acumulación a lo
+> largo de meses; atrapa la que sangra de a poco.
+
+**Nota normativa obligatoria — delimitación de ámbito frente a G7 (corregida, ver PA-106-2):**
+
+> P3 y G7 **no miden lo mismo y ninguno domina al otro**, porque operan en ámbitos distintos que el
+> propio v1.4 ya separa en los títulos de sus secciones: **G7 es un gate G — "robustez por símbolo y
+> candidato"** (§7.1), evaluado por Monte Carlo **sobre un símbolo aislado**; **P3 es un gate P —
+> "economía prop a nivel de cuenta"** (§7.3), evaluado por `prop_sim` **sobre la cuenta conjunta**.
+>
+> La diferencia es material bajo el universo de §2.x. Con señales que coinciden en dirección el 88%
+> de los días entre MES y MNQ, caídas intradía moderadas **por símbolo** pasan G7 holgadamente y, sin
+> embargo, sumadas en la cuenta consumen el colchón de $2.000 en una sola mañana. **G7 no puede ver
+> ese evento**: no existe en ninguna de sus corridas por símbolo.
+>
+> Segunda diferencia, propia de la etapa fondeada: los retiros **vacían** el excedente sobre el
+> colchón. Tras un payout, la distancia al umbral trailing al inicio del día puede ser de unos pocos
+> cientos de dólares, y un día adverso ordinario la consume. La MC de G7 corre sobre una curva
+> continua **sin retiros de capital**, así que tampoco ve ese evento.
+>
+> Por lo tanto **P3 vincula**, y es la única salvaguarda de la cuenta fondeada contra el shock
+> intradía de cartera. El umbral se mantiene en **< 2%**.
+
+Los gates G6 y G7 **no cambian de redacción**: referencian `max_loss_limit` simbólicamente y la
+denominación en dólares se hereda de §1.1 sin tocarlos.
+
+### R13 — §7.5 — Veredicto: regla de supervivientes y precedencia de C1
+
+Tres cambios en §7.5, y **ninguno relaja un gate**:
+
+**(a) Regla de veredicto — se conservan TODOS los supervivientes, no el mejor (nuevo):**
+
+> Un candidato que supera los gates en varios instrumentos se opera en **todos los que el presupuesto
+> de riesgo de la cuenta permita llevar a la vez** (`k_max`, §7.2 C3), **equiponderados**. Mientras
+> `k_max` alcance para todos los supervivientes, **no se selecciona el de mejor métrica**: el ganador
+> de la muestra es en parte suerte, y preferirlo empeora el resultado esperado fuera de muestra.
+>
+> Cuando `k_max` es menor que el número de supervivientes, la canasta se recorta **por capital**, con
+> la regla de composición declarada de antemano (§7.2). Eso **no** convierte al veredicto en NO-GO ni
+> en GO-PARCIAL: es un GO con canasta acotada — ver (d).
+
+Sustento a citar (verificado contra fuente):
+
+- DeMiguel, Garlappi & Uppal (2009), *RFS* 22(5):1915–1953 — sobre 14 modelos y 7 datasets ninguno
+  bate consistentemente a 1/N fuera de muestra.
+- Bates & Granger (1969), *JORS* 20:451–468; Timmermann, *Forecast Combinations* (Handbook of
+  Economic Forecasting, cap. 4) — las combinaciones baten a la elección del mejor modelo individual
+  ex ante, y las simples suelen dominar a las refinadas.
+- Asness, Moskowitz & Pedersen (2013), *Value and Momentum Everywhere*, *J. Finance* 68(3):929–985 —
+  primas consistentes en ocho mercados y clases de activo; promediar entre mercados mitiga el ruido
+  que no es común a la señal.
+
+**(b) GO-PARCIAL: precedencia explícita de C1 (endurecimiento, corrige ambigüedad de v1.4):**
+
+La redacción de v1.4 —*"GO-PARCIAL: pasa en subconjunto de símbolos → incubación restringida"*— se
+lee como si un subconjunto cualquiera bastara, lo que contradice C1 (≥60% del universo). Se
+reemplaza por:
+
+> **GO-PARCIAL**: el candidato pasa **C+P+T** —lo que incluye **C1 ≥ 60% del universo**— pero no en
+> la totalidad de sus instrumentos. La incubación se restringe a los supervivientes, equiponderados
+> (regla (a)). **GO-PARCIAL nunca es una vía para eludir C1**: un candidato que falla C1 es NO-GO.
+> Con el universo de cuatro instrumentos de §2.x, C1 ≥ 60% exige **3 de 4**.
+
+**(c) Corolario de un solo instrumento — como fundamento de C1, no como regla con excepción:**
+
+> Que un candidato aparezca en **exactamente uno** de varios instrumentos emparentados es **evidencia
+> en contra** del candidato, no un éxito parcial: un edge estructural se apoya en un mecanismo, y los
+> mecanismos no respetan fronteras de ticker (*Value and Momentum Everywhere*).
+>
+> **Esto no es una cláusula de veredicto adicional ni una regla aparte: es la fundamentación económica
+> del umbral del 60% de C1**, y se redacta como tal, adosada a C1 y no a §7.5 como regla propia.
+> Escribirla como regla específica de "un solo instrumento" sugeriría —falsamente— que pasar en dos sí
+> calificaría: no califica. Para cualquier universo de `n ≥ 2`, aprobar en uno da `1/n ≤ 50% < 60%`, y
+> con el universo de §2.x aprobar en dos da 50%: **ambos son NO-GO mecánico por C1**, sin necesidad de
+> ninguna regla nueva.
+
+Y, explícitamente, la **cláusula que no se escribe** y por qué:
+
+> No se admite ninguna excepción por **hipótesis pre-registrada** que rescate a un candidato que
+> falla C1. Una hipótesis pre-registrada (issue #88) **interpreta** un resultado; no **relaja** un
+> gate, y los gates no se relajan. Su rol en el universo es otro: toda ampliación futura del universo
+> (por ejemplo M2K, §2.x) debe declararse antes de medir, y toda selección entre instrumentos debe
+> contarse como ensayo (§2.x.1).
+
+**(c-bis) Orden de evaluación normativo — hueco detectado en la segunda revisión (§6.1 y §7.5):**
+
+Si `prop_sim` corre sobre la canasta completa de supervivientes y **después** C3 la recorta, el
+veredicto certifica métricas de cuenta —P1 probabilidad de pasar, P4 supervivencia, P5 payout— de un
+portafolio **que no es el que se va a operar**. Con una canasta de 1 en vez de 3 cambian la frecuencia
+de trades, el tiempo hasta el objetivo de profit y el ratio de la regla de consistencia del 30%. El
+número que el proyecto existe para producir describiría otra cuenta.
+
+v1.5 fija el orden y lo hace normativo:
+
+```
+WFA + G1–G9 (por símbolo)
+   └─► C1, C2 (¿el edge generaliza?)
+        └─► C3 → k_max y composición de la canasta operada
+             └─► prop_sim + P1–P6 SOBRE ESA CANASTA, no sobre el conjunto de supervivientes
+                  └─► T1, T2
+                       └─► Veredicto
+```
+
+> **Si la canasta de tamaño `k_max` no supera los gates P, el veredicto es NO-GO.** Está **prohibido**
+> reintentar con canastas más chicas hasta que alguna pase: eso sería exactamente la búsqueda sobre
+> subconjuntos que la regla de composición pre-registrada existe para impedir, y entraría por la
+> puerta de atrás.
+
+Esto obliga a ajustar §6.1 (flujo), donde hoy los gates P no dependen de una canasta previamente
+determinada.
+
+**(d) GO acotado por capital — forma nueva de veredicto (normativo):**
+
+> **GO-ACOTADO (candidato X, firma Y, canasta {…})**: el candidato pasa C+P+T sobre una canasta de
+> tamaño `k_max` **menor** que el número de instrumentos en los que superó los gates, porque el
+> presupuesto de riesgo de la cuenta no permite llevarlos todos a la vez. **Es un GO**, no un NO-GO
+> degradado ni un GO-PARCIAL: la ventaja existe y generaliza (C1 lo certificó); lo que falta es
+> capital.
+>
+> El artefacto registra obligatoriamente: los instrumentos que superaron los gates, `k_max`, la
+> calibración `risk_pct` que lo produjo, la regla de composición aplicada y su fecha de pre-registro.
+> Un GO-ACOTADO cuyo `k_max` se explique por una calibración de riesgo elegida después de ver los
+> resultados **no es un GO**: es minería.
+
+**Distinción que el spec debe hacer explícita, porque las tres se parecen y significan cosas
+opuestas:**
+
+| Veredicto | Qué falló | Lectura |
+|---|---|---|
+| **NO-GO** | C1, o los gates G/P/T | No hay ventaja robusta, o no rentabiliza bajo las reglas |
+| **GO-PARCIAL** | Nada; pasó C1 pero no en el 100% del universo | La ventaja existe pero no es universal |
+| **GO-ACOTADO** | Nada; el capital no alcanza para la canasta completa | La ventaja existe y generaliza; **falta cuenta, no edge** |
+
+**Piso de `k_max ≥ 2`: propuesto por la revisión independiente y RECHAZADO (registrado con su razón).**
+
+La segunda revisión propuso exigir `k_max ≥ 2` y emitir NO-GO por "capacidad insuficiente de cuenta"
+cuando solo se pueda operar un instrumento, invocando el principio de combinación 1/N (DeMiguel et
+al.; Asness et al.). **No se adopta**, por tres razones:
+
+1. **Aplica un principio de construcción de cartera a una restricción de factibilidad.** 1/N dice qué
+   hacer *cuando podés sostener N*: no concentres. Si el capital solo permite 1, no hay elección entre
+   concentrar y diversificar — es exactamente la confusión entre "¿hay ventaja?" y "¿entra en la
+   cuenta?" que este requisito existe para deshacer.
+2. **C1 sigue exigiendo 3 de 4.** Un GO-ACOTADO con `k = 1` solo es alcanzable por un candidato que
+   demostró ventaja en **al menos tres** instrumentos. La validación cruzada ocurrió; lo que se acota
+   es la ejecución. "Mono-factorial sin validar" describe otra cosa.
+3. **La cola en `k = 1` no queda descubierta**: la cubren G6 (MaxDD multi-día), G7 (probabilidad de
+   breach) y P3 (ruina intradía de un día a nivel de cuenta), los tres corriendo sobre la cuenta real.
+
+Lo que sí se conserva del señalamiento: operar uno **renuncia** al beneficio de diversificación, y el
+artefacto debe decirlo — el `n_eff` reportado será 1 y el veredicto lo muestra. Un GO-ACOTADO no
+pretende ser tan bueno como un GO completo; pretende no confundirse con un NO-GO.
+
+**Alternativa estructural que el spec debe registrar, no resolver:** MFFU Rapid EOD admite **3 cuentas
+fondeadas**. Un instrumento por cuenta da tres colchones de $2.000 **independientes** en vez de uno
+compartido, y elimina el riesgo de cola conjunta a nivel de cuenta: un shock macro mata una cuenta, no
+las tres a la vez. El costo son tres suscripciones y tres evaluaciones. La disyuntiva **una cuenta
+multi-activo vs. varias cuentas mono-activo** ya estaba abierta antes de este change; v1.5 la deja
+declarada en §11.1 con sus términos, y **no la resuelve** — depende de precios que no están
+verificados (PA de §11.1).
+
+El resto de §7.5 —condicionamiento por firma, `firm_profile_hash`, no-transferibilidad, forma
+canónica `GO (candidato X, firma Y)`, nota de trabajo futuro sobre `FirmMismatchError`— se conserva
+**sin cambios**, salvo que la forma canónica se **extiende** a `GO (candidato X, firma Y, canasta
+{…})`: la canasta es parte inseparable de la identidad del veredicto, por la misma razón que la firma.
+Y la no-transferibilidad ahora cubre también el **cambio de régimen** CFD → CME: un veredicto del
+mundo CFD no es válido en el mundo CME bajo ninguna circunstancia.
+
+### R14 — §7.6 — Sanity-checks re-derivados
+
+- **Sanity-check G1 ≥ 300**: el cálculo de v1.4 parte de ~700–1.000 apuestas/año en **4 índices** con
+  dos sesiones distintas (3 US + GER40). El universo de v1.5 tiene 3 micro-índices sobre **una sola**
+  sesión RTH, más MGC con ancla pendiente (R7). El spec debe **re-derivar** el cálculo sobre el
+  universo efectivo del Candidato B y **declarar el resultado como estimación heredada del régimen
+  CFD, a confirmar contra datos CME reales** en el change de capa 1. Si la re-derivación no alcanzara
+  300 trades OOS, la salida es extender la ventana temporal o excluir el instrumento — **los gates no
+  se relajan** (texto de v1.4, conservado).
+- **Sanity-check G4/T1 DSR ≥ 0.95**: el análisis de v1.4 asume `N_trials_IS = 27` (grid 3×3×3). Bajo
+  el régimen de **selección** de §2.x.1, el número efectivo de ensayos incluye **también** los
+  instrumentos sobre los que se selecciona. El spec debe declarar que el sanity-check de v1.4 **queda
+  invalidado como está** y se recalcula cuando exista el ledger (#53), y que hasta entonces
+  **no se emite veredicto** sobre el universo múltiple. Esta es la consecuencia mecánica de R9; sin
+  ella el spec afirmaría alcanzabilidad sobre un contador que ya no aplica.
+
+### R15 — §11.1 — Pendientes declarados
+
+Se añaden a la lista de preguntas abiertas, con el mismo formato `PA-n (Issue X)` de v1.4, y **no se
+rellenan con supuestos**:
+
+| Pendiente | Qué falta | Por qué bloquea |
+|---|---|---|
+| Ancla del rango de apertura de **MGC** | Página de producto oficial de CME | Sin él, el Candidato B no corre sobre MGC (R7) |
+| **Política de VPS de MFFU** | Búsqueda de "VPS" / "virtual private server" en su help center: **cero resultados**. Ausencia de regla no es permiso | Decide la arquitectura de operación post-GO |
+| **Comisiones por contrato** | No publicadas; dependen de la plataforma (Tradovate / Rithmic / NinjaTrader) | Insumo obligatorio de `costs.py`, que bloquea **G3** (PF OOS con costos completos), **G9** (PF con stress ×1.5) **y todos los gates P**. No es solo economía: sin comisiones verificadas los gates de robustez tampoco corren |
+| **Árbitro de exposición (#96)** | No existe | Bloquea **operar** la canasta contra el `contract_budget` compartido y emitir gates P sobre ella. No bloquea C3, que se computa por superposición (R11) |
+| **Denominador del sizing (`risk_pct`)** — PA-106-5 | v1.4 lo define como **% del balance**, y en sim funded el balance arranca en **$0** y puede ir negativo: ahí es indefinido | Sin denominador, `k_max` no se calcula y C3 no se evalúa. Candidato natural: el `max_loss_limit`. **Es una decisión del spec, no un dato externo** |
+| **Una cuenta multi-activo vs. varias mono-activo** | MFFU admite **3 cuentas fondeadas** en Rapid EOD. Tres colchones de $2.000 independientes eliminan el riesgo de cola conjunta que C3 acota; el costo son 3 suscripciones y 3 evaluaciones, y el **precio del plan no está verificado** | Decide la arquitectura de la operación y puede volver a C3 irrelevante. Abierta desde antes de este change; v1.5 la declara con sus términos y no la resuelve |
+| **Precio del plan Rapid EOD 50K** | No verificado | Entra en `challenge_cost` y en la economía del embudo (§1.2) |
+| **Hedging entre instrumentos *related*** | Ambigüedad entre "mismo subyacente" y "no relacionados"; confirmar con soporte | Decide si la canasta MES/MNQ/MYM puede tomar signos opuestos (R5) |
+| **Datos de M2K** | No existen en el store | Sin ellos su admisión al universo no se evalúa (R8) |
+| **Proveedor de datos CME** | Databento / Rithmic / Tradovate / CME DataMine | Change de capa 1 (R10) |
+
+Las preguntas PA-1 a PA-5 de v1.4 se conservan, marcadas como **cerradas o caducas por el cambio de
+régimen** según corresponda: PA-1 y PA-2 (símbolos y profundidad de ticks en The5ers) quedan
+**caducas**; PA-3, PA-4 y PA-5 (contrato plugin, enforcement de `LookaheadError`, forma del grid)
+siguen **vigentes** porque son agnósticas al venue.
+
+### R16 — Punteros al SSoT
+
+Se migran a v1.5, revirtiendo explícitamente el precedente de #20 (que los dejó apuntando a v1.1 y
+lo documentó como decisión de alcance):
+
+| Archivo | Línea | Acción |
+|---|---|---|
+| `CLAUDE.md` | 5 | `v1.4` → `v1.5` |
+| `AGENTS.md` | 7 | `v1.4` → `v1.5` |
+| `README.md` | 168 | `v1.4` → `v1.5` (texto del enlace y destino) |
+| `docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md` | 615 | `v1.4` → `v1.5` |
+| `docs/PROTOCOLO_ADMISION_ESTRATEGIAS.md` | — | **No se toca** — verificado el 2026-09-11: no contiene ninguna referencia al SSoT por nombre de archivo, ni al universo CFD, ni a The5ers/FTMO |
+
+**Excepción declarada, no olvido:** `src/genesis/strategy/contract.py:1` referencia
+`docs/SPEC_GENESIS_v1.4...md` §11.1 (PA-3) en su docstring. **No se toca**: está bajo `src/**`, que
+es no-alcance de este change y que el guardián de escritura bloquea fuera de la fase `apply`. La
+referencia sigue siendo **correcta** —PA-3 se conserva vigente en v1.5 (R15)—, solo apunta a la
+versión histórica. Se migra en el primer change que toque ese archivo por otro motivo.
+
+**Los artefactos archivados en `.pulse/changes/archive/**` no se tocan**: son registro histórico
+inmutable de decisiones fechadas.
+
+### R17 — Gates intactos: verificación por enumeración
+
+Ningún umbral de G, C, P o T se relaja. El spec v1.5 debe conservar **literalmente idénticos**:
+
+- **G1** ≥ 300, **G2** ≥ 0.5, **G3** ≥ 1.3, **G4** ≥ 0.95, **G5** < 25%, **G6** ≤ 50% del
+  `max_loss_limit`, **G7** < 5%, **G8** < 30%, **G9** ≥ 1.15.
+- **C1** ≥ 60%, **C2** ≥ 0.8. (**C3** es **añadido** y **no es un gate de pase/fallo**: es una
+  restricción de dimensionamiento cuyo incumplimiento reduce la canasta. No sustituye ni debilita a
+  ninguno.)
+- **P1** ≥ 50%, **P2** ≤ 2, **P4** ≥ 6 meses, **P5** > 0, **P6** = 0. (**P3** cambia de **definición**
+  —qué mide— pero **no de umbral**: sigue < 2%.)
+- **T1** ≥ 0.95, **T2** < 0.3.
+
+### R18 — Prohibición de tocar código
+
+`git status --porcelain` restringido a `src/` y `tests/` debe mostrar, al terminar el change,
+**exactamente las mismas entradas que al empezar**. Baseline capturado el 2026-09-11 al entrar en
+`specify` (modificaciones previas de la sesión con `agy`, ajenas a este change):
+
+```
+ M src/genesis/data/metadata.py
+ M tests/data/test_metadata.py
+```
+
+Ninguna entrada nueva, y ninguna de esas dos con contenido distinto al del baseline. El parche de
+`metadata.py` (`tick_size = 10^-digits`) se revierte en un change aparte — es no-alcance aquí (OUT 5).
+
+---
+
+## Redacción exacta esperada (spec-delta) — celdas que cambian de valor
+
+| Ubicación | v1.4 (actual) | v1.5 (esperado) |
+|---|---|---|
+| §1.1, fila `max_loss_limit` | `DD máximo (% y tipo: estático o trailing; ancla del trailing)` | `DD máximo — **monto absoluto en la divisa de la cuenta** y tipo: `static` \| `trailing_intraday` \| `trailing_eod`; ancla y **nivel de congelamiento** (`threshold_lock_at`)` |
+| §1.1, fila `daily_loss_limit` | `Límite de pérdida diaria (% y base de cálculo: el mayor de equity flotante intradía y balance del día anterior)` | `**Opcional.** Límite de pérdida diaria en monto absoluto, con base de cálculo y **semántica declarada** (`breach` = rompe la cuenta \| `pause` = suspende el día). Una ficha sin DLL declarado es válida; ver §7.3 (P3)` |
+| §1.1, fila `max_lots`, `max_positions` | `Límites de exposición si existen` | `**`contract_budget`** — techo de exposición **total y compartido entre instrumentos, en tiempo real**, con equivalencia declarada entre tamaños (10 micros = 1 mini). La simulación multi-activo concurrente contra este presupuesto queda **bloqueada** hasta #96` |
+| §2.3, fila `Universo` | `CFDs de índices: US500, NAS100, US30, GER40 (apertura de contado de cada uno) — ver §2.x para símbolos MT5` | `Futuros CME, front month **sin ajustar**: MES, MNQ, MYM, MGC — ver §2.x. El **universo efectivo** de una corrida excluye los instrumentos cuyo ancla de rango de apertura no esté verificada (hoy: MGC)` |
+| §7.2, tabla de gates C | *(C1, C2)* | *(C1, C2 idénticos)* + fila **C3** (`≤ 50% del max_loss_limit`), marcada **restricción de dimensionamiento**, con columna *Efecto al incumplirse* = "se reduce la canasta" + regla de `k_max` + requisito de reporte de correlación y `n_eff`, sin umbral |
+| §7.3, fila P3 | `P(breach del límite diario en un mes fondeado) \| < 2% — evaluado sobre equity flotante intradía… El breach también ocurre si la pérdida contra el balance del día anterior cruza el 5%…` | `P(en un mes fondeado, la pérdida intradía de **un solo día** consuma el colchón disponible hasta el **umbral vinculante** al inicio de ese día) \| **< 2%** — el umbral vinculante es el `daily_loss_limit` si la ficha lo declara, y el `max_loss_limit` trailing si no. Ver nota de dominancia con G7` |
+| §7.5, viñeta GO-PARCIAL | `**GO-PARCIAL**: pasa en subconjunto de símbolos → incubación restringida.` | `**GO-PARCIAL**: pasa **C+P+T** —incluido **C1 ≥ 60% del universo**— pero no en la totalidad de sus instrumentos → incubación restringida a los supervivientes, **equiponderados**. Nunca es vía para eludir C1: fallar C1 es NO-GO. Con \|U\| = 4, C1 exige **3 de 4**` |
+| `CLAUDE.md:5`, `AGENTS.md:7`, `README.md:168`, `PROPUESTA_LABORATORIO…:615` | `SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` | `SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` |
+
+---
+
+## Criterios de aceptación (evals ejecutables)
+
+```
+DADO el directorio docs/ del repo
+CUANDO se ejecuta `fd 'SPEC_GENESIS_v1\.5' docs/`
+ENTONCES retorna exactamente 1 archivo: docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `git status --porcelain docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md`
+ENTONCES la salida es vacía (el v1.4 permanece byte a byte idéntico; queda como histórico)
+Y lo mismo para v1.1, v1.2 y v1.3
+```
+
+```
+DADO el repo completo
+CUANDO se ejecuta `rg -l 'SPEC_GENESIS_v1\.4' --glob '!.pulse/changes/**' --glob '!docs/SPEC_GENESIS_v1*'`
+ENTONCES la única coincidencia es src/genesis/strategy/contract.py (excepción declarada en R16)
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg -n 'US500|NAS100|US30|GER40|The5ers|FTMO|MetaTrader|MT5' docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md`
+ENTONCES toda coincidencia cae dentro de: el changelog v1.4→v1.5 o anteriores, §1.3.1/§1.3.2 (fichas
+  históricas), §2.x (universos heredados de los Candidatos A y C), o §4 (fila de mt5_export.py marcada
+  como régimen histórico)
+Y ninguna coincidencia aparece en §2.3 (definición normativa del Candidato B) ni en §7
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg -n 'MES|MNQ|MYM|MGC' docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md`
+ENTONCES aparecen en §1.3.0 (hedging), §2.3 (universo y anclas) y §2.x (tabla del universo)
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+CUANDO se extraen los umbrales de §7.1–§7.4
+ENTONCES son idénticos a los de v1.4 para G1–G9, C1, C2, P1, P2, P4, P5, P6, T1, T2
+Y P3 conserva el umbral `< 2%` con definición nueva
+Y C3 (`≤ 50% del max_loss_limit`) es la única fila añadida, marcada como restricción de dimensionamiento
+Y no existe ninguna fila de gate con umbral de correlación de Pearson entre instrumentos
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+CUANDO se busca en §7.2 y §7.5 el efecto de incumplir C3
+ENTONCES dice "se reduce la canasta" y en ningún lugar dice que incumplir C3 produzca NO-GO
+Y §7.5 define GO-ACOTADO con su tabla de distinción frente a NO-GO y GO-PARCIAL
+Y la forma canónica del veredicto incluye la canasta: `GO (candidato X, firma Y, canasta {…})`
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+CUANDO se ejecuta `rg -n 'no verificado|PENDIENTE|a confirmar' docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md`
+ENTONCES aparecen al menos: ancla de MGC, política de VPS, comisiones por contrato, precio del plan,
+  hedging entre instrumentos related, datos de M2K, proveedor de datos CME
+Y ninguno de ellos aparece rellenado con un valor concreto en la ficha de §1.3.0
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+CUANDO se busca la nota de delimitación de ámbito P3/G7 en §7.3
+ENTONCES existe, y afirma que G7 es por símbolo y P3 a nivel de cuenta, y que P3 SÍ vincula
+Y NO aparece en ninguna parte del documento la afirmación de que G7 domina a P3 o de que P3 es no vinculante
+```
+
+```
+DADO docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+CUANDO se busca en §7.5 la palabra "pre-registrada"
+ENTONCES aparece únicamente para declarar que NO rescata a un candidato que falla C1
+Y no existe ninguna cláusula que admita GO-PARCIAL por debajo del 60% de C1
+```
+
+```
+DADO el repo
+CUANDO se ejecuta `git status --porcelain src/ tests/`
+ENTONCES la salida es idéntica a la de antes del change (ninguna entrada nueva)
+```
+
+```
+DADO el ciclo SDD
+CUANDO el change llega a review
+ENTONCES `mise run ci` pasa sin cambios respecto del baseline (change doc-only; no debería tocarlo,
+  se corre como red de seguridad)
+```
+
+---
+
+## Riesgos
+
+| # | Riesgo | Mitigación |
+|---|---|---|
+| 1 | **El spec describe una firma que puede reescribir su rulebook.** Apex lo hizo en 2026 y dejó todo su producto anterior como "Legacy" | R5 exige fecha de lectura por parámetro y reverificación obligatoria a los 6 meses |
+| 2 | **`p_pass` sobreestimado mientras la capa 3 no implemente `trailing_eod` en dólares.** El modelo actual (% del pico móvil) da más aire a medida que el pico sube | R4 bloquea explícitamente la simulación multi-activo concurrente; el change de capa 3 es prerrequisito de cualquier veredicto sobre esta ficha. Declararlo en el spec no lo arregla, pero impide emitir un GO sobre él |
+| 3 | **El ledger (#53) no existe y el régimen es de selección.** Sin él G4 deja de proteger en silencio | R9 y R14 lo convierten en prerrequisito explícito y declaran invalidado el sanity-check de alcanzabilidad hasta entonces |
+| 4 | **La canasta puede quedar reducida a 1 instrumento** si el drawdown conjunto no cabe en medio presupuesto | Ya no produce NO-GO: produce **GO-ACOTADO** con la canasta declarada (R13.d). El riesgo que queda es el inverso — que `risk_pct` se calibre *después* de ver resultados para agrandar `k_max`. R11 lo prohíbe explícitamente y exige registrar la pareja (`risk_pct`, `k_max`) con fecha de pre-registro |
+| 5 | **El universo efectivo del Candidato B se reduce a 3 instrumentos** si el ancla de MGC no se cierra. Contraer el denominador de C1 habría sido una rebaja encubierta del gate (2 de 3 pasa; 2 de 4 no) | R7 fija el denominador en el **universo normativo**: lo no evaluable cuenta como no superado. El Candidato B queda obligado a pasar en los tres micro-índices mientras MGC siga pendiente — más exigente, no menos |
+| 6 | **Deriva documental**: v1.5 nace declarando siete pendientes | Es la alternativa correcta a rellenarlos con memoria del modelo. R15 los centraliza en §11.1 con su bloqueo asociado |
+| 7 | **El docstring de `contract.py` queda apuntando a v1.4** | R16 lo declara como excepción trazable, no como olvido; la referencia sigue siendo correcta en contenido |
+
+---
+
+## Preguntas abiertas — elevar al humano antes de `DESIGN → APPLY`
+
+Las tres primeras surgieron **al redactar la delta exacta**, no estaban en `proposal.md`, y cambian
+texto normativo. Ninguna se resuelve sola.
+
+### PA-106-1 — El "corolario duro" tal como se aprobó en `propose` relajaría C1
+
+`proposal.md` admite GO-PARCIAL para un candidato que pasa en **un solo** instrumento si existe una
+hipótesis pre-registrada. Con `|U| = 4`, pasar en uno es **C1 = 25% < 60%** ⇒ el candidato **ya falla
+los gates C**. Admitir GO-PARCIAL ahí sería **relajar C1**, contra el invariante del proyecto.
+
+**Resolución propuesta y ya escrita en R13:** el corolario se conserva como **fundamento económico de
+C1** (un mecanismo que aparece en uno de cuatro emparentados es evidencia en contra), C1 lo hace
+cumplir mecánicamente, y **no se escribe ninguna excepción**. La hipótesis pre-registrada (#88)
+interpreta resultados y gobierna la ampliación futura del universo; no rescata gates.
+
+**Qué se pierde:** nada operativo. **Qué se gana:** §7.5 deja de tener una cláusula que se lee como
+bypass. **Requiere tu visto bueno** porque revierte una decisión tomada en `propose`.
+
+### PA-106-2 — ~~P3 queda no vinculante~~ → **RESUELTA: P3 sí vincula** (corregida 2026-09-11)
+
+**La versión original de esta pregunta contenía un error de mi parte**, detectado por la revisión
+independiente con `gemini-3.8-flash-high`. Se deja registrada con su corrección porque el gate humano
+aprueba el razonamiento, no solo la conclusión.
+
+**Lo que afirmé:** con Rapid EOD (sin DLL) el evento de P3 es un **subconjunto** del de G7, con
+umbral más laxo (2% mensual ≈ 21% anual, contra 5% anual), luego G7 domina y P3 no vincula.
+
+**Por qué era falso:** la aritmética de umbrales era correcta, pero el argumento de subconjunto
+presuponía que P3 y G7 miden sobre el **mismo ámbito**, y no lo hacen. El propio v1.4 los separa en
+los títulos: §7.1 *"Gates G — robustez **por símbolo** y candidato"* frente a §7.3 *"Gates P —
+economía prop **a nivel de cuenta**"*. Un evento de ruina de **cartera** —tres stops simultáneos por
+un mismo shock macro consumiendo el colchón en una mañana— **no aparece en ninguna corrida por
+símbolo de G7**. Y en etapa fondeada, los retiros vacían el excedente sobre el colchón, cosa que la
+MC de G7 (curva continua, sin retiros) tampoco modela.
+
+**Resolución adoptada:** P3 conserva definición generalizada y umbral `< 2%`, y §7.3 gana una nota
+que **delimita ámbitos** en vez de declarar dominancia. P3 es la única salvaguarda de la cuenta
+fondeada contra el shock intradía de cartera. Sin decisión pendiente del gate humano sobre este
+punto: el error está corregido, no en disputa.
+
+**Lección que sí conviene registrar:** la aritmética de dos umbrales no dice nada si las dos
+magnitudes se miden sobre poblaciones distintas. Fue el paso que salté.
+
+### PA-106-3 — ~~C3a = 0.3 excluiría MES + MYM~~ → **RESUELTA: se elimina el gate de Pearson**
+
+**Segunda corrección de la revisión independiente.** La pregunta original preguntaba si aceptar que
+`C3a < 0.3` dejara fuera la canasta MES+MYM (correlación medida 0,445). La respuesta correcta no era
+ninguna de las tres opciones que ofrecí: era **que el gate de Pearson no debía existir**.
+
+**Por qué el anclaje a T2 no se sostiene** — tres razones, desarrolladas en R11:
+
+1. T2 mide entre **candidatos** diseñados para no parecerse; C3a medía entre **activos** de la misma
+   estrategia, que comparten beta estructural. Poblaciones distintas, líneas base distintas.
+2. Fallar T2 **no mata** al candidato (se descarta el ensemble); fallar C3a lo mataba. El número
+   viajaba, la consecuencia no.
+3. `prop_sim` simula la **cuenta conjunta**: la correlación ya está incorporada en P1–P5. El gate de
+   Pearson no agregaba protección, agregaba una condición de muerte redundante.
+
+**Resolución adoptada:** queda **un solo gate C3** —drawdown conjunto intradía p95 en días de señal
+simultánea ≤ 50% del `max_loss_limit`, anclado a **G6**— más un **requisito de reporte sin umbral**
+de la matriz de correlación y del número efectivo de apuestas `n_eff`. Se mide lo que importa (ruina
+conjunta), se reporta lo que informa (amplitud efectiva), y no se inventa ninguna constante.
+
+**Segunda corrección, del dueño del proyecto (2026-09-11), sobre lo que yo había dejado en pie.**
+Todavía escribí que si el peor día conjunto no cabe en medio presupuesto, el Candidato B era **NO-GO**.
+Eso seguía mezclando dos preguntas: *"¿hay ventaja?"* la responde C1; *"¿entra la canasta en la
+cuenta?"* es una pregunta de **capital**. No alcanzar el colchón para llevar cuatro instrumentos a la
+vez no dice nada malo de la estrategia — dice que la cuenta es chica.
+
+**Resolución final:** C3 deja de ser gate y pasa a ser **restricción de dimensionamiento**: determina
+`k_max`, el número de instrumentos que la cuenta puede llevar simultáneamente. Incumplirla **reduce la
+canasta**, no mata al candidato. El veredicto resultante es **GO-ACOTADO** (R13.d). El único NO-GO que
+sobrevive por esta vía es el de `k_max = 1` fallando, que es **G6** — un solo instrumento que no cabe
+en medio presupuesto —, y ese sí es un problema de la estrategia.
+
+Lo que se conserva del razonamiento anterior es el control anti-minería: la reducción es **por tamaño
+descendente, sin buscar subconjuntos**, con regla de composición pre-registrada, y con la calibración
+`risk_pct` fijada antes de ver resultados. Ahí sí no se cede.
+
+### PA-106-4 — Ancla del rango de apertura de MGC
+
+No es decidible sin fuente primaria (página de producto de CME). Queda declarada en R7 y R15, y su
+consecuencia —MGC fuera del universo **efectivo** del Candidato B hasta cerrarla— está escrita. No
+requiere decisión tuya ahora; requiere que la aceptes como pendiente declarado en vez de rellenada.
+
+---
+
+## Trazabilidad
+
+| Requisito | Origen |
+|---|---|
+| R1, R2 | Precedente change #20; `proposal.md` §2 |
+| R3 | `proposal.md` Decisión 1; `idea.md` §1.1 |
+| R4 | `proposal.md` Decisión 2; `idea.md` §2.2, §2.4 |
+| R5, R6 | `proposal.md` Decisión 3; `idea.md` §3.2 |
+| R7, R8 | `proposal.md` Decisión 4; `idea.md` §3.4 |
+| R9 | `proposal.md` Decisión 4 (régimen de selección); `idea.md` §3.8 |
+| R10 | `proposal.md` Decisión 5; `idea.md` §3.5 |
+| R11 | `proposal.md` Decisión 4 (gate C3); `idea.md` §2.5 |
+| R12 | `proposal.md` Decisión 6; `idea.md` §3.6 |
+| R13 | `proposal.md` Decisión 4 (veredicto y corolario), **con la corrección de PA-106-1** |
+| R14 | Consecuencia mecánica de R9 sobre §7.6 de v1.4 — no estaba en `proposal.md` |
+| R15 | `proposal.md` Decisión 7; `idea.md` §3.7 |
+| R16 | `proposal.md` §4 invariante 2 |
+| R17, R18 | `proposal.md` §3 No-Objetivos y §4 invariante 1 |

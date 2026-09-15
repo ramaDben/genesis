@@ -56,11 +56,13 @@ Si se decide aplicar, el flag va en los dos sitios que invocan a `ty`:
 - `mise.toml`, tarea `ty` (~línea 127): `run = "uv run ty check"`
 - `.github/workflows/ci.yml`, paso *ty check*
 
-## Estado
+## Estado — RESUELTO (actualizado 2026-09-13)
 
-PR #65 **abierto a propósito**, con este diagnóstico comentado en el hilo. `ty` queda en 0.0.64.
-Los otros cuatro bumps (`pyarrow` 25.0.1, `numpy` 2.5.2, `hypothesis` 6.165.10, `ruff` 0.16.5) se
-agruparon y mergearon en el **#73** — de a uno se pisaban en `uv.lock`.
+El arreglo se aplicó: `--extra-search-path .agents/hooks/_lib` quedó en `mise.toml` (tarea `ty`,
+línea ~133) y en `.github/workflows/ci.yml` (paso *ty check*). `ty` está en **0.0.75** en `main`
+y `uv run ty check` pasa limpio. El PR #92 (dependabot) propone el siguiente bump, 0.0.75 → 0.0.79;
+antes de mergearlo hay que confirmar que el flag sigue resolviendo `pulse_hooks_lib` en esa versión
+(no asumirlo — la 0.0.75 fue justamente la que rompió la semántica de `root`).
 
 ## Nota aparte sobre ruff 0.16
 

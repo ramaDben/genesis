@@ -612,7 +612,7 @@ tratarla como Change independiente, no como parte del laboratorio.
 
 | Recurso | Dónde |
 |---|---|
-| SSoT del proyecto | `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md` |
+| SSoT del proyecto | `docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` |
 | Visión y invariantes decididos | `README.md` §Visión |
 | Ledger de ensayos | `src/genesis/validation/trial_ledger.py`, `ledger/README.md` |
 | Contrato de capa 2 | `src/genesis/strategy/contract.py` |
