@@ -1,0 +1,35 @@
+metadata:
+  id: "CANDIDATE-C1-GOLD-LOB"
+  author: "Lou, Polk & Skouras / Gao et al."
+  paper_ref: "JFE: Lou, Polk & Skouras (2019) A Tug of War: Overnight vs Intraday Expected Returns"
+  economic_rationale: "Desbalance de inventario nocturno y flujo institucional de descubrimiento de precio en la apertura de Londres (LBMA)."
+  fidelity: "canonical"
+  sources:
+    academic:
+      paper: "A Tug of War: Overnight Versus Intraday Expected Returns"
+      authors: "Dong Lou, Christopher Polk, Spyros Skouras (2019)"
+      journal: "Journal of Financial Economics"
+    institutional:
+      firm: "AQR Capital Management / Man AHL / Alpha Architect"
+      concept: "Intraday Trend Following, Liquidity Transitions and Breakout Anomaly"
+      failure_mode: "Overnight expansion > 0.6 ATR (Tug-of-war mean-reversion risk)"
+
+universe:
+  symbol: "XAUUSD"
+  timeframe: "M15"
+  session: "XAUUSD"
+
+alpha:
+  regime_filter:
+    kind: "rvol"
+    threshold: 1.2
+    lookback_days: 10
+  entry_trigger:
+    kind: "opening_range_breakout"
+    range_minutes: 60
+
+risk_exit:
+  kind: "chandelier_trailing"
+  params:
+    lookback_bars: 22
+    atr_multiplier: 2.5
