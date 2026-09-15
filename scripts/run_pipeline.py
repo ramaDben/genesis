@@ -51,6 +51,7 @@ from genesis.data.metadata import ArtifactMetadata, current_git_commit
 from genesis.data.mt5_export import Granularity, RawParquetStore, plan_chunks
 from genesis.data.profile import firm_profile_hash, load_firm_profile
 from genesis.data.symbols import SymbolFigure
+from genesis.strategy.genome import compile_genome
 from genesis.strategy.inspector import InspectorFunnelConfig, load_inspector_funnel_config
 from genesis.validation import (
     CandidateValidationBundle,
@@ -142,6 +143,7 @@ def _candidate_config(
     window_config: WfaWindowConfig,
     grid_config: GridConfig,
     funnel_config: InspectorFunnelConfig,
+    genome_config: Mapping[str, object] | None = None,
 ) -> Mapping[str, object]:
     """Identidad de *lo evaluado*, insumo de `compute_trial_id` (R4-R6).
 
@@ -149,7 +151,7 @@ def _candidate_config(
     grilla y distinto `lot_step_tolerance` son ensayos distintos, y colapsarlos en un
     `trial_id` sub-contaría el denominador del DSR.
     """
-    return {
+    cfg: dict[str, object] = {
         "candidate_id": candidate_id,
         "symbols": [symbol],
         "starting_balance": starting_balance,
@@ -159,6 +161,9 @@ def _candidate_config(
         "funnel_config": asdict(funnel_config),
         "runner_config_version": CONFIG_VERSION,
     }
+    if genome_config is not None:
+        cfg["genome"] = dict(genome_config)
+    return cfg
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -173,6 +178,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--end", required=True, help="Fin del rango, ISO (YYYY-MM-DD).")
     parser.add_argument("--out-dir", type=Path, required=True, help="Destino de los artefactos.")
     parser.add_argument("--candidate", default="B", help="`candidate_id` a evaluar.")
+    parser.add_argument(
+        "--genome",
+        type=Path,
+        help="Ruta al archivo YAML de genoma declarativo (ej. specs/b1.yaml).",
+    )
     parser.add_argument("--starting-balance", type=float, default=100_000.0)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--n-paths", type=int, default=1000, help="Caminos de Monte Carlo.")
@@ -227,7 +237,16 @@ def main() -> None:
     )
     prop_sim_config = PropSimConfig(n_paths=args.n_paths, seed=42)
 
-    print(f"=== Pipeline {args.candidate}/{args.symbol} ({resolved_symbol}) ===")
+    candidate_id = args.candidate
+    candidate_factory = None
+    genome_config = None
+    if args.genome is not None:
+        genome_factory = compile_genome(args.genome)
+        candidate_factory = genome_factory
+        candidate_id = genome_factory.candidate_id
+        genome_config = genome_factory.raw_config
+
+    print(f"=== Pipeline {candidate_id}/{args.symbol} ({resolved_symbol}) ===")
     print(
         f"Rango: {start:%Y-%m-%d} .. {end:%Y-%m-%d} | ficha: {figure.symbol} "
         f"volume_step={figure.volume_step}"
@@ -246,7 +265,7 @@ def main() -> None:
 
     with _timed("run_wfa"):
         wfa_result = run_wfa(
-            args.candidate,
+            candidate_id,
             args.symbol,
             frame,
             firm_profile,
@@ -260,6 +279,7 @@ def main() -> None:
             args.starting_balance,
             window_config=window_config,
             grid_config=grid_config,
+            candidate_factory=candidate_factory,
             seed=args.seed,
         )
     print(
@@ -280,7 +300,7 @@ def main() -> None:
 
     with _timed("trial_matrix+dsr_pbo"):
         trial_matrix = build_signal_trial_matrix(
-            args.candidate,
+            candidate_id,
             args.symbol,
             frame,
             firm_profile,
@@ -297,6 +317,7 @@ def main() -> None:
             # la matriz sale con 0 ventanas contra un WFA que sí encontró 5 (R25).
             window_config=window_config,
             grid_config=grid_config,
+            candidate_factory=candidate_factory,
         )
         dsr_pbo_result = run_dsr_pbo(wfa_result, trial_matrix)
     print(
@@ -318,6 +339,7 @@ def main() -> None:
             store,
             store,
             args.starting_balance,
+            candidate_factory=candidate_factory,
         )
     print(
         f"  baseline_pf={sensitivity_result.baseline_profit_factor:.4f} "
@@ -338,7 +360,7 @@ def main() -> None:
             risk_profile,
             prop_economics,
             prop_sim_config,
-            args.candidate,
+            candidate_id,
         )
     print(f"  prop_sim: p_pass={prop_sim_result.p_pass}")
 
@@ -363,8 +385,8 @@ def main() -> None:
         print("\n  ledger: DESACTIVADO — este ensayo no contará en el DSR de corridas futuras.")
 
     candidates = {
-        args.candidate: CandidateValidationBundle(
-            candidate_id=args.candidate,
+        candidate_id: CandidateValidationBundle(
+            candidate_id=candidate_id,
             wfa_results_by_symbol={args.symbol: wfa_result},
             dsr_pbo_results_by_symbol={args.symbol: dsr_pbo_result},
             sensitivity_results_by_symbol={args.symbol: sensitivity_result},
@@ -372,13 +394,14 @@ def main() -> None:
             mc_portfolio_result=mc_portfolio_result,
             prop_sim_result=prop_sim_result,
             candidate_config=_candidate_config(
-                candidate_id=args.candidate,
+                candidate_id=candidate_id,
                 symbol=args.symbol,
                 starting_balance=args.starting_balance,
                 seed=args.seed,
                 window_config=window_config,
                 grid_config=grid_config,
                 funnel_config=funnel_config,
+                genome_config=genome_config,
             ),
         )
     }
@@ -403,9 +426,9 @@ def main() -> None:
         firm_profile_hash=firm_hash,
         risk_profile_hash=risk_hash,
         prop_economics_profile_hash_value=prop_economics_profile_hash(prop_economics),
-        seeds={args.candidate: {"mc_seed": 13, "prop_sim_seed": prop_sim_config.seed}},
+        seeds={candidate_id: {"mc_seed": 13, "prop_sim_seed": prop_sim_config.seed}},
         git_commit=git_commit,
-        purged_cv_results_by_candidate={args.candidate: {args.symbol: purged_result}},
+        purged_cv_results_by_candidate={candidate_id: {args.symbol: purged_result}},
     )
 
     if ledger is not None:
