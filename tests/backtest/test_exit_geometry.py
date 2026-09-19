@@ -34,7 +34,7 @@ def test_exit_geometry_es_frozen() -> None:
 def test_u6b_exit_geometry_sin_argumentos_lanza_type_error() -> None:
     """Eval U6b: sin defaults -> construir sin argumentos es un `TypeError`."""
     with pytest.raises(TypeError):
-        ExitGeometry()  # type: ignore[call-arg]
+        ExitGeometry(**{})  # type: ignore[missing-argument]
 
 
 def test_u6b_json_sin_trailing_atr_mult_nombra_el_campo(tmp_path: Path) -> None:
