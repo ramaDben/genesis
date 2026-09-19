@@ -54,6 +54,18 @@ class ExitGeometry:
             )
 
 
+def _parse_trailing_lookback(raw: object) -> int:
+    """Coerción estricta: solo un `int` real es válido (sin truthiness de `bool`).
+
+    `bool` es subtipo de `int` en Python, así que `True`/`False` pasarían el
+    `isinstance(raw, int)` desnudo y se colarían como `1`/`0`; un float no entero
+    (`22.9`) se truncaría en silencio a `22`. Ambos deben fallar, no colarse.
+    """
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        raise TypeError(f"'trailing_lookback' debe ser un entero, recibido: {raw!r}")
+    return raw
+
+
 def load_exit_geometry(path: Path | None = None) -> ExitGeometry:
     """Carga `ExitGeometry` desde `path`, o desde el recurso empaquetado por defecto.
 
@@ -80,7 +92,7 @@ def load_exit_geometry(path: Path | None = None) -> ExitGeometry:
             )
             raise BacktestConfigError(message)
         return ExitGeometry(
-            trailing_lookback=int(payload["trailing_lookback"]),
+            trailing_lookback=_parse_trailing_lookback(payload["trailing_lookback"]),
             trailing_atr_mult=float(payload["trailing_atr_mult"]),
             source=ExitGeometrySource.CONFIG,
         )

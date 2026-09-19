@@ -140,6 +140,40 @@ def test_exit_geometry_hash_no_depende_de_source() -> None:
     assert exit_geometry_hash(from_config) == exit_geometry_hash(from_genome)
 
 
+def test_hallazgo_trailing_lookback_bool_no_se_cuela_como_entero(tmp_path: Path) -> None:
+    """`bool` es subtipo de `int`: `true` no debe colarse silenciosamente como `1`."""
+    path = tmp_path / "exit_geometry.json"
+    path.write_text(
+        json.dumps(
+            {
+                "config_version": "genesis-backtest-exit-geometry/1",
+                "trailing_lookback": True,
+                "trailing_atr_mult": 3.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(BacktestConfigError, match="trailing_lookback"):
+        load_exit_geometry(path)
+
+
+def test_hallazgo_trailing_lookback_float_no_entero_no_se_trunca(tmp_path: Path) -> None:
+    """Un float no entero (`22.9`) no debe truncarse en silencio a `22`."""
+    path = tmp_path / "exit_geometry.json"
+    path.write_text(
+        json.dumps(
+            {
+                "config_version": "genesis-backtest-exit-geometry/1",
+                "trailing_lookback": 22.9,
+                "trailing_atr_mult": 3.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(BacktestConfigError, match="trailing_lookback"):
+        load_exit_geometry(path)
+
+
 def test_no_hay_defaults_silenciosos_en_el_codigo_fuente() -> None:
     """Eval de no-regresión: sin `trailing_lookback: int = ` / `trailing_atr_mult: float = `."""
     source = Path("src/genesis/backtest/exit_geometry.py").read_text(encoding="utf-8")
