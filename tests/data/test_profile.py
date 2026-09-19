@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from genesis.data.errors import GenesisDataError
-from genesis.data.house_rule import ConsistencySemantics, MaxLossLimitKind
+from genesis.data.house_rule import ConsistencySemantics, MaxLossLimitKind, house_rule_hash
 from genesis.data.profile import (
     CONFIG_VERSION,
     FirmProfile,
@@ -39,8 +39,8 @@ def _minimal_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
-def _write(tmp_path: Path, payload: dict[str, object]) -> Path:
-    path = tmp_path / "profile.json"
+def _write(tmp_path: Path, payload: dict[str, object], name: str = "profile.json") -> Path:
+    path = tmp_path / name
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
@@ -77,6 +77,73 @@ def test_firm_profile_hash_differs_for_different_profiles() -> None:
         house_rule=profile.house_rule,
     )
     assert firm_profile_hash(profile) != firm_profile_hash(other)
+
+
+def test_hallazgo2_firm_profile_hash_distingue_funded_starting_balance(
+    tmp_path: Path,
+) -> None:
+    """DH-4 / tasks.md:165: `house_rule_hash` ignora `funded_starting_balance`, pero
+    `firm_profile_hash` debe distinguirlo (es el hash de la ficha completa)."""
+    house_rule_base = {
+        "max_loss_limit": {"amount": 2000.0, "kind": "trailing_eod"},
+        "threshold_lock_at": 52100.0,
+        "consistency_rule": None,
+        "weekend_holding_allowed": False,
+        "payout_buffer": 0.0,
+        "min_net_profit_between_payouts": 0.0,
+        "funded_starting_balance": 0.0,
+        "account_size": 50000.0,
+    }
+    payload_base = _minimal_payload(house_rule=house_rule_base)
+    payload_distinto = _minimal_payload(
+        house_rule={**house_rule_base, "funded_starting_balance": 500.0}
+    )
+    profile_base = load_firm_profile(_write(tmp_path, payload_base, name="base.json"))
+    profile_distinto = load_firm_profile(_write(tmp_path, payload_distinto, name="distinto.json"))
+
+    assert profile_base.house_rule is not None
+    assert profile_distinto.house_rule is not None
+    assert house_rule_hash(profile_base.house_rule) == house_rule_hash(profile_distinto.house_rule)
+    assert firm_profile_hash(profile_base) != firm_profile_hash(profile_distinto)
+
+
+def test_hallazgo3_load_firm_profile_raiz_no_dict_lanza_genesis_data_error(
+    tmp_path: Path,
+) -> None:
+    """Un JSON raíz que es una lista no debe escapar como `AttributeError` crudo."""
+    path = tmp_path / "lista.json"
+    path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    with pytest.raises(GenesisDataError):
+        load_firm_profile(path)
+
+
+def test_hallazgo3_load_firm_profile_symbols_no_dict_lanza_genesis_data_error(
+    tmp_path: Path,
+) -> None:
+    """`symbols` no-dict (p.ej. una lista) no debe escapar como `AttributeError` crudo."""
+    payload = _minimal_payload(symbols=["US500"])
+    with pytest.raises(GenesisDataError):
+        load_firm_profile(_write(tmp_path, payload))
+
+
+def test_hallazgo4_weekend_holding_allowed_string_falsy_falla_estricto(
+    tmp_path: Path,
+) -> None:
+    """`"false"` (string no vacía) es truthy en Python: debe fallar, no colarse como `True`."""
+    payload = _minimal_payload(
+        house_rule={
+            "max_loss_limit": {"amount": 2000.0, "kind": "trailing_eod"},
+            "threshold_lock_at": 52100.0,
+            "consistency_rule": None,
+            "weekend_holding_allowed": "false",
+            "payout_buffer": 0.0,
+            "min_net_profit_between_payouts": 0.0,
+            "funded_starting_balance": 0.0,
+            "account_size": 50000.0,
+        }
+    )
+    with pytest.raises(GenesisDataError, match="weekend_holding_allowed"):
+        load_firm_profile(_write(tmp_path, payload))
 
 
 def test_load_firm_profile_missing_field_raises_domain_error(tmp_path: Path) -> None:

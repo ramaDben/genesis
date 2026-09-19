@@ -98,6 +98,17 @@ def _parse_consistency_rule(raw: dict[str, Any] | None) -> ConsistencyRule | Non
     return ConsistencyRule(pct=float(raw["pct"]), semantics=ConsistencySemantics(raw["semantics"]))
 
 
+def _parse_weekend_holding_allowed(raw: object) -> bool:
+    """Coerción estricta: solo un `bool` real es válido (sin truthiness de Python).
+
+    Un `"false"` (string no vacía) es truthy en Python y se leería como `True`; un
+    `null` se leería silenciosamente como `False`. Ambos deben fallar, no colarse.
+    """
+    if not isinstance(raw, bool):
+        raise TypeError(f"'weekend_holding_allowed' debe ser un booleano, recibido: {raw!r}")
+    return raw
+
+
 def _parse_house_rule(source: str, raw: dict[str, Any] | None) -> HouseRule | None:
     """Parsea el bloque `house_rule` de la ficha; `raw is None` es un caso válido (§D2)."""
     if raw is None:
@@ -110,7 +121,7 @@ def _parse_house_rule(source: str, raw: dict[str, Any] | None) -> HouseRule | No
             ),
             daily_loss_limit=_parse_daily_loss_limit(raw.get("daily_loss_limit")),
             consistency_rule=_parse_consistency_rule(raw.get("consistency_rule")),
-            weekend_holding_allowed=bool(raw["weekend_holding_allowed"]),
+            weekend_holding_allowed=_parse_weekend_holding_allowed(raw["weekend_holding_allowed"]),
             payout_buffer=float(raw["payout_buffer"]),
             min_net_profit_between_payouts=float(raw["min_net_profit_between_payouts"]),
             funded_starting_balance=float(raw["funded_starting_balance"]),
@@ -170,7 +181,7 @@ def load_firm_profile(path: Path | None = None) -> FirmProfile:
         )
     except GenesisDataError:
         raise
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         message = f"Ficha de firma inválida/incompleta en '{source}': {exc}"
         raise GenesisDataError(message) from exc
 
@@ -181,6 +192,11 @@ def firm_profile_hash(profile: FirmProfile) -> str:
     Compone `house_rule_hash(profile.house_rule)` como un campo más del diccionario
     canónico (D2, R4): un cambio del contrato de la casa invalida la procedencia de
     la ficha completa. `house_rule is None` se representa como `None`.
+
+    **Incluye `funded_starting_balance` aparte del hash delegado** (contrato DH-4,
+    `tasks.md`): `house_rule_hash` lo excluye a propósito porque no tiene consumidor
+    funcional todavía (issue #112), pero la procedencia de la ficha completa sí debe
+    distinguir dos fichas que solo difieren en ese campo.
     """
     canonical = {
         "name": profile.name,
@@ -194,6 +210,9 @@ def firm_profile_hash(profile: FirmProfile) -> str:
         "news_bracket_before_seconds": profile.news_bracket_before.total_seconds(),
         "news_bracket_after_seconds": profile.news_bracket_after.total_seconds(),
         "house_rule": None if profile.house_rule is None else house_rule_hash(profile.house_rule),
+        "funded_starting_balance": (
+            None if profile.house_rule is None else profile.house_rule.funded_starting_balance
+        ),
     }
     raw = json.dumps(canonical, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
