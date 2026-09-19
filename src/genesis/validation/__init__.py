@@ -37,6 +37,8 @@ from genesis.validation.montecarlo import (
     monte_carlo_symbol,
 )
 from genesis.validation.prop_sim import (
+    BiasDirection,
+    BreachEvaluationBasis,
     PathOutcome,
     PhaseSpec,
     PropEconomicsProfile,
@@ -89,6 +91,8 @@ from genesis.validation.window_config import GridConfig, WfaWindowConfig, window
 
 __all__ = [
     "ArchiveOrContinue",
+    "BiasDirection",
+    "BreachEvaluationBasis",
     "CandidateGateSummary",
     "CandidateValidationBundle",
     "CostStressOutcome",

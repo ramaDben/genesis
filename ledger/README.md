@@ -16,7 +16,16 @@ derivado de la configuración completa del candidato + las claves de identidad
 institucional de la corrida), `outcome` (`wfa-completado` o `descartado`, con
 `discard_reason` obligatorio en el segundo caso) y las claves de trazabilidad
 (`config_version`, `dataset_hash_by_symbol`, `firm_profile_hash`,
-`risk_profile_hash`, `git_commit`, `recorded_at_utc`).
+`exit_geometry_hash`, `house_rule_hash`, `git_commit`, `recorded_at_utc`).
+
+## Corte de Change #109
+
+`risk_profile_hash` se sustituyó por `exit_geometry_hash` + `house_rule_hash`
+(el modelo de la firma dejó de ser un `RiskProfile` de capa 3, separado en
+`ExitGeometry`/`HouseRule` — ver `.pulse/changes/109-...`). Los ensayos previos
+corrieron bajo un contrato de cuenta distinto y **no se mezclan** con los nuevos:
+se archivaron en `ledger/archive/trials_pre_109.jsonl` (no leído por
+`read_trial_summary`, es un respaldo histórico) y este archivo arrancó limpio.
 
 ## Cómo se lee
 

@@ -35,8 +35,8 @@ from typing import Any
 import pandas as pd
 
 from genesis.backtest.costs import load_costs_config
+from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.ledger import FillRecord
-from genesis.backtest.risk_profile import load_risk_profile
 from genesis.backtest.simulator import Simulator
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
@@ -182,7 +182,7 @@ def _build_simulator(
         candidate,
         symbol=symbol,
         firm_profile=firm_profile,
-        risk_profile=load_risk_profile(),
+        exit_geometry=load_exit_geometry(),
         figure=figure,
         funnel_config=load_inspector_funnel_config(),
         costs_config=load_costs_config(),

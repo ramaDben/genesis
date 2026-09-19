@@ -27,7 +27,7 @@ from genesis.backtest.metrics import (
     intent_authorization_counts,
     profit_factor,
 )
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.data.house_rule import HouseRule
 from genesis.data.metadata import current_git_commit
 from genesis.data.profile import FirmProfile
 from genesis.strategy.inspector import RejectionReason
@@ -37,12 +37,12 @@ from genesis.validation.dsr_pbo import DsrPboResult
 from genesis.validation.errors import TrialLedgerConfigError, VerdictConfigError
 from genesis.validation.montecarlo import McPortfolioResult, McSymbolResult
 from genesis.validation.prop_sim import (
-    _DEFAULT_PROFILE_HASH,
+    BiasDirection,
+    BreachEvaluationBasis,
     PropEconomicsProfile,
     PropSimConfig,
     PropSimResult,
     _build_daily_basket,
-    prop_economics_profile_hash,
     simulate_challenge_paths,
 )
 from genesis.validation.purged_cv import PurgedCvResult
@@ -50,8 +50,11 @@ from genesis.validation.sensitivity import SensitivityResult
 from genesis.validation.trial_ledger import TrialLedger, TrialLedgerSummary, TrialOutcomeKind
 from genesis.validation.wfa import WfaResult
 
-CONFIG_VERSION: str = "genesis-validation-j/1"
-"""Versión del esquema de configuración de este Change (Issue J, decisión 10 §3)."""
+CONFIG_VERSION: str = "genesis-validation-j/2"
+"""Versión del esquema de configuración de este Change (Issue J, decisión 10 §3).
+
+`/2` desde Change #109: `manifest.json` sustituye `risk_profile_hash` por
+`exit_geometry_hash` + `house_rule_hash`, y agrega el bloque de sesgo del proxy (D7)."""
 
 # --- Umbrales de gate, constantes de módulo nombradas (ADR-J11, R63/R65) ---
 _G1_MIN_TRADES_OOS = 300
@@ -190,8 +193,7 @@ def _build_symbol_gate_outcome(
     dsr_pbo_result: DsrPboResult,
     sensitivity_result: SensitivityResult,
     mc_symbol_result: McSymbolResult,
-    risk_profile: RiskProfile,
-    starting_balance: float,
+    house_rule: HouseRule,
     *,
     ledger_extra_trials: int,
 ) -> SymbolGateOutcome:
@@ -229,7 +231,7 @@ def _build_symbol_gate_outcome(
     pbo = dsr_pbo_result.pbo
     g5_pass = pbo < _G5_MAX_PBO
 
-    full_limit_dollar = risk_profile.max_loss_limit_pct / 100.0 * starting_balance
+    full_limit_dollar = house_rule.max_loss_limit.amount
     mc_maxdd_p95_pct_of_limit = (
         mc_symbol_result.block_bootstrap.max_drawdown_p95 / full_limit_dollar
         if full_limit_dollar > 0
@@ -359,15 +361,17 @@ def _p6_violating_symbols(
 
 def build_candidate_gate_summary(
     bundle: CandidateValidationBundle,
-    risk_profile: RiskProfile,
-    starting_balance: float,
+    house_rule: HouseRule,
     *,
     ledger_extra_trials: int = 0,
 ) -> CandidateGateSummary:
     """Construye `CandidateGateSummary` de `bundle`: gates G por símbolo + C1/C2 + P1-P6.
 
     `ledger_extra_trials` (Change #53) default `0`: con ledger ausente, comportamiento
-    bit a bit idéntico al pre-Change (R12/R21).
+    bit a bit idéntico al pre-Change (R12/R21). `house_rule` (Change #109, D8): G6
+    lee `house_rule.max_loss_limit.amount` directo, ya no un `max_loss_limit_pct`
+    derivado de `starting_balance` — el parámetro `starting_balance` deja de ser
+    necesario acá.
     """
     symbol_gate_outcomes = {
         symbol: _build_symbol_gate_outcome(
@@ -376,8 +380,7 @@ def build_candidate_gate_summary(
             bundle.dsr_pbo_results_by_symbol[symbol],
             bundle.sensitivity_results_by_symbol[symbol],
             bundle.mc_symbol_results_by_symbol[symbol],
-            risk_profile,
-            starting_balance,
+            house_rule,
             ledger_extra_trials=ledger_extra_trials,
         )
         for symbol in bundle.wfa_results_by_symbol
@@ -651,7 +654,6 @@ def _compute_t2(
     candidate_summaries: Mapping[str, CandidateGateSummary],
     starting_balance: float,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
     prop_economics_profile: PropEconomicsProfile,
     ensemble_prop_sim_config: PropSimConfig,
 ) -> EnsembleResult | None:
@@ -716,7 +718,6 @@ def _compute_t2(
         starting_balance,
         prop_economics_profile,
         firm_profile,
-        risk_profile,
         ensemble_prop_sim_config,
         "ensemble",
     )
@@ -872,7 +873,6 @@ def run_verdict(
     candidates: Mapping[str, CandidateValidationBundle],
     starting_balance: float,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
     prop_economics_profile: PropEconomicsProfile,
     ensemble_prop_sim_config: PropSimConfig,
     *,
@@ -904,6 +904,14 @@ def run_verdict(
     if starting_balance <= 0:
         message = f"run_verdict: starting_balance={starting_balance!r} debe ser > 0 (R2c)."
         raise VerdictConfigError(message)
+    house_rule = firm_profile.house_rule
+    if house_rule is None:
+        message = (
+            f"La ficha de firma {firm_profile.name!r} no declara 'house_rule' (no es una "
+            "prop firm, D2); run_verdict no puede evaluar ningún candidato del torneo "
+            f"({sorted(candidates)!r})."
+        )
+        raise VerdictConfigError(message)
 
     # Change #53 (Q4/Q8): un único snapshot de lectura, sin efectos secundarios (Q10).
     # `ledger=None` -> extra=0, comportamiento bit a bit idéntico al pre-Change (R12).
@@ -916,14 +924,14 @@ def run_verdict(
 
     candidate_summaries = {
         candidate_id: build_candidate_gate_summary(
-            bundle, risk_profile, starting_balance, ledger_extra_trials=ledger_extra_trials
+            bundle, house_rule, ledger_extra_trials=ledger_extra_trials
         )
         for candidate_id, bundle in candidates.items()
     }
     n_candidatos_torneo = len(candidates)
-    economics_confirmed = (
-        prop_economics_profile_hash(prop_economics_profile) != _DEFAULT_PROFILE_HASH
-    )
+    # D4b: `economics_confirmed` deja de inferirse de un hash (falso positivo/negativo
+    # en las dos direcciones); campo explícito de la ficha.
+    economics_confirmed = not prop_economics_profile.is_placeholder
 
     winning_candidate_id = _select_winning_candidate(candidates, candidate_summaries)
     t1: TournamentDeflationOutcome | None = None
@@ -940,7 +948,6 @@ def run_verdict(
         candidate_summaries,
         starting_balance,
         firm_profile,
-        risk_profile,
         prop_economics_profile,
         ensemble_prop_sim_config,
     )
@@ -989,6 +996,15 @@ _P3_WARNING = (
     "evalúa **solo** sobre la base balance-a-balance (cierre-a-cierre); es una **cota inferior "
     "conservadora**. La base de equity flotante intradía real puede disparar el breach diario "
     "antes de lo que este proxy indica."
+)
+_D7_BIAS_WARNING = (
+    "`max_loss_limit` evaluado con el proxy **cierre-a-cierre** de ADR-J4: "
+    "**subestima** la probabilidad de breach, por lo tanto **sesga `p_pass` al alza**. "
+    "No es un margen de seguridad."
+)
+_DH4_FUNDED_STARTING_BALANCE_NOTICE = (
+    "`funded_starting_balance` no aplicado: PA-106-5 fuera de alcance del #109 "
+    "(issue de continuación #112)."
 )
 _ECONOMICS_WARNING = (
     "**Advertencia (decisión 2):** la economía del challenge "
@@ -1091,6 +1107,10 @@ def render_tearsheet(result: VerdictResult) -> str:
         f"- **Economía confirmada**: {result.economics_confirmed}",
         "",
         f"> {_P3_WARNING}",
+        "",
+        f"> {_D7_BIAS_WARNING}",
+        "",
+        f"> {_DH4_FUNDED_STARTING_BALANCE_NOTICE}",
     ]
     if not result.economics_confirmed:
         lines.append(">")
@@ -1200,7 +1220,8 @@ def verdict_result_to_manifest_json(
     config_version: str,
     dataset_hash_by_symbol: Mapping[str, str],
     firm_profile_hash: str,
-    risk_profile_hash: str,
+    exit_geometry_hash: str,
+    house_rule_hash: str,
     prop_economics_profile_hash_value: str,
     seeds: Mapping[str, Mapping[str, int]],
     git_commit: str,
@@ -1209,19 +1230,21 @@ def verdict_result_to_manifest_json(
     """Serializa `result` a JSON determinista byte a byte (`sort_keys=True`, R98/R103).
 
     Campos mínimos de R98: `config_version`, `dataset_hash_by_symbol`,
-    `firm_profile_hash`, `risk_profile_hash`, `prop_economics_profile_hash`,
+    `firm_profile_hash`, `exit_geometry_hash`, `house_rule_hash` (Change #109, D9:
+    sustituyen a `risk_profile_hash`), `prop_economics_profile_hash`,
     `candidate_ids`, `winning_candidate_id`, `verdict`, `seeds`, `git_commit`,
     `n_candidatos_torneo`, `n_trials_deflactado`, `t1_dsr`/`t1_dsr_pre_deflation`,
-    `economics_confirmed`, resultados por candidato (mismos campos que el
-    tearsheet, R97) y `purged_cv_summary` si `purged_cv_results_by_candidate` no es
-    `None` (R106). Fuera de `__all__` (§1.10): detalle de composición de
-    `write_verdict_artifacts`.
+    `economics_confirmed`, `prop_sim_bias` (D7: sesgo del proxy cierre-a-cierre),
+    resultados por candidato (mismos campos que el tearsheet, R97) y
+    `purged_cv_summary` si `purged_cv_results_by_candidate` no es `None` (R106).
+    Fuera de `__all__` (§1.10): detalle de composición de `write_verdict_artifacts`.
     """
     payload: dict = {
         "config_version": config_version,
         "dataset_hash_by_symbol": dict(dataset_hash_by_symbol),
         "firm_profile_hash": firm_profile_hash,
-        "risk_profile_hash": risk_profile_hash,
+        "exit_geometry_hash": exit_geometry_hash,
+        "house_rule_hash": house_rule_hash,
         "prop_economics_profile_hash": prop_economics_profile_hash_value,
         "candidate_ids": sorted(result.candidate_summaries),
         "winning_candidate_id": result.winning_candidate_id,
@@ -1234,6 +1257,12 @@ def verdict_result_to_manifest_json(
         "t1_dsr_pre_deflation": result.t1_dsr_pre_deflation,
         "economics_confirmed": result.economics_confirmed,
         "no_go_iteration_used": result.no_go_iteration_used,
+        "prop_sim_bias": {
+            "breach_evaluation_basis": BreachEvaluationBasis.CLOSE_TO_CLOSE_PROXY.value,
+            "bias_direction": BiasDirection.UNDERESTIMATES_BREACH.value,
+            "funded_starting_balance_aplicado": False,
+            "nota": "funded_starting_balance no aplicado: PA-106-5 fuera de alcance del #109",
+        },
         "candidates": {
             candidate_id: _candidate_summary_payload(summary)
             for candidate_id, summary in result.candidate_summaries.items()
@@ -1267,7 +1296,8 @@ def write_verdict_artifacts(
     config_version: str,
     dataset_hash_by_symbol: Mapping[str, str],
     firm_profile_hash: str,
-    risk_profile_hash: str,
+    exit_geometry_hash: str,
+    house_rule_hash: str,
     prop_economics_profile_hash_value: str,
     seeds: Mapping[str, Mapping[str, int]],
     git_commit: str | None = None,
@@ -1285,7 +1315,8 @@ def write_verdict_artifacts(
         config_version,
         dataset_hash_by_symbol,
         firm_profile_hash,
-        risk_profile_hash,
+        exit_geometry_hash,
+        house_rule_hash,
         prop_economics_profile_hash_value,
         seeds,
         resolved_git_commit,

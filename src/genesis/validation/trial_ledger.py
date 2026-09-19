@@ -38,7 +38,8 @@ _REQUIRED_FIELDS = (
     "config_version",
     "dataset_hash_by_symbol",
     "firm_profile_hash",
-    "risk_profile_hash",
+    "exit_geometry_hash",
+    "house_rule_hash",
     "git_commit",
     "recorded_at_utc",
 )
@@ -69,7 +70,8 @@ class TrialRecord:
     config_version: str
     dataset_hash_by_symbol: Mapping[str, str]
     firm_profile_hash: str
-    risk_profile_hash: str
+    exit_geometry_hash: str
+    house_rule_hash: str
     git_commit: str
     recorded_at_utc: str
 
@@ -114,22 +116,25 @@ def compute_trial_id(
     candidate_config: Mapping[str, object],
     dataset_hash_by_symbol: Mapping[str, str],
     firm_profile_hash: str,
-    risk_profile_hash: str,
+    exit_geometry_hash: str,
+    house_rule_hash: str,
 ) -> str:
-    """`sha256` hexdigest de la serialización canónica completa de los 4 insumos (R4-R6).
+    """`sha256` hexdigest de la serialización canónica completa de los 5 insumos (R4-R6).
 
     `candidate_config` participa **completo, sin lista blanca** (D2/R5): dos
     configuraciones distintas en cualquier campo producen `trial_id` distintos
     (defensa real contra el sub-conteo por colisión). Un `TypeError` de
     `json.dumps` (valor no serializable) se envuelve en `TrialLedgerConfigError`
     citando el campo ofensor (R6) — nunca `default=str`, que colisionaría dos
-    objetos distintos con el mismo `repr`.
+    objetos distintos con el mismo `repr`. Change #109 (D9): `risk_profile_hash`
+    se sustituye por `exit_geometry_hash` + `house_rule_hash`.
     """
     payload = {
         "candidate_config": candidate_config,
         "dataset_hash_by_symbol": dataset_hash_by_symbol,
         "firm_profile_hash": firm_profile_hash,
-        "risk_profile_hash": risk_profile_hash,
+        "exit_geometry_hash": exit_geometry_hash,
+        "house_rule_hash": house_rule_hash,
     }
     try:
         canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False)
@@ -187,7 +192,8 @@ def _parse_trial_record_line(line: str, *, ledger_path: Path, line_number: int) 
         config_version=raw["config_version"],
         dataset_hash_by_symbol=raw["dataset_hash_by_symbol"],
         firm_profile_hash=raw["firm_profile_hash"],
-        risk_profile_hash=raw["risk_profile_hash"],
+        exit_geometry_hash=raw["exit_geometry_hash"],
+        house_rule_hash=raw["house_rule_hash"],
         git_commit=raw["git_commit"],
         recorded_at_utc=raw["recorded_at_utc"],
     )
@@ -279,7 +285,8 @@ def append_trial(ledger_path: Path, record: TrialRecord) -> None:
         "config_version": record.config_version,
         "dataset_hash_by_symbol": dict(record.dataset_hash_by_symbol),
         "firm_profile_hash": record.firm_profile_hash,
-        "risk_profile_hash": record.risk_profile_hash,
+        "exit_geometry_hash": record.exit_geometry_hash,
+        "house_rule_hash": record.house_rule_hash,
         "git_commit": record.git_commit,
         "recorded_at_utc": record.recorded_at_utc,
     }
@@ -299,7 +306,8 @@ class TrialIdentityContext:
 
     dataset_hash_by_symbol: Mapping[str, str]
     firm_profile_hash: str
-    risk_profile_hash: str
+    exit_geometry_hash: str
+    house_rule_hash: str
     git_commit: str
 
 
@@ -333,12 +341,13 @@ class TrialLedger:
         append_trial(self._ledger_path, record)
 
     def trial_id_for_config(self, candidate_config: Mapping[str, object]) -> str:
-        """`compute_trial_id(candidate_config, *self.identity[:3])` (PR-2/Q5)."""
+        """`compute_trial_id(candidate_config, *self.identity[:4])` (PR-2/Q5)."""
         return compute_trial_id(
             candidate_config,
             self._identity.dataset_hash_by_symbol,
             self._identity.firm_profile_hash,
-            self._identity.risk_profile_hash,
+            self._identity.exit_geometry_hash,
+            self._identity.house_rule_hash,
         )
 
     def build_record(
@@ -370,7 +379,8 @@ class TrialLedger:
             config_version=CONFIG_VERSION,
             dataset_hash_by_symbol=self._identity.dataset_hash_by_symbol,
             firm_profile_hash=self._identity.firm_profile_hash,
-            risk_profile_hash=self._identity.risk_profile_hash,
+            exit_geometry_hash=self._identity.exit_geometry_hash,
+            house_rule_hash=self._identity.house_rule_hash,
             git_commit=self._identity.git_commit,
             recorded_at_utc=resolved_recorded_at_utc,
         )

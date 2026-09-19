@@ -46,10 +46,9 @@ from pathlib import Path
 import pandas as pd
 
 from genesis.backtest.costs import load_costs_config
-from genesis.backtest.risk_profile import load_risk_profile, risk_profile_hash
 from genesis.data.metadata import ArtifactMetadata, current_git_commit
 from genesis.data.mt5_export import Granularity, RawParquetStore, plan_chunks
-from genesis.data.profile import firm_profile_hash, load_firm_profile
+from genesis.data.profile import FirmProfile, firm_profile_hash, load_firm_profile
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.genome import compile_genome
 from genesis.strategy.inspector import InspectorFunnelConfig, load_inspector_funnel_config
@@ -166,6 +165,29 @@ def _candidate_config(
     return cfg
 
 
+def _resolve_starting_balance(cli_value: float, firm_profile: FirmProfile) -> float:
+    """La ficha gobierna el balance inicial (D3b, Change #109); reconciliación fail-fast.
+
+    Con `house_rule` declarado, `--starting-balance` debe coincidir exactamente con
+    `house_rule.account_size` — si difiere, `SystemExit` con los dos números y el
+    nombre de la ficha, nunca una elección silenciosa. Con `house_rule is None`
+    (ficha de exchange) `--starting-balance` gobierna sin reconciliar: no hay
+    contrato con el que comparar.
+    """
+    house_rule = firm_profile.house_rule
+    if house_rule is None:
+        return cli_value
+    if cli_value != house_rule.account_size:
+        message = (
+            f"--starting-balance={cli_value!r} no coincide con "
+            f"house_rule.account_size={house_rule.account_size!r} de la ficha "
+            f"{firm_profile.name!r} (D3b). La ficha gobierna: pasar "
+            f"--starting-balance {house_rule.account_size!r} o una ficha distinta."
+        )
+        raise SystemExit(message)
+    return cli_value
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -222,7 +244,7 @@ def main() -> None:
     total_start = time.perf_counter()
 
     firm_profile = load_firm_profile(args.firm_profile)
-    risk_profile = load_risk_profile()
+    starting_balance = _resolve_starting_balance(args.starting_balance, firm_profile)
     costs_config = load_costs_config()
     funnel_config = load_inspector_funnel_config()
     prop_economics = load_prop_economics_profile()
@@ -269,14 +291,14 @@ def main() -> None:
             args.symbol,
             frame,
             firm_profile,
-            risk_profile,
+            None,
             figure,
             funnel_config,
             costs_config,
             [],
             store,
             store,
-            args.starting_balance,
+            starting_balance,
             window_config=window_config,
             grid_config=grid_config,
             candidate_factory=candidate_factory,
@@ -286,12 +308,24 @@ def main() -> None:
         f"  n_windows={wfa_result.n_windows} wfe={wfa_result.wfe:.4f} "
         f"trades_oos={len(wfa_result.oos_ledger_cosido.entries)}"
     )
+    # No se reconstruye ExitGeometry/HouseRule en el script (RD-1): las huellas
+    # de procedencia se leen de la RunProvenance que `run_wfa` ya produjo.
+    provenance = wfa_result.oos_ledger_cosido.provenance
+    exit_geometry_hash_value = provenance.exit_geometry_hash
+    house_rule_hash_value = provenance.house_rule_hash
 
     oos_ledgers = {args.symbol: wfa_result.oos_ledger_cosido}
+    house_rule = firm_profile.house_rule
+    if house_rule is None:
+        message = (
+            f"La ficha de firma {firm_profile.name!r} no declara 'house_rule': este runner "
+            "solo evalúa prop firms (D2)."
+        )
+        raise SystemExit(message)
 
     with _timed("monte_carlo_symbol"):
         mc_symbol_result = monte_carlo_symbol(
-            wfa_result.oos_ledger_cosido, risk_profile, n_paths=args.n_paths, seed=11
+            wfa_result.oos_ledger_cosido, house_rule, n_paths=args.n_paths, seed=11
         )
 
     with _timed("purged_cv"):
@@ -304,14 +338,14 @@ def main() -> None:
             args.symbol,
             frame,
             firm_profile,
-            risk_profile,
+            None,
             figure,
             funnel_config,
             costs_config,
             [],
             store,
             store,
-            args.starting_balance,
+            starting_balance,
             # Obligatorio, no opcional: `build_signal_trial_matrix` reconstruye la misma
             # geometría IS/OOS que `run_wfa`. Omitirlo la deja en el default normativo y
             # la matriz sale con 0 ventanas contra un WFA que sí encontró 5 (R25).
@@ -331,14 +365,14 @@ def main() -> None:
             frame,
             args.symbol,
             firm_profile,
-            risk_profile,
+            None,
             figure,
             funnel_config,
             costs_config,
             [],
             store,
             store,
-            args.starting_balance,
+            starting_balance,
             candidate_factory=candidate_factory,
         )
     print(
@@ -348,16 +382,15 @@ def main() -> None:
 
     with _timed("monte_carlo_portfolio"):
         mc_portfolio_result = monte_carlo_portfolio(
-            oos_ledgers, risk_profile, n_paths=args.n_paths, seed=13
+            oos_ledgers, house_rule, n_paths=args.n_paths, seed=13
         )
     print(f"  breach_probability={mc_portfolio_result.block_bootstrap.breach_probability:.4f}")
 
     with _timed("run_prop_sim"):
         prop_sim_result = run_prop_sim(
             oos_ledgers,
-            args.starting_balance,
+            starting_balance,
             firm_profile,
-            risk_profile,
             prop_economics,
             prop_sim_config,
             candidate_id,
@@ -366,7 +399,6 @@ def main() -> None:
 
     dataset_hash_by_symbol = {args.symbol: store.chunk_hash(frame)}
     firm_hash = firm_profile_hash(firm_profile)
-    risk_hash = risk_profile_hash(risk_profile)
     git_commit = current_git_commit()
 
     ledger: TrialLedger | None = None
@@ -376,7 +408,8 @@ def main() -> None:
             TrialIdentityContext(
                 dataset_hash_by_symbol=dataset_hash_by_symbol,
                 firm_profile_hash=firm_hash,
-                risk_profile_hash=risk_hash,
+                exit_geometry_hash=exit_geometry_hash_value,
+                house_rule_hash=house_rule_hash_value,
                 git_commit=git_commit,
             ),
         )
@@ -396,7 +429,7 @@ def main() -> None:
             candidate_config=_candidate_config(
                 candidate_id=candidate_id,
                 symbol=args.symbol,
-                starting_balance=args.starting_balance,
+                starting_balance=starting_balance,
                 seed=args.seed,
                 window_config=window_config,
                 grid_config=grid_config,
@@ -409,9 +442,8 @@ def main() -> None:
     with _timed("run_verdict"):
         verdict_result = run_verdict(
             candidates,
-            args.starting_balance,
+            starting_balance,
             firm_profile,
-            risk_profile,
             prop_economics,
             prop_sim_config,
             ledger=ledger,
@@ -424,7 +456,8 @@ def main() -> None:
         config_version=CONFIG_VERSION,
         dataset_hash_by_symbol=dataset_hash_by_symbol,
         firm_profile_hash=firm_hash,
-        risk_profile_hash=risk_hash,
+        exit_geometry_hash=exit_geometry_hash_value,
+        house_rule_hash=house_rule_hash_value,
         prop_economics_profile_hash_value=prop_economics_profile_hash(prop_economics),
         seeds={candidate_id: {"mc_seed": 13, "prop_sim_seed": prop_sim_config.seed}},
         git_commit=git_commit,
