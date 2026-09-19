@@ -6,9 +6,12 @@ from collections.abc import Mapping
 
 import pytest
 
+from pathlib import Path
+
+from genesis.backtest.exit_geometry import ExitGeometrySource
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.contract import StrategyCandidate
-from genesis.strategy.factories import CandidateFactory
+from genesis.strategy.factories import CandidateFactory, ExitGeometryProvider
 from genesis.strategy.genome.compiler import compile_genome
 from genesis.strategy.genome.errors import MissingAcademicProvenanceError
 from genesis.validation.trial_ledger import compute_trial_id
@@ -139,4 +142,19 @@ def test_compile_genome_rejects_missing_provenance():
     bad_yaml = GENOME_YAML_1.replace(target, 'paper_ref: ""')
     with pytest.raises(MissingAcademicProvenanceError):
         compile_genome(bad_yaml)
+
+
+def test_genome_candidate_factory_implementa_exit_geometry_provider():
+    """C2: `GenomeCandidateFactory` es un `ExitGeometryProvider` (Protocol runtime_checkable)."""
+    factory = compile_genome(GENOME_YAML_1)
+    assert isinstance(factory, ExitGeometryProvider)
+    assert factory.exit_geometry.trailing_lookback == 22
+    assert factory.exit_geometry.trailing_atr_mult == 3.0
+    assert factory.exit_geometry.source == ExitGeometrySource.GENOME
+
+
+def test_exit_geometry_del_candidato_c1_real_llega_al_motor():
+    """Eval C2: el caso real que hoy nunca llega al motor (`design.md` C2)."""
+    factory = compile_genome(Path("candidates/specs/candidate_c1_gold_lob.yaml"))
+    assert factory.exit_geometry.trailing_atr_mult == 2.5
 

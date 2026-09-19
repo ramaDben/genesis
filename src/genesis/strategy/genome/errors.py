@@ -13,3 +13,15 @@ class MissingAcademicProvenanceError(GenomeValidationError):
 
 class CompiledCandidateStateError(GenomeValidationError):
     """Invariante interno de una estrategia compilada violado (geometría o ciclo de vida)."""
+
+
+class UnknownRiskExitParamError(GenomeValidationError):
+    """Clave desconocida en `risk_exit.params` para el `kind` declarado (C1, Change #109).
+
+    Única clase de excepción nueva de ese change (`design.md` §5): un genoma que
+    declara una clave que el motor no consume debe fallar, no ignorarla en silencio
+    (R8, Invariante 3b — un parámetro muerto es una señal corrupta para un arquitecto
+    automatizado). El mensaje cita la clave por nombre y enumera las admitidas para el
+    `kind`, disparado por `genesis.strategy.genome.schema.parse_genome` cuando
+    `risk_exit.params` incluye una clave fuera de la allowlist de su `kind`.
+    """
