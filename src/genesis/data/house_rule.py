@@ -60,18 +60,25 @@ class MaxLossLimit:
         el ancla no se mueve más (una vez congelada, no se descongela). Si no está
         congelada: `STATIC` nunca actualiza el ancla; `TRAILING_INTRADAY` la sigue en
         cada evaluación contra `floating_equity`; `TRAILING_EOD` solo la actualiza
-        cuando `session_close_balance` está disponible (cierre de sesión).
+        cuando `session_close_balance` está disponible (cierre de sesión). En
+        cualquiera de los dos casos trailing, si el candidato de un solo salto supera
+        `threshold_lock_at`, el ancla resultante se acota a `threshold_lock_at`: no
+        puede congelarse por encima del umbral contractual.
         """
         if threshold_lock_at is not None and current_anchor >= threshold_lock_at:
             return current_anchor
         if self.kind is MaxLossLimitKind.STATIC:
             return current_anchor
         if self.kind is MaxLossLimitKind.TRAILING_INTRADAY:
-            return max(current_anchor, floating_equity)
-        # TRAILING_EOD: solo se mueve en la barra de cierre de sesión.
-        if session_close_balance is None:
-            return current_anchor
-        return max(current_anchor, session_close_balance)
+            candidate = max(current_anchor, floating_equity)
+        else:
+            # TRAILING_EOD: solo se mueve en la barra de cierre de sesión.
+            if session_close_balance is None:
+                return current_anchor
+            candidate = max(current_anchor, session_close_balance)
+        if threshold_lock_at is not None:
+            return min(candidate, threshold_lock_at)
+        return candidate
 
     def threshold_from(self, anchor: float) -> float:
         """Umbral de breach: el ancla menos el monto absoluto del límite."""

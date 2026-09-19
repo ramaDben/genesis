@@ -71,6 +71,36 @@ def test_u4_trailing_eod_congela_en_threshold_lock_at() -> None:
     assert limit.threshold_from(nueva_ancla) == 50100.0
 
 
+def test_hallazgo1_trailing_eod_acota_el_salto_al_threshold_lock_at() -> None:
+    """El ancla nunca sobrepasa `threshold_lock_at` en un solo salto (bug de correctitud).
+
+    `current_anchor=50_000.0` está por debajo de `threshold_lock_at=52_100.0` (no
+    congelada todavía), pero el `session_close_balance` de la sesión salta a
+    `53_000.0` en un solo paso: el ancla resultante debe quedar acotada en
+    `52_100.0`, no en `53_000.0`.
+    """
+    limit = MaxLossLimit(amount=2000.0, kind=MaxLossLimitKind.TRAILING_EOD)
+    nueva_ancla = limit.next_anchor(
+        50000.0,
+        floating_equity=53000.0,
+        session_close_balance=53000.0,
+        threshold_lock_at=52100.0,
+    )
+    assert nueva_ancla == 52100.0
+
+
+def test_hallazgo1_trailing_intraday_acota_el_salto_al_threshold_lock_at() -> None:
+    """Mismo bug, vía `TRAILING_INTRADAY`: el salto de `floating_equity` se acota."""
+    limit = MaxLossLimit(amount=2000.0, kind=MaxLossLimitKind.TRAILING_INTRADAY)
+    nueva_ancla = limit.next_anchor(
+        50000.0,
+        floating_equity=53000.0,
+        session_close_balance=None,
+        threshold_lock_at=52100.0,
+    )
+    assert nueva_ancla == 52100.0
+
+
 def test_u5_trailing_eod_ignora_equity_flotante_sin_cierre_de_sesion() -> None:
     """Eval U5: sin `session_close_balance`, el ancla TRAILING_EOD no cambia."""
     limit = MaxLossLimit(amount=2000.0, kind=MaxLossLimitKind.TRAILING_EOD)
