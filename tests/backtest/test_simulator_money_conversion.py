@@ -7,7 +7,7 @@ import pytest
 
 from genesis.backtest.costs import CostsConfig
 from genesis.backtest.ledger import FillRecord
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.simulator import OpenPosition, ResolvedFill, Simulator
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -40,7 +40,7 @@ def _figure_with(tick_value: float, tick_size: float) -> SymbolFigure:
 
 def _simulator(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     costs_config_fixture: CostsConfig,
     figure: SymbolFigure,
 ) -> Simulator:
@@ -48,7 +48,7 @@ def _simulator(
         FakeRiskCandidate(),
         symbol="US500",
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=figure,
         funnel_config=_FUNNEL_CONFIG,
         costs_config=costs_config_fixture,
@@ -80,16 +80,16 @@ def _position(
 
 def test_floating_pnl_usa_value_per_point(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     costs_config_fixture: CostsConfig,
 ) -> None:
     """A6: con `(1.0, 1.0)` el flotante es `points * sizing_hint * 1.0`; con `(1.0, 0.01)`
     es exactamente 100x el anterior (discriminación del bug)."""
     baseline_sim = _simulator(
-        firm_profile_fixture, risk_profile_fixture, costs_config_fixture, _figure_with(1.0, 1.0)
+        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, _figure_with(1.0, 1.0)
     )
     scaled_sim = _simulator(
-        firm_profile_fixture, risk_profile_fixture, costs_config_fixture, _figure_with(1.0, 0.01)
+        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, _figure_with(1.0, 0.01)
     )
     position = _position(sizing_hint=0.1)
     baseline_pnl = baseline_sim._floating_pnl(position, 110.0)
@@ -100,7 +100,7 @@ def test_floating_pnl_usa_value_per_point(
 
 def test_costo_de_entrada_usa_value_per_point(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     costs_config_fixture: CostsConfig,
 ) -> None:
     """A7: el `cost_applied` de la entrada (`is_exit=False`) difiere entre las dos fichas
@@ -114,7 +114,7 @@ def test_costo_de_entrada_usa_value_per_point(
     )
 
     baseline_sim = _simulator(
-        firm_profile_fixture, risk_profile_fixture, costs_config_fixture, _figure_with(1.0, 1.0)
+        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, _figure_with(1.0, 1.0)
     )
     baseline_sim._open_position(intent, bar, [], False, 90.0, 120.0)
     baseline_entry = next(
@@ -124,7 +124,7 @@ def test_costo_de_entrada_usa_value_per_point(
     )
 
     scaled_sim = _simulator(
-        firm_profile_fixture, risk_profile_fixture, costs_config_fixture, _figure_with(1.0, 0.01)
+        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, _figure_with(1.0, 0.01)
     )
     scaled_sim._open_position(intent, bar, [], False, 90.0, 120.0)
     scaled_entry = next(
@@ -138,7 +138,7 @@ def test_costo_de_entrada_usa_value_per_point(
 
 def test_pnl_realizado_usa_la_misma_conversion_que_el_flotante(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     costs_config_fixture: CostsConfig,
 ) -> None:
     """H2/D4: `_close_position` no reimplementa la fórmula; el `pnl_gross` realizado
@@ -146,7 +146,7 @@ def test_pnl_realizado_usa_la_misma_conversion_que_el_flotante(
     fill = ResolvedFill(price=115.0, timestamp_utc=_ENTRY_TIME)
 
     baseline_sim = _simulator(
-        firm_profile_fixture, risk_profile_fixture, costs_config_fixture, _figure_with(1.0, 1.0)
+        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, _figure_with(1.0, 1.0)
     )
     baseline_position = _position(sizing_hint=0.1)
     baseline_sim.account.open_positions.append(baseline_position)
@@ -159,7 +159,7 @@ def test_pnl_realizado_usa_la_misma_conversion_que_el_flotante(
     baseline_pnl_gross = baseline_exit.equity_after - _STARTING_BALANCE + baseline_exit.cost_applied
 
     scaled_sim = _simulator(
-        firm_profile_fixture, risk_profile_fixture, costs_config_fixture, _figure_with(1.0, 0.01)
+        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, _figure_with(1.0, 0.01)
     )
     scaled_position = _position(sizing_hint=0.1)
     scaled_sim.account.open_positions.append(scaled_position)

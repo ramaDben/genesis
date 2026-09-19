@@ -13,7 +13,7 @@ import pytest
 
 from genesis.backtest.costs import load_costs_config
 from genesis.backtest.ledger import FillRecord, TrailingStopMoved
-from genesis.backtest.risk_profile import load_risk_profile
+from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.simulator import (
     OpenPosition,
     RiskLevelsProvider,
@@ -46,7 +46,7 @@ def test_criterio_a7_y_a8_golden_test_trailing_stop_fill_y_ledger() -> None:
         candidate=_PassiveCandidate(),
         symbol=_SYMBOL,
         firm_profile=load_firm_profile(),
-        risk_profile=load_risk_profile(),
+        exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure(_SYMBOL),
         funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
         costs_config=load_costs_config(),
@@ -155,7 +155,7 @@ def test_criterio_a7_y_a8_short_position_trailing_stop_fill_y_ledger() -> None:
         candidate=_PassiveCandidate(),
         symbol=_SYMBOL,
         firm_profile=load_firm_profile(),
-        risk_profile=load_risk_profile(),
+        exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure(_SYMBOL),
         funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
         costs_config=load_costs_config(),
@@ -264,7 +264,7 @@ def test_criterio_a10_determinismo() -> None:
             candidate=_PassiveCandidate(),
             symbol=_SYMBOL,
             firm_profile=load_firm_profile(),
-            risk_profile=load_risk_profile(),
+            exit_geometry=load_exit_geometry(),
             figure=_default_symbol_figure(_SYMBOL),
             funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
             costs_config=load_costs_config(),
@@ -317,7 +317,7 @@ def test_criterio_a11_ningun_consumidor_ve_stop_viejo() -> None:
         candidate=_PassiveCandidate(),
         symbol=_SYMBOL,
         firm_profile=load_firm_profile(),
-        risk_profile=load_risk_profile(),
+        exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure(_SYMBOL),
         funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
         costs_config=load_costs_config(),

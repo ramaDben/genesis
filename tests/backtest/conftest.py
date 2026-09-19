@@ -1,6 +1,6 @@
 """Fixtures compartidas de la suite `tests/backtest/` (capa 3: backtest, R51).
 
-Reutiliza `load_firm_profile()`/`load_risk_profile()`/`load_costs_config()` y el
+Reutiliza `load_firm_profile()`/`load_exit_geometry()`/`load_costs_config()` y el
 `SymbolFigure` fake de `tests/data/fakes.py`; no duplica su construcción (R51).
 """
 
@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig, load_costs_config
-from genesis.backtest.risk_profile import RiskProfile, load_risk_profile
+from genesis.backtest.exit_geometry import ExitGeometry, load_exit_geometry
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
 from genesis.data.symbols import SymbolFigure
@@ -38,9 +38,9 @@ def firm_profile_fixture() -> FirmProfile:
 
 
 @pytest.fixture
-def risk_profile_fixture() -> RiskProfile:
-    """Ficha de riesgo por defecto (`load_risk_profile()`)."""
-    return load_risk_profile()
+def exit_geometry_fixture() -> ExitGeometry:
+    """Geometría de salida por defecto (`load_exit_geometry()`)."""
+    return load_exit_geometry()
 
 
 @pytest.fixture

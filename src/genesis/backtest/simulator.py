@@ -25,18 +25,20 @@ import pandas as pd
 from genesis.backtest.clock import SimulationClock
 from genesis.backtest.costs import CostsConfig, commission_for, slippage_for, spread_for, swap_for
 from genesis.backtest.errors import BacktestConfigError, SessionBoundaryError
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.exit_policy import _TrailingState
 from genesis.backtest.ledger import (
     CONFIG_VERSION,
     BreachEvent,
     BreachKind,
+    ExhaustionPolicy,
     FillRecord,
     Ledger,
     RejectionRecord,
     RunProvenance,
     TrailingStopMoved,
 )
-from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile, risk_profile_hash
+from genesis.backtest.exit_geometry import exit_geometry_hash as _exit_geometry_hash
 from genesis.backtest.ticks import (
     TickCache,
     TickRow,
@@ -44,6 +46,8 @@ from genesis.backtest.ticks import (
     ticks_in_bar_window,
 )
 from genesis.data.calendar import EconomicEvent, news_windows
+from genesis.data.house_rule import HouseRule
+from genesis.data.house_rule import house_rule_hash as _house_rule_hash
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash
 from genesis.data.sessions import session_window
@@ -256,7 +260,7 @@ class Simulator:
         *,
         symbol: str,
         firm_profile: FirmProfile,
-        risk_profile: RiskProfile,
+        exit_geometry: ExitGeometry,
         figure: SymbolFigure,
         funnel_config: InspectorFunnelConfig,
         costs_config: CostsConfig,
@@ -266,10 +270,13 @@ class Simulator:
         dataset_hash: str,
         tick_cache: TickCache | None = None,
         stress: float = 1.0,
+        exhaustion_policy: ExhaustionPolicy = ExhaustionPolicy.HALT_ENTRIES,
     ) -> None:
+        candidate_id = getattr(candidate, "candidate_id", "?")
+
         if not isinstance(candidate, RiskLevelsProvider):
             message = (
-                f"El candidato candidate_id={getattr(candidate, 'candidate_id', '?')!r} no "
+                f"El candidato candidate_id={candidate_id!r} no "
                 "implementa RiskLevelsProvider (risk_levels); requisito duro para simular "
                 f"symbol={symbol!r} (R21, ADR-G3)."
             )
@@ -291,10 +298,20 @@ class Simulator:
             )
             raise BacktestConfigError(message) from exc
 
+        house_rule = firm_profile.house_rule
+        if house_rule is None:
+            message = (
+                f"La ficha de firma {firm_profile.name!r} no declara 'house_rule' (no es una "
+                f"prop firm, D2 de design.md); no se puede simular candidate_id={candidate_id!r} "
+                f"en capa 3."
+            )
+            raise BacktestConfigError(message)
+
         self.candidate = candidate
         self.symbol = symbol
         self.firm_profile = firm_profile
-        self.risk_profile = risk_profile
+        self.exit_geometry = exit_geometry
+        self.exhaustion_policy = exhaustion_policy
         self.figure = figure
         self.funnel_config = funnel_config
         self.costs_config = costs_config
@@ -305,21 +322,23 @@ class Simulator:
         # `Simulator` usa el suyo. En ambos casos la cota de días vivos es la misma.
         self._tick_cache = tick_cache if tick_cache is not None else TickCache()
         self._starting_balance = starting_balance
+        self._house_rule = house_rule
+        self._max_loss_anchor = house_rule.max_loss_limit.initial_anchor(starting_balance)
         self._intraday_peak_equity = starting_balance
-        self._all_time_peak_equity = starting_balance
         self._session_closed_days: set[date] = set()
         self._position_counter: int = 0
         self._aggregator = BarAggregator()
         self._atr = IncrementalAtr(period=14)
         self._trailing_states: dict[str, _TrailingState] = {}
 
-        candidate_id = getattr(candidate, "candidate_id", "?")
         provenance = RunProvenance(
             candidate_id=candidate_id,
             config_version=CONFIG_VERSION,
             dataset_hash=dataset_hash,
             firm_profile_hash=firm_profile_hash(firm_profile),
-            risk_profile_hash=risk_profile_hash(risk_profile),
+            exit_geometry_hash=_exit_geometry_hash(exit_geometry),
+            house_rule_hash=_house_rule_hash(house_rule),
+            exhaustion_policy=exhaustion_policy,
         )
         self.ledger = Ledger(provenance=provenance, entries=[])
         self.clock = SimulationClock()
@@ -370,8 +389,13 @@ class Simulator:
         # (3)/(4) cierre forzado proactivo de sesión + guard defensivo (T10).
         self._enforce_session_close_and_guard(bar, day_ticks, coverage)
 
-        # (5) nuevas entradas: solo si la cuenta no está agotada (R30).
-        if not self.account.account_exhausted:
+        # (5) nuevas entradas: bajo HALT_ENTRIES ninguna tras el agotamiento (R30); bajo
+        # RECORD_AND_CONTINUE la corrida sigue produciendo muestra (D1, capa 4).
+        halted = (
+            self.exhaustion_policy is ExhaustionPolicy.HALT_ENTRIES
+            and self.account.account_exhausted
+        )
+        if not halted:
             self._process_new_entries(bar, day_ticks, coverage)
 
         # (6) NUEVO: alimentar el agregador con la barra, SIN condicionar a sesión (§3);
@@ -388,7 +412,7 @@ class Simulator:
             state = self._trailing_states.get(position.position_id)
             if state is None:
                 state = _TrailingState(
-                    rolling_extreme=RollingExtreme(lookback=self.risk_profile.trailing_lookback),
+                    rolling_extreme=RollingExtreme(lookback=self.exit_geometry.trailing_lookback),
                     current_stop=position.stop_loss,
                 )
                 self._trailing_states[position.position_id] = state
@@ -396,7 +420,7 @@ class Simulator:
             new_stop = state.update_stop(
                 direction=position.direction,
                 atr=atr_val,
-                atr_mult=self.risk_profile.trailing_atr_mult,
+                atr_mult=self.exit_geometry.trailing_atr_mult,
             )
             if new_stop != position.stop_loss:
                 self.ledger.append(
@@ -459,23 +483,29 @@ class Simulator:
         del day_ticks, coverage
         floating_equity = self._floating_equity(bar)
         self._intraday_peak_equity = max(self._intraday_peak_equity, floating_equity)
-        self._all_time_peak_equity = max(self._all_time_peak_equity, floating_equity)
 
         self._evaluate_daily_breach(bar, floating_equity)
         if not self.account.account_exhausted:
             self._evaluate_total_breach(bar, floating_equity)
 
     def _evaluate_daily_breach(self, bar: AnnotatedBar, floating_equity: float) -> None:
-        """Breach DAILY (R25): base doble — el mayor entre pérdida vs. flotante intradía y
-        pérdida vs. `clock.previous_day_close_balance`, contra `daily_loss_limit_pct`.
+        """Breach DAILY (R25, D6): base doble contra `house_rule.daily_loss_limit.amount`.
+
+        Si `daily_loss_limit is None`, no emite nada: la regla no existe en el contrato
+        real (D6) — modelar una regla inexistente era el error de dirección que hoy
+        tiene the5ers con su 5% inventado. `semantics=PAUSE` no está modelada en esta
+        capa (hoy tampoco lo estaba): ambas semánticas solo registran el evento.
         """
+        daily_loss_limit = self._house_rule.daily_loss_limit
+        if daily_loss_limit is None:
+            return
         reference = self.clock.previous_day_close_balance
         if reference is None or reference <= 0:
             return
         loss_vs_close = reference - floating_equity
         loss_vs_peak = self._intraday_peak_equity - floating_equity
         daily_loss = max(loss_vs_close, loss_vs_peak)
-        threshold = reference * (self.firm_profile.daily_loss_limit_pct / 100.0)
+        threshold = daily_loss_limit.amount
         if daily_loss >= threshold:
             self.ledger.append(
                 BreachEvent(
@@ -487,29 +517,39 @@ class Simulator:
                 )
             )
 
-    def _evaluate_total_breach(self, bar: AnnotatedBar, floating_equity: float) -> None:
-        """Breach TOTAL (R26): pérdida vs. la referencia de `risk_profile.max_loss_limit_kind`.
+    def _is_session_close_bar(self, bar: AnnotatedBar) -> bool:
+        """`True` en la única barra donde `session_close_balance` está disponible (§1.3)."""
+        return (
+            bar.timestamp_utc >= bar.session_close_utc
+            and bar.trading_day not in self._session_closed_days
+        )
 
-        `STATIC` compara contra el balance inicial del run; `TRAILING` contra el pico de
-        equity flotante alcanzado en toda la ejecución (ADR-G2). Terminal (R30/R31):
-        agota la cuenta, sin lanzar excepción Python.
+    def _evaluate_total_breach(self, bar: AnnotatedBar, floating_equity: float) -> None:
+        """Breach TOTAL (R26, R5, B3): delega entero en `MaxLossLimit` (§1.3 del diseño).
+
+        `floating_equity` alimenta la evaluación intradía en cada barra;
+        `session_close_balance` solo se pasa en la barra de cierre de sesión — es la
+        única aproximación **exacta** de los dos evaluadores del contrato (capa 4 usa
+        un proxy cierre-a-cierre, ADR-J4). Terminal (R30/R31): agota la cuenta sin
+        lanzar excepción Python.
         """
-        if self.risk_profile.max_loss_limit_kind is MaxLossLimitKind.TRAILING:
-            reference = self._all_time_peak_equity
-        else:
-            reference = self._starting_balance
-        if reference <= 0:
-            return
-        total_loss = reference - floating_equity
-        threshold = reference * (self.risk_profile.max_loss_limit_pct / 100.0)
-        if total_loss >= threshold:
+        max_loss_limit = self._house_rule.max_loss_limit
+        session_close_balance = floating_equity if self._is_session_close_bar(bar) else None
+        self._max_loss_anchor = max_loss_limit.next_anchor(
+            self._max_loss_anchor,
+            floating_equity=floating_equity,
+            session_close_balance=session_close_balance,
+            threshold_lock_at=self._house_rule.threshold_lock_at,
+        )
+        if max_loss_limit.is_breached(self._max_loss_anchor, floating_equity):
+            total_loss = self._max_loss_anchor - floating_equity
             self.ledger.append(
                 BreachEvent(
                     kind=BreachKind.TOTAL,
                     trading_day=bar.trading_day,
                     timestamp_utc=bar.timestamp_utc,
                     magnitude=total_loss,
-                    threshold=threshold,
+                    threshold=max_loss_limit.amount,
                     account_exhausted=True,
                 )
             )
@@ -528,7 +568,7 @@ class Simulator:
 
         if bar.timestamp_utc >= close_utc and bar.trading_day not in self._session_closed_days:
             if bar.trading_day.weekday() == _FRIDAY_WEEKDAY and not (
-                self.risk_profile.weekend_holding_allowed
+                self._house_rule.weekend_holding_allowed
             ):
                 self._register_weekend_breaches(bar)
             self._force_close_all_positions(bar, day_ticks, coverage)
@@ -650,7 +690,7 @@ class Simulator:
         )
         self.account.open_positions.append(position)
         self._trailing_states[position.position_id] = _TrailingState(
-            rolling_extreme=RollingExtreme(lookback=self.risk_profile.trailing_lookback),
+            rolling_extreme=RollingExtreme(lookback=self.exit_geometry.trailing_lookback),
             current_stop=stop_loss,
         )
         self.ledger.append(

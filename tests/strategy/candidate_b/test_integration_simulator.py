@@ -2,7 +2,7 @@
 
 Import cruzado de fixtures/loaders de `tests/backtest/` y `genesis.data`/
 `genesis.backtest` (habilitado por los `__init__.py` de test, H1): no se duplica la
-construcción de `FirmProfile`/`RiskProfile`/`CostsConfig`/`SymbolFigure` ya existente
+construcción de `FirmProfile`/`ExitGeometry`/`CostsConfig`/`SymbolFigure` ya existente
 en `tests/backtest/conftest.py` (R80).
 """
 
@@ -13,7 +13,7 @@ import pytest
 
 from genesis.backtest.costs import load_costs_config
 from genesis.backtest.errors import BacktestConfigError
-from genesis.backtest.risk_profile import load_risk_profile
+from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.simulator import RiskLevelsProvider, Simulator
 from genesis.data.profile import load_firm_profile
 from genesis.data.symbols import SymbolFigure
@@ -59,7 +59,7 @@ def _build_simulator(
         candidate,
         symbol="US500",
         firm_profile=load_firm_profile(),
-        risk_profile=load_risk_profile(),
+        exit_geometry=load_exit_geometry(),
         figure=symbol_figure,
         funnel_config=_FUNNEL_CONFIG,
         costs_config=load_costs_config(),

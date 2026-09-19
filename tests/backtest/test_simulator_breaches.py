@@ -6,7 +6,7 @@ import pytest
 
 from genesis.backtest.costs import CostsConfig
 from genesis.backtest.ledger import BreachEvent, BreachKind
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.simulator import Simulator
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -22,7 +22,7 @@ _STARTING_BALANCE = 100_000.0
 
 def _build_simulator(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> tuple[Simulator, FakeRiskCandidate]:
@@ -31,7 +31,7 @@ def _build_simulator(
         candidate,
         symbol="US500",
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=symbol_figure_fixture,
         funnel_config=_FUNNEL_CONFIG,
         costs_config=costs_config_fixture,
@@ -45,7 +45,7 @@ def _build_simulator(
 
 def test_breach_diario_golden_calculado_a_mano(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -58,7 +58,7 @@ def test_breach_diario_golden_calculado_a_mano(
     0.05 = 5_000` → dispara `BreachEvent(DAILY)` con `magnitude=6_000`, `threshold=5_000`.
     """
     simulator, _candidate = _build_simulator(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator.account.balance = 94_000.0
     bar = make_annotated_bar(datetime(2024, 1, 2, 15, 0, tzinfo=UTC))
@@ -79,11 +79,11 @@ def test_breach_diario_golden_calculado_a_mano(
 
 def test_breach_total_golden_calculado_a_mano(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
-    """R26/R54: `risk_profile_fixture.max_loss_limit_pct == 10.0` (STATIC), calculado a mano.
+    """R26/R54: `exit_geometry_fixture.max_loss_limit_pct == 10.0` (STATIC), calculado a mano.
 
     `starting_balance = 100_000`; balance realizado 88 000 sin posiciones abiertas →
     `floating_equity == 88_000.0`. `total_loss = 100_000 - 88_000 = 12_000 >=
@@ -91,7 +91,7 @@ def test_breach_total_golden_calculado_a_mano(
     account_exhausted=True)` y agota la cuenta.
     """
     simulator, _candidate = _build_simulator(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator.account.balance = 88_000.0
     bar = make_annotated_bar(datetime(2024, 1, 2, 15, 0, tzinfo=UTC))
@@ -112,13 +112,13 @@ def test_breach_total_golden_calculado_a_mano(
 
 def test_tras_breach_diario_on_bar_sigue_invocandose(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     """R29: DAILY es continuable — el run sigue invocando `candidate.on_bar`."""
     simulator, candidate = _build_simulator(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator.account.balance = 94_000.0
     bar = make_annotated_bar(datetime(2024, 1, 2, 15, 0, tzinfo=UTC))
@@ -131,13 +131,13 @@ def test_tras_breach_diario_on_bar_sigue_invocandose(
 
 def test_tras_breach_total_on_bar_no_se_invoca_y_no_hay_excepcion(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     """R30/R31: TOTAL agota la cuenta; el run continúa sin excepción, omitiendo `on_bar`."""
     simulator, candidate = _build_simulator(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator.account.balance = 88_000.0
     bar_1 = make_annotated_bar(datetime(2024, 1, 2, 15, 0, tzinfo=UTC))

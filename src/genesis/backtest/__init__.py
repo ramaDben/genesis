@@ -2,15 +2,21 @@
 
 from genesis.backtest.clock import SimulationClock
 from genesis.backtest.errors import BacktestConfigError, GenesisBacktestError, SessionBoundaryError
+from genesis.backtest.exit_geometry import (
+    ExitGeometry,
+    ExitGeometrySource,
+    exit_geometry_hash,
+    load_exit_geometry,
+)
 from genesis.backtest.ledger import (
     CONFIG_VERSION,
     BreachEvent,
     BreachKind,
+    ExhaustionPolicy,
     Ledger,
     TrailingStopMoved,
     reconstruct_equity_series,
 )
-from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile, load_risk_profile
 from genesis.backtest.simulator import RiskLevelsProvider, Simulator, run_backtest
 from genesis.backtest.ticks import iter_ticks
 
@@ -19,17 +25,19 @@ __all__ = [
     "BacktestConfigError",
     "BreachEvent",
     "BreachKind",
+    "ExhaustionPolicy",
+    "ExitGeometry",
+    "ExitGeometrySource",
     "GenesisBacktestError",
     "Ledger",
-    "MaxLossLimitKind",
     "RiskLevelsProvider",
-    "RiskProfile",
     "SessionBoundaryError",
     "SimulationClock",
     "Simulator",
     "TrailingStopMoved",
+    "exit_geometry_hash",
     "iter_ticks",
-    "load_risk_profile",
+    "load_exit_geometry",
     "reconstruct_equity_series",
     "run_backtest",
 ]

@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.simulator import (
     OpenPosition,
     RiskLevelsProvider,
@@ -51,7 +51,7 @@ def _build_test_simulator(
     *,
     dataset_hash: str = "dataset-test-1",
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry,
     figure: SymbolFigure,
     costs_config: CostsConfig,
 ) -> Simulator:
@@ -59,7 +59,7 @@ def _build_test_simulator(
         candidate=candidate,
         symbol="US500",
         firm_profile=firm_profile,
-        risk_profile=risk_profile,
+        exit_geometry=exit_geometry,
         figure=figure,
         funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
         costs_config=costs_config,
@@ -95,7 +95,7 @@ def test_compute_rr_take_profit_none_retorna_none() -> None:
 
 def test_criterio_a16_supervivencia_posiciones_no_corrupcion(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -105,7 +105,7 @@ def test_criterio_a16_supervivencia_posiciones_no_corrupcion(
     sim = _build_test_simulator(
         _DummyCandidate(),
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=symbol_figure_fixture,
         costs_config=costs_config_fixture,
     )
@@ -136,7 +136,7 @@ def test_criterio_a16_supervivencia_posiciones_no_corrupcion(
 
 def test_criterio_a17_embudo_y_simulador_autorizan_sin_take_profit(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -151,7 +151,7 @@ def test_criterio_a17_embudo_y_simulador_autorizan_sin_take_profit(
     sim = _build_test_simulator(
         candidate,
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=symbol_figure_fixture,
         costs_config=costs_config_fixture,
     )
@@ -177,7 +177,7 @@ def test_criterio_a17_embudo_y_simulador_autorizan_sin_take_profit(
 
 def test_criterio_a21_vaciado_tras_sesion_multiple(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -185,7 +185,7 @@ def test_criterio_a21_vaciado_tras_sesion_multiple(
     sim = _build_test_simulator(
         _DummyCandidate(),
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=symbol_figure_fixture,
         costs_config=costs_config_fixture,
     )
@@ -210,7 +210,7 @@ def test_criterio_a21_vaciado_tras_sesion_multiple(
 
 def test_criterio_a22_unicidad_position_id_entre_ventanas(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -235,7 +235,7 @@ def test_criterio_a22_unicidad_position_id_entre_ventanas(
         cand1,
         dataset_hash="11111111_window_1_abc",
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=symbol_figure_fixture,
         costs_config=costs_config_fixture,
     )
@@ -243,7 +243,7 @@ def test_criterio_a22_unicidad_position_id_entre_ventanas(
         cand2,
         dataset_hash="22222222_window_2_xyz",
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=symbol_figure_fixture,
         costs_config=costs_config_fixture,
     )

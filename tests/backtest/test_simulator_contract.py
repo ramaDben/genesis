@@ -4,7 +4,7 @@ import pytest
 
 from genesis.backtest.costs import CostsConfig
 from genesis.backtest.errors import BacktestConfigError
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.simulator import RiskLevelsProvider, Simulator
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -19,7 +19,7 @@ _UNSET = object()
 
 def _build_kwargs(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
     *,
@@ -29,7 +29,7 @@ def _build_kwargs(
     return {
         "symbol": symbol,
         "firm_profile": firm_profile_fixture,
-        "risk_profile": risk_profile_fixture,
+        "exit_geometry": exit_geometry_fixture,
         "figure": symbol_figure_fixture,
         "funnel_config": _FUNNEL_CONFIG,
         "costs_config": costs_config_fixture if costs_config is _UNSET else costs_config,
@@ -47,12 +47,12 @@ def test_risk_levels_provider_es_runtime_checkable() -> None:
 
 def test_simulator_lanza_backtest_config_error_si_candidato_no_implementa_risk_levels(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     kwargs = _build_kwargs(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     with pytest.raises(BacktestConfigError):
         Simulator(FakeCandidateNoRisk(), **kwargs)
@@ -60,12 +60,12 @@ def test_simulator_lanza_backtest_config_error_si_candidato_no_implementa_risk_l
 
 def test_simulator_construye_correctamente_con_candidato_valido(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     kwargs = _build_kwargs(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     simulator = Simulator(FakeRiskCandidate(), **kwargs)
     assert simulator is not None
@@ -73,13 +73,13 @@ def test_simulator_construye_correctamente_con_candidato_valido(
 
 def test_simulator_lanza_backtest_config_error_si_costs_config_invalido(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     kwargs = _build_kwargs(
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
         costs_config=None,  # type: ignore[arg-type]
@@ -90,13 +90,13 @@ def test_simulator_lanza_backtest_config_error_si_costs_config_invalido(
 
 def test_simulator_lanza_backtest_config_error_si_symbol_fuera_de_sessions(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     kwargs = _build_kwargs(
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
         symbol="NOPE",

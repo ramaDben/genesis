@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.simulator import Simulator
 from genesis.backtest.ticks import _day_window
 from genesis.data.metadata import ArtifactMetadata
@@ -59,7 +59,7 @@ def _two_day_frame() -> pd.DataFrame:
 
 def _build_simulator(
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry,
     figure: SymbolFigure,
     costs_config: CostsConfig,
     *,
@@ -69,7 +69,7 @@ def _build_simulator(
         FakeRiskCandidate(),
         symbol=_SYMBOL,
         firm_profile=firm_profile,
-        risk_profile=risk_profile,
+        exit_geometry=exit_geometry,
         figure=figure,
         funnel_config=_FUNNEL_CONFIG,
         costs_config=costs_config,
@@ -82,14 +82,14 @@ def _build_simulator(
 
 def test_run_resuelve_la_ventana_de_sesion_una_vez_por_dia(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """R28: sobre el run completo, `session_window` se consulta por día, no por barra."""
     simulator = _build_simulator(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     frame = _two_day_frame()
 
@@ -114,7 +114,7 @@ def test_run_resuelve_la_ventana_de_sesion_una_vez_por_dia(
 def test_run_consulta_la_existencia_de_chunks_una_vez_por_dia(
     tmp_path: Path,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
     monkeypatch: pytest.MonkeyPatch,
@@ -143,7 +143,7 @@ def test_run_consulta_la_existencia_de_chunks_una_vez_por_dia(
 
         simulator = _build_simulator(
             firm_profile_fixture,
-            risk_profile_fixture,
+            exit_geometry_fixture,
             symbol_figure_fixture,
             costs_config_fixture,
             tick_store=store,
@@ -205,7 +205,7 @@ def _write_tick_chunk_for(
 def test_los_ticks_de_un_dia_se_leen_una_sola_vez_en_el_run(
     tmp_path: Path,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
     monkeypatch: pytest.MonkeyPatch,
@@ -225,7 +225,7 @@ def test_los_ticks_de_un_dia_se_leen_una_sola_vez_en_el_run(
 
     simulator = _build_simulator(
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
         tick_store=store,

@@ -150,17 +150,24 @@ def worst_daily_floating_excursion(ledger: Ledger) -> float:
     return max((breach.magnitude for breach in _daily_breaches(ledger)), default=0.0)
 
 
-def min_distance_to_daily_limit(ledger: Ledger, firm_profile: FirmProfile) -> float:
-    """Distancia mínima observada al límite de pérdida diaria (R49).
+def min_distance_to_daily_limit(ledger: Ledger, firm_profile: FirmProfile) -> float | None:
+    """Distancia mínima observada al límite de pérdida diaria (R49; DT-2 del gate, Change #109).
 
     `threshold - magnitude` sobre los `BreachEvent(DAILY)` del ledger (negativo si el
-    límite fue superado). Sin ningún breach DAILY, no hubo cercanía observada y se
-    retorna `firm_profile.daily_loss_limit_pct` como distancia de referencia.
+    límite fue superado). Sin ningún breach DAILY: si la ficha declara
+    `house_rule.daily_loss_limit`, se usa su `amount` como distancia de referencia
+    (ninguna pérdida diaria observada implica que toda esa distancia sigue
+    disponible); si la ficha **no** declara DLL (p.ej. MFFU), retorna `None` —
+    "sin límite diario en el contrato", sin inventar un número que fusionaría esta
+    regla con el `max_loss_limit` (DT-2, opción (b), `tasks.md` B3b).
     """
     distances = [breach.threshold - breach.magnitude for breach in _daily_breaches(ledger)]
-    if not distances:
-        return firm_profile.daily_loss_limit_pct
-    return min(distances)
+    if distances:
+        return min(distances)
+    house_rule = firm_profile.house_rule
+    if house_rule is None or house_rule.daily_loss_limit is None:
+        return None
+    return house_rule.daily_loss_limit.amount
 
 
 def max_concurrent_exposure(ledger: Ledger) -> int:

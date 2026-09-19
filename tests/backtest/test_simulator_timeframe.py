@@ -18,7 +18,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from genesis.backtest.costs import CostsConfig, load_costs_config
-from genesis.backtest.risk_profile import RiskProfile, load_risk_profile
+from genesis.backtest.exit_geometry import ExitGeometry, load_exit_geometry
 from genesis.backtest.simulator import (
     OpenPosition,
     RiskLevelsProvider,
@@ -51,7 +51,7 @@ class _PassiveCandidate(StrategyCandidate, RiskLevelsProvider):
 
 def _build_sim(
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry,
     figure: SymbolFigure,
     costs_config: CostsConfig,
 ) -> Simulator:
@@ -59,7 +59,7 @@ def _build_sim(
         candidate=_PassiveCandidate(),
         symbol=_SYMBOL,
         firm_profile=firm_profile,
-        risk_profile=risk_profile,
+        exit_geometry=exit_geometry,
         figure=figure,
         funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
         costs_config=costs_config,
@@ -90,7 +90,7 @@ def _warm_up_atr(sim: Simulator, n_hours: int = 15, base_price: float = 100.0) -
 
 def test_criterio_a5_barra_en_curso_no_participa(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -99,7 +99,7 @@ def test_criterio_a5_barra_en_curso_no_participa(
     """
     sim = _build_sim(
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
     )
@@ -155,7 +155,7 @@ def test_criterio_a5_barra_en_curso_no_participa(
 
 def test_criterio_a6_y_a19_ancla_ignora_maximo_previo_a_apertura(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -166,7 +166,7 @@ def test_criterio_a6_y_a19_ancla_ignora_maximo_previo_a_apertura(
     """
     sim = _build_sim(
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
     )
@@ -224,7 +224,7 @@ def test_criterio_a6_y_a19_ancla_ignora_maximo_previo_a_apertura(
 
 def test_criterio_a15_geometria_es_horaria(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -233,7 +233,7 @@ def test_criterio_a15_geometria_es_horaria(
     """
     sim = _build_sim(
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
     )
@@ -289,7 +289,7 @@ def test_criterio_a15_geometria_es_horaria(
 
 def test_criterio_a18_ninguna_vela_agregada_cruza_sesiones(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -298,7 +298,7 @@ def test_criterio_a18_ninguna_vela_agregada_cruza_sesiones(
     """
     sim = _build_sim(
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
     )
@@ -326,7 +326,7 @@ def test_criterio_a18_ninguna_vela_agregada_cruza_sesiones(
 
 def test_criterio_a20_posiciones_concurrentes_reciben_ambas_h1(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -335,7 +335,7 @@ def test_criterio_a20_posiciones_concurrentes_reciben_ambas_h1(
     """
     sim = _build_sim(
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
     )
@@ -395,7 +395,7 @@ def test_criterio_a4_anti_anticipacion_del_stop(
     def run_up_to_t(suffix_highs: list[float]) -> float:
         sim = _build_sim(
             load_firm_profile(),
-            load_risk_profile(),
+            load_exit_geometry(),
             _default_symbol_figure(_SYMBOL),
             load_costs_config(),
         )
