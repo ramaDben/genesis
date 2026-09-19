@@ -86,7 +86,7 @@ def load_exit_geometry(path: Path | None = None) -> ExitGeometry:
         )
     except BacktestConfigError:
         raise
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         message = f"Geometría de salida inválida/incompleta en '{source}': {exc}"
         raise BacktestConfigError(message) from exc
 

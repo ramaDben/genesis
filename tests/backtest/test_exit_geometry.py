@@ -67,6 +67,16 @@ def test_load_exit_geometry_config_incompleta_falta_lookback(tmp_path: Path) -> 
         load_exit_geometry(incomplete)
 
 
+def test_hallazgo3_load_exit_geometry_raiz_no_dict_lanza_backtest_config_error(
+    tmp_path: Path,
+) -> None:
+    """Un JSON raíz que es una lista no debe escapar como `AttributeError` crudo."""
+    path = tmp_path / "lista.json"
+    path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    with pytest.raises(BacktestConfigError):
+        load_exit_geometry(path)
+
+
 def test_load_exit_geometry_default_empaquetado() -> None:
     geometry = load_exit_geometry()
     assert geometry.trailing_lookback >= 1
