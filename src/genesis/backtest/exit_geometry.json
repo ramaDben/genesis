@@ -1,0 +1,5 @@
+{
+  "config_version": "genesis-backtest-exit-geometry/1",
+  "trailing_lookback": 22,
+  "trailing_atr_mult": 3.0
+}
