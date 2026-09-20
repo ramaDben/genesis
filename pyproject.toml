@@ -1,6 +1,6 @@
 [project]
 name = "genesis"
-version = "0.4.1"
+version = "0.5.0"
 description = "Pipeline de validación institucional para prop firms: torneo de candidatos de estrategia bajo gates mecánicos (Spec Génesis v1.4)."
 readme = "README.md"
 requires-python = ">=3.14"
