@@ -38,3 +38,11 @@
 **Contexto:** Cierre del Change #53 (dominio validation); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-08-10T16:54:51.320721+00:00; tests_passed_at=2026-08-10T19:50:03.251181+00:00; artefactos: /work/.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/idea.md, /work/.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/proposal.md, /work/.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/design.md, /work/.pulse/changes/53-feat-validation-ledger-de-ensayos-persistente-entre-corridas-pre/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de validation.
+### Heurística: cierre Change #109 validation [#109 · validation · 2026-09-20]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa
+**Contexto:** Cierre del Change #109 (dominio validation); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-09-14T20:12:06.538453+00:00; tests_passed_at=2026-09-20T15:54:11.183559+00:00; artefactos: /work/.pulse/changes/109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa/idea.md, /work/.pulse/changes/109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa/proposal.md, /work/.pulse/changes/109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa/design.md, /work/.pulse/changes/109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de validation.

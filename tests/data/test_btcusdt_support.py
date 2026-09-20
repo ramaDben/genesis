@@ -52,7 +52,7 @@ def test_load_binance_futures_profile() -> None:
     assert profile.server_tz == "UTC"
     assert profile.daily_reset_time == time(0, 0)
     assert profile.daily_reset_tz == "UTC"
-    assert profile.daily_loss_limit_pct == 5.0
+    assert profile.house_rule is None
     assert "BTCUSDT" in profile.symbols
     assert profile.symbols["BTCUSDT"].expected == "BTCUSDT"
 
@@ -80,7 +80,6 @@ def test_btcusdt_metadata_store_recovery() -> None:
     assert figure.volume_step == 0.001
     assert figure.digits == 1
     assert figure.value_per_point == 1.0
-
 
 
 def test_iter_bars_in_session_btcusdt() -> None:

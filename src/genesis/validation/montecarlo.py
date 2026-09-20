@@ -21,7 +21,7 @@ from datetime import date
 import numpy as np
 
 from genesis.backtest.ledger import FillRecord, Ledger, RunProvenance
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.data.house_rule import HouseRule
 from genesis.validation._shared import clip
 from genesis.validation.errors import MonteCarloConfigError
 
@@ -169,15 +169,20 @@ def _paths_to_result(
     paths: np.ndarray,
     *,
     base_equity: float,
-    max_loss_limit_pct: float,
+    max_loss_limit_amount: float,
     seed: int,
     n_paths: int,
     block_size: int | None,
 ) -> McPathsResult:
-    """Reduce `paths` (deltas por trayectoria) a MaxDD/breach por trayectoria (R39, R40)."""
+    """Reduce `paths` (deltas por trayectoria) a MaxDD/breach por trayectoria (R39, R40, G7).
+
+    `threshold` es `house_rule.max_loss_limit.amount`: monto absoluto, independiente
+    de `base_equity` (Change #109, D1 del diseño; eval U16). `base_equity` solo
+    reconstruye la curva de equity para calcular el MaxDD por trayectoria.
+    """
     max_drawdown_per_path = np.empty(n_paths, dtype=float)
     breach_per_path = np.empty(n_paths, dtype=bool)
-    threshold = (max_loss_limit_pct / 100.0) * base_equity
+    threshold = max_loss_limit_amount
     for path_index in range(n_paths):
         equity_path = np.concatenate(([base_equity], base_equity + np.cumsum(paths[path_index])))
         maxdd = _path_max_drawdown(equity_path)
@@ -211,7 +216,7 @@ def _validate_montecarlo_inputs(n_paths: int, block_size: int | None, *, context
 
 def monte_carlo_symbol(
     oos_ledger: Ledger,
-    risk_profile: RiskProfile,
+    house_rule: HouseRule,
     n_paths: int,
     seed: int,
     block_size: int | None = None,
@@ -241,7 +246,7 @@ def monte_carlo_symbol(
     reshuffle_result = _paths_to_result(
         _reshuffle_paths(returns, n_paths, rng),
         base_equity=base_equity,
-        max_loss_limit_pct=risk_profile.max_loss_limit_pct,
+        max_loss_limit_amount=house_rule.max_loss_limit.amount,
         seed=seed,
         n_paths=n_paths,
         block_size=None,
@@ -249,7 +254,7 @@ def monte_carlo_symbol(
     block_bootstrap_result = _paths_to_result(
         _block_bootstrap_paths(returns, n_paths, resolved_block_size, rng),
         base_equity=base_equity,
-        max_loss_limit_pct=risk_profile.max_loss_limit_pct,
+        max_loss_limit_amount=house_rule.max_loss_limit.amount,
         seed=seed,
         n_paths=n_paths,
         block_size=resolved_block_size,
@@ -340,7 +345,7 @@ def _portfolio_block_bootstrap_paths(
 
 def monte_carlo_portfolio(
     oos_ledgers_by_symbol: Mapping[str, Ledger],
-    risk_profile: RiskProfile,
+    house_rule: HouseRule,
     n_paths: int,
     seed: int,
     block_size: int | None = None,
@@ -379,7 +384,7 @@ def monte_carlo_portfolio(
             basket_days, daily_totals, n_paths, resolved_block_size, rng
         ),
         base_equity=base_equity_portfolio,
-        max_loss_limit_pct=risk_profile.max_loss_limit_pct,
+        max_loss_limit_amount=house_rule.max_loss_limit.amount,
         seed=seed,
         n_paths=n_paths,
         block_size=resolved_block_size,

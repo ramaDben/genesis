@@ -1,6 +1,6 @@
 """Fixtures compartidas de la suite `tests/validation/` (capa 4: validación, R53).
 
-Reutiliza `load_firm_profile()`/`load_risk_profile()`/`load_costs_config()` y el
+Reutiliza `load_firm_profile()`/`load_exit_geometry()`/`load_costs_config()` y el
 `SymbolFigure` fake de `tests/data/fakes.py` (patrón `tests/backtest/conftest.py`);
 no duplica su construcción. Extensión Issue I (`design.md` §5.2): añade
 `wfa_result_fixture` (garantiza `n_windows >= 4`, precondición de CSCV, Rg-3),
@@ -17,8 +17,9 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig, load_costs_config
+from genesis.backtest.exit_geometry import ExitGeometry, load_exit_geometry
 from genesis.backtest.ledger import Ledger
-from genesis.backtest.risk_profile import RiskProfile, load_risk_profile
+from genesis.data.house_rule import HouseRule
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
 from genesis.data.symbols import SymbolFigure
@@ -43,9 +44,16 @@ def firm_profile_fixture() -> FirmProfile:
 
 
 @pytest.fixture
-def risk_profile_fixture() -> RiskProfile:
-    """Ficha de riesgo por defecto (`load_risk_profile()`)."""
-    return load_risk_profile()
+def exit_geometry_fixture() -> ExitGeometry:
+    """Geometría de salida por defecto (`load_exit_geometry()`)."""
+    return load_exit_geometry()
+
+
+@pytest.fixture
+def house_rule_fixture(firm_profile_fixture: FirmProfile) -> HouseRule:
+    """`house_rule` de la ficha de firma por defecto (the5ers, siempre declarado)."""
+    assert firm_profile_fixture.house_rule is not None
+    return firm_profile_fixture.house_rule
 
 
 @pytest.fixture
@@ -119,7 +127,7 @@ def i_frame() -> pd.DataFrame:
 @pytest.fixture
 def wfa_result_fixture(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -135,7 +143,7 @@ def wfa_result_fixture(
         "US500",
         i_frame,
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,

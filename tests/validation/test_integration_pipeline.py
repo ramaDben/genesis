@@ -11,7 +11,8 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
+from genesis.data.house_rule import HouseRule
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.store import iter_bars
@@ -26,7 +27,8 @@ pytestmark = pytest.mark.integration
 
 def test_pipeline_completo_produce_resultados_no_vacios_y_metricas_finitas(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
+    house_rule_fixture: HouseRule,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -43,7 +45,7 @@ def test_pipeline_completo_produce_resultados_no_vacios_y_metricas_finitas(
         "US500",
         short_wfa_frame,
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,
@@ -59,7 +61,7 @@ def test_pipeline_completo_produce_resultados_no_vacios_y_metricas_finitas(
     assert math.isfinite(wfa_result.wfe)
 
     symbol_result = monte_carlo_symbol(
-        wfa_result.oos_ledger_cosido, risk_profile_fixture, n_paths=100, seed=11
+        wfa_result.oos_ledger_cosido, house_rule_fixture, n_paths=100, seed=11
     )
     assert len(symbol_result.reshuffle.max_drawdown_per_path) == 100
     assert len(symbol_result.block_bootstrap.max_drawdown_per_path) == 100
@@ -67,7 +69,7 @@ def test_pipeline_completo_produce_resultados_no_vacios_y_metricas_finitas(
     assert math.isfinite(symbol_result.block_bootstrap.breach_probability)
 
     portfolio_result = monte_carlo_portfolio(
-        {"US500": wfa_result.oos_ledger_cosido}, risk_profile_fixture, n_paths=100, seed=13
+        {"US500": wfa_result.oos_ledger_cosido}, house_rule_fixture, n_paths=100, seed=13
     )
     assert len(portfolio_result.block_bootstrap.max_drawdown_per_path) == 100
     assert math.isfinite(portfolio_result.block_bootstrap.max_drawdown_p95)

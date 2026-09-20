@@ -13,6 +13,8 @@ al torneo A/B/C y ahí se queda. Este módulo mapea `candidate_id` → **callabl
 uniforme**, que es lo que permite inyectar un candidato que nadie escribió a mano.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
@@ -20,6 +22,21 @@ from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_b.candidate import CandidateB
 from genesis.strategy.contract import StrategyCandidate
 from genesis.strategy.errors import CandidateFactoryError
+from genesis.strategy.exit_geometry import ExitGeometry
+
+
+@runtime_checkable
+class ExitGeometryProvider(Protocol):
+    """Fábricas que declaran su propia geometría de salida (C2, Change #109, `design.md` §1.4).
+
+    El genoma gobierna la geometría de salida por candidato, no un JSON global: una
+    `CandidateFactory` que implementa este puerto expone `exit_geometry` con
+    `source=GENOME`, y `run_wfa` la prioriza sobre el `exit_geometry` de config
+    (§D8 del diseño). Solo `GenomeCandidateFactory` lo implementa hoy.
+    """
+
+    @property
+    def exit_geometry(self) -> ExitGeometry: ...
 
 
 @runtime_checkable

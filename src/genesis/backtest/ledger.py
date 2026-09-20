@@ -72,15 +72,42 @@ class FillRecord:
     equity_after: float
 
 
+class ExhaustionPolicy(StrEnum):
+    """Qué hace el `Simulator` cuando la cuenta queda agotada por un breach TOTAL (D1).
+
+    `HALT_ENTRIES` (default): sin entradas nuevas tras el agotamiento — R30 tal como
+    hoy, para quien simula una cuenta real. `RECORD_AND_CONTINUE`: la corrida sigue
+    produciendo muestra tras el agotamiento (capa 4, para que el WFA no trunque la
+    muestra OOS); el primer breach TOTAL sigue siendo el único evento TOTAL emitido
+    (PROP-5, §D1 punto 3) y `account_exhausted` se sigue marcando en `True` — solo
+    cambia quién obedece esa marca.
+
+    Vive en `ledger.py` (no en `simulator.py`, pese a lo que sugiere `design.md` §D1)
+    porque `RunProvenance` la necesita como campo y `simulator.py` ya importa de
+    `ledger.py`: el patrón es el mismo que `BreachKind`, que tampoco vive en
+    `simulator.py`. `simulator.py` la reexpone importándola de acá.
+    """
+
+    HALT_ENTRIES = "halt_entries"
+    RECORD_AND_CONTINUE = "record_and_continue"
+
+
 @dataclass(frozen=True, slots=True)
 class RunProvenance:
-    """Ficha de reproducibilidad compartida por todas las entradas de un run (R45, ADR-G9)."""
+    """Ficha de reproducibilidad compartida por todas las entradas de un run (R45, ADR-G9).
+
+    Change #109: `risk_profile_hash` se sustituye por `exit_geometry_hash` +
+    `house_rule_hash` (D2, D9) y se agrega `exhaustion_policy`, para que ningún
+    artefacto quede ambiguo sobre qué modo lo produjo.
+    """
 
     candidate_id: str
     config_version: str
     dataset_hash: str
     firm_profile_hash: str
-    risk_profile_hash: str
+    exit_geometry_hash: str
+    house_rule_hash: str
+    exhaustion_policy: ExhaustionPolicy
 
 
 @dataclass(frozen=True, slots=True)

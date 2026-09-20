@@ -1,13 +1,14 @@
 """Golden de cierre forzado de sesión + guard defensivo (R23, R24, R53, R28)."""
 
+import dataclasses
 from datetime import datetime, timedelta
 
 import pytest
 
 from genesis.backtest.costs import CostsConfig
 from genesis.backtest.errors import SessionBoundaryError
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.ledger import BreachEvent, BreachKind, FillRecord
-from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
 from genesis.backtest.simulator import OpenPosition, Simulator
 from genesis.data.profile import FirmProfile
 from genesis.data.sessions import session_window
@@ -26,17 +27,17 @@ _TRADING_DAY_FRIDAY = datetime(2024, 1, 5).date()
 
 def _build_simulator(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
     *,
-    risk_profile: RiskProfile | None = None,
+    firm_profile: FirmProfile | None = None,
 ) -> Simulator:
     return Simulator(
         FakeRiskCandidate(),
         symbol="US500",
-        firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile if risk_profile is not None else risk_profile_fixture,
+        firm_profile=firm_profile if firm_profile is not None else firm_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=symbol_figure_fixture,
         funnel_config=_FUNNEL_CONFIG,
         costs_config=costs_config_fixture,
@@ -69,13 +70,13 @@ def _open_position(
 
 def test_cierre_forzado_proactivo_al_cierre_de_sesion(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     """R23/R53: posición viva al cierre de sesión se cierra proactivamente al precio de la vela."""
     simulator = _build_simulator(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     _open_utc, close_utc = session_window("US500", _TRADING_DAY_MONDAY)
     position = _open_position(
@@ -109,13 +110,13 @@ def test_cierre_forzado_proactivo_al_cierre_de_sesion(
 
 def test_guard_lanza_session_boundary_error_si_posicion_viva_pese_al_cierre(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     """R24: si el cierre proactivo ya se intentó y aun así queda una posición viva → aborta."""
     simulator = _build_simulator(
-        firm_profile_fixture, risk_profile_fixture, symbol_figure_fixture, costs_config_fixture
+        firm_profile_fixture, exit_geometry_fixture, symbol_figure_fixture, costs_config_fixture
     )
     _open_utc, close_utc = session_window("US500", _TRADING_DAY_MONDAY)
     bar_at_close = make_annotated_bar(
@@ -147,21 +148,24 @@ def test_guard_lanza_session_boundary_error_si_posicion_viva_pese_al_cierre(
 
 def test_breach_weekend_al_cerrar_sesion_del_viernes_sin_holding_permitido(
     firm_profile_fixture: FirmProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
     """R28: posición viva al cierre del viernes con `weekend_holding_allowed=False`."""
-    risk_profile_no_weekend = RiskProfile(
-        max_loss_limit_pct=10.0,
-        max_loss_limit_kind=MaxLossLimitKind.STATIC,
-        weekend_holding_allowed=False,
+    assert firm_profile_fixture.house_rule is not None
+    firm_profile_no_weekend = dataclasses.replace(
+        firm_profile_fixture,
+        house_rule=dataclasses.replace(
+            firm_profile_fixture.house_rule, weekend_holding_allowed=False
+        ),
     )
     simulator = _build_simulator(
         firm_profile_fixture,
-        risk_profile_no_weekend,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         costs_config_fixture,
-        risk_profile=risk_profile_no_weekend,
+        firm_profile=firm_profile_no_weekend,
     )
     _open_utc, close_utc = session_window("US500", _TRADING_DAY_FRIDAY)
     position = _open_position(

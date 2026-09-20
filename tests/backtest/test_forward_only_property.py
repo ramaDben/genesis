@@ -25,8 +25,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from genesis.backtest.costs import load_costs_config
-from genesis.backtest.ledger import LedgerEntry
-from genesis.backtest.risk_profile import load_risk_profile
+from genesis.backtest.exit_geometry import load_exit_geometry
+from genesis.backtest.ledger import ExhaustionPolicy, LedgerEntry
 from genesis.backtest.simulator import Simulator
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
@@ -56,12 +56,14 @@ def _bars(closes: list[float], *, start_index: int = 0) -> list[AnnotatedBar]:
     ]
 
 
-def _build_simulator() -> Simulator:
+def _build_simulator(
+    exhaustion_policy: ExhaustionPolicy = ExhaustionPolicy.HALT_ENTRIES,
+) -> Simulator:
     return Simulator(
         FakeRiskCandidate(entry_threshold=101.0, stop_loss=80.0, take_profit=130.0),
         symbol="US500",
         firm_profile=load_firm_profile(),
-        risk_profile=load_risk_profile(),
+        exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure("US500"),
         funnel_config=_FUNNEL_CONFIG,
         costs_config=load_costs_config(),
@@ -69,17 +71,20 @@ def _build_simulator() -> Simulator:
         tick_store=None,
         starting_balance=100_000.0,
         dataset_hash="test-dataset-hash",
+        exhaustion_policy=exhaustion_policy,
     )
 
 
 def _build_simulator_with_tick_store(
-    tick_store: RawParquetStore, firm_profile: FirmProfile
+    tick_store: RawParquetStore,
+    firm_profile: FirmProfile,
+    exhaustion_policy: ExhaustionPolicy = ExhaustionPolicy.HALT_ENTRIES,
 ) -> Simulator:
     return Simulator(
         FakeRiskCandidate(entry_threshold=101.0, stop_loss=80.0, take_profit=130.0),
         symbol="US500",
         firm_profile=firm_profile,
-        risk_profile=load_risk_profile(),
+        exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure("US500"),
         funnel_config=_FUNNEL_CONFIG,
         costs_config=load_costs_config(),
@@ -87,6 +92,7 @@ def _build_simulator_with_tick_store(
         tick_store=tick_store,
         starting_balance=100_000.0,
         dataset_hash="test-dataset-hash",
+        exhaustion_policy=exhaustion_policy,
     )
 
 
@@ -112,10 +118,12 @@ def _populate_athens_tick_store(store: RawParquetStore, bars: list[AnnotatedBar]
 
 
 def _simulate_prefix_then_capture(
-    prefix_closes: list[float], suffix_closes: list[float]
+    prefix_closes: list[float],
+    suffix_closes: list[float],
+    exhaustion_policy: ExhaustionPolicy = ExhaustionPolicy.HALT_ENTRIES,
 ) -> tuple[list[LedgerEntry], float]:
     """Procesa el prefijo, captura el estado, y SOLO DESPUÉS alimenta la cola futura."""
-    simulator = _build_simulator()
+    simulator = _build_simulator(exhaustion_policy)
     for bar in _bars(prefix_closes):
         simulator._process_bar(bar)
 
@@ -129,7 +137,9 @@ def _simulate_prefix_then_capture(
 
 
 def _simulate_prefix_then_capture_with_athens_ticks(
-    prefix_closes: list[float], suffix_closes: list[float]
+    prefix_closes: list[float],
+    suffix_closes: list[float],
+    exhaustion_policy: ExhaustionPolicy = ExhaustionPolicy.HALT_ENTRIES,
 ) -> tuple[list[LedgerEntry], float]:
     """Análogo a `_simulate_prefix_then_capture`, con `tick_store` poblado (R82).
 
@@ -147,7 +157,7 @@ def _simulate_prefix_then_capture_with_athens_ticks(
     with tempfile.TemporaryDirectory() as tmp_dir:
         tick_store = RawParquetStore(Path(tmp_dir))
         _populate_athens_tick_store(tick_store, prefix_bars + suffix_bars)
-        simulator = _build_simulator_with_tick_store(tick_store, profile)
+        simulator = _build_simulator_with_tick_store(tick_store, profile, exhaustion_policy)
 
         for bar in prefix_bars:
             simulator._process_bar(bar)
@@ -174,6 +184,7 @@ _future_closes_strategy = st.lists(
 
 
 @pytest.mark.timeout(180)
+@pytest.mark.parametrize("exhaustion_policy", list(ExhaustionPolicy))
 @given(
     prefix_closes=_closes_strategy,
     suffix_closes_a=_future_closes_strategy,
@@ -181,18 +192,28 @@ _future_closes_strategy = st.lists(
 )
 @settings(max_examples=1000, deadline=None)
 def test_ledger_hasta_t_no_cambia_si_se_mutan_barras_futuras(
+    exhaustion_policy: ExhaustionPolicy,
     prefix_closes: list[float],
     suffix_closes_a: list[float],
     suffix_closes_b: list[float],
 ) -> None:
-    """R52: el ledger/balance hasta `t` es idéntico sin importar qué barras futuras se agreguen."""
-    entries_a, balance_a = _simulate_prefix_then_capture(prefix_closes, suffix_closes_a)
-    entries_b, balance_b = _simulate_prefix_then_capture(prefix_closes, suffix_closes_b)
+    """R52: el ledger/balance hasta `t` es idéntico sin importar qué barras futuras se agreguen.
+
+    PROP-4 (Change #109): la propiedad forward-only sobrevive bajo las dos
+    `ExhaustionPolicy` — `RECORD_AND_CONTINUE` no reintroduce dependencia del futuro.
+    """
+    entries_a, balance_a = _simulate_prefix_then_capture(
+        prefix_closes, suffix_closes_a, exhaustion_policy
+    )
+    entries_b, balance_b = _simulate_prefix_then_capture(
+        prefix_closes, suffix_closes_b, exhaustion_policy
+    )
     assert entries_a == entries_b
     assert balance_a == pytest.approx(balance_b)
 
 
 @pytest.mark.timeout(180)
+@pytest.mark.parametrize("exhaustion_policy", list(ExhaustionPolicy))
 @given(
     prefix_closes=_closes_strategy,
     suffix_closes_a=_future_closes_strategy,
@@ -200,6 +221,7 @@ def test_ledger_hasta_t_no_cambia_si_se_mutan_barras_futuras(
 )
 @settings(max_examples=1000, deadline=None)
 def test_ledger_hasta_t_no_cambia_con_tick_store_poblado_server_tz_no_utc(
+    exhaustion_policy: ExhaustionPolicy,
     prefix_closes: list[float],
     suffix_closes_a: list[float],
     suffix_closes_b: list[float],
@@ -208,13 +230,14 @@ def test_ledger_hasta_t_no_cambia_con_tick_store_poblado_server_tz_no_utc(
     capturado inmediatamente tras un prefijo arbitrario de `AnnotatedBar` procesado
     hasta `t` es idéntico entre dos ejecuciones, aunque después se alimenten dos colas
     futuras `suffix_closes_a`/`suffix_closes_b` distintas — barras Y ticks (derivados
-    de `bar.close`) con `timestamp_utc > t` — al `Simulator`.
+    de `bar.close`) con `timestamp_utc > t` — al `Simulator`. PROP-4: bajo las dos
+    `ExhaustionPolicy`.
     """
     entries_a, balance_a = _simulate_prefix_then_capture_with_athens_ticks(
-        prefix_closes, suffix_closes_a
+        prefix_closes, suffix_closes_a, exhaustion_policy
     )
     entries_b, balance_b = _simulate_prefix_then_capture_with_athens_ticks(
-        prefix_closes, suffix_closes_b
+        prefix_closes, suffix_closes_b, exhaustion_policy
     )
     assert entries_a == entries_b
     assert balance_a == pytest.approx(balance_b)

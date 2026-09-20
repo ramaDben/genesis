@@ -16,8 +16,13 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from genesis.backtest.costs import load_costs_config
-from genesis.backtest.ledger import Decision, FillRecord, reconstruct_equity_series
-from genesis.backtest.risk_profile import load_risk_profile
+from genesis.backtest.exit_geometry import load_exit_geometry
+from genesis.backtest.ledger import (
+    Decision,
+    ExhaustionPolicy,
+    FillRecord,
+    reconstruct_equity_series,
+)
 from genesis.backtest.simulator import Simulator
 from genesis.data.profile import load_firm_profile
 from genesis.data.store import AnnotatedBar
@@ -45,12 +50,14 @@ def _bars(closes: list[float]) -> list[AnnotatedBar]:
     ]
 
 
-def _build_simulator() -> Simulator:
+def _build_simulator(
+    exhaustion_policy: ExhaustionPolicy = ExhaustionPolicy.HALT_ENTRIES,
+) -> Simulator:
     return Simulator(
         FakeRiskCandidate(entry_threshold=101.0, stop_loss=80.0, take_profit=130.0),
         symbol="US500",
         firm_profile=load_firm_profile(),
-        risk_profile=load_risk_profile(),
+        exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure("US500"),
         funnel_config=_FUNNEL_CONFIG,
         costs_config=load_costs_config(),
@@ -58,6 +65,7 @@ def _build_simulator() -> Simulator:
         tick_store=None,
         starting_balance=100_000.0,
         dataset_hash="test-dataset-hash",
+        exhaustion_policy=exhaustion_policy,
     )
 
 
@@ -83,13 +91,18 @@ _closes_strategy = st.lists(
 )
 
 
+@pytest.mark.parametrize("exhaustion_policy", list(ExhaustionPolicy))
 @given(closes=_closes_strategy)
 @settings(max_examples=1000, deadline=None)
 def test_reconstruct_equity_series_iguala_la_serie_registrada_en_vivo(
+    exhaustion_policy: ExhaustionPolicy,
     closes: list[float],
 ) -> None:
-    """R47: la reconstrucción pura del ledger reproduce exactamente la serie en vivo."""
-    simulator = _build_simulator()
+    """R47: la reconstrucción pura del ledger reproduce exactamente la serie en vivo.
+
+    PROP-4 (Change #109): también bajo `RECORD_AND_CONTINUE`.
+    """
+    simulator = _build_simulator(exhaustion_policy)
     live_series = _install_live_recorder(simulator)
 
     for bar in _bars(closes):

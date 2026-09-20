@@ -40,6 +40,9 @@ _EXPECTED_ALL = {
     "run_purged_cv",
     "run_sensitivity",
     # Issue J (R118): prop_sim.py + verdict.py (gates G/C/P/T1/T2, veredicto, tearsheet/manifest).
+    # Change #109 (D7): declaración tipada del sesgo del proxy cierre-a-cierre.
+    "BiasDirection",
+    "BreachEvaluationBasis",
     "CandidateGateSummary",
     "CandidateValidationBundle",
     "EnsembleResult",
@@ -151,6 +154,8 @@ def test_detalles_internos_de_issue_i_no_se_reexportan() -> None:
 def test_importa_la_superficie_publica_de_issue_j_sin_error() -> None:
     """R117/R118: superficie normativa de prop_sim.py/verdict.py importa sin error."""
     from genesis.validation import (  # noqa: F401
+        BiasDirection,
+        BreachEvaluationBasis,
         CandidateGateSummary,
         CandidateValidationBundle,
         EnsembleResult,

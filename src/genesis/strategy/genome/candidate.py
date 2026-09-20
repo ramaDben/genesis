@@ -72,9 +72,7 @@ class CompiledGenomeCandidate:
         self._atr_period = int(risk_params.get("atr_period", 14))
 
         # TP multiple
-        self._has_explicit_tp = (
-            "tp_rr_multiple" in self._params or "tp_rr_multiple" in risk_params
-        )
+        self._has_explicit_tp = "tp_rr_multiple" in self._params or "tp_rr_multiple" in risk_params
         self._tp_rr_multiple = float(
             self._params.get("tp_rr_multiple", risk_params.get("tp_rr_multiple", 3.0))
         )
@@ -156,9 +154,7 @@ class CompiledGenomeCandidate:
             self._range_high = (
                 bar.high if self._range_high is None else max(self._range_high, bar.high)
             )
-            self._range_low = (
-                bar.low if self._range_low is None else min(self._range_low, bar.low)
-            )
+            self._range_low = bar.low if self._range_low is None else min(self._range_low, bar.low)
             bar_vol = float(getattr(bar, "tick_volume", getattr(bar, "volume", 0.0)))
             self._open_window_volume += bar_vol
             self._last_open_window_close = bar.close

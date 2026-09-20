@@ -1,8 +1,8 @@
 {
+  "config_version": "genesis-data-firm-profile/2",
   "name": "The5ers",
   "daily_reset_time": "00:00:00",
   "daily_reset_tz": "America/New_York",
-  "daily_loss_limit_pct": 5.0,
   "server_tz": "America/New_York",
   "news_bracket_before_minutes": 15,
   "news_bracket_after_minutes": 15,
@@ -11,5 +11,17 @@
     "NAS100": { "expected": "US100", "aliases": ["NAS100", "USTEC"] },
     "US30": { "expected": "US30", "aliases": ["DJ30", "DJIA"] },
     "GER40": { "expected": "GER40", "aliases": ["DE40", "DAX40"] }
+  },
+  "house_rule": {
+    "_migracion_2026-09-14": "amount = pct historico x --starting-balance por defecto (100000.0); ver design.md D3. daily_loss_limit.amount congela una referencia que en el contrato original se movia dia a dia: perdida de informacion declarada y aceptada (design.md D3, salvedad honesta).",
+    "max_loss_limit": { "amount": 10000.0, "kind": "static" },
+    "threshold_lock_at": null,
+    "daily_loss_limit": { "amount": 5000.0, "semantics": "breach" },
+    "consistency_rule": null,
+    "weekend_holding_allowed": true,
+    "payout_buffer": 0.0,
+    "min_net_profit_between_payouts": 0.0,
+    "funded_starting_balance": 0.0,
+    "account_size": 100000.0
   }
 }

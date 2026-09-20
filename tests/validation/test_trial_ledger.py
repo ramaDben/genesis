@@ -67,8 +67,8 @@ def test_trial_record_coherente_completado_construye_y_es_inmutable() -> None:
 def test_compute_trial_id_invariante_al_orden_de_insercion() -> None:
     cfg_a = {"alpha": 1, "beta": 2}
     cfg_b = {"beta": 2, "alpha": 1}
-    id_a = compute_trial_id(cfg_a, {"US500": "h"}, "firm-h", "risk-h")
-    id_b = compute_trial_id(cfg_b, {"US500": "h"}, "firm-h", "risk-h")
+    id_a = compute_trial_id(cfg_a, {"US500": "h"}, "firm-h", "geometry-h", "house-h")
+    id_b = compute_trial_id(cfg_b, {"US500": "h"}, "firm-h", "geometry-h", "house-h")
     assert id_a == id_b
 
 
@@ -86,17 +86,18 @@ def test_compute_trial_id_sensibilidad_total_a_candidate_config(
     mutated[mutated_key] = mutated_value
     if mutated == base:
         return
-    original_id = compute_trial_id(base, {"US500": "h"}, "firm-h", "risk-h")
-    mutated_id = compute_trial_id(mutated, {"US500": "h"}, "firm-h", "risk-h")
+    original_id = compute_trial_id(base, {"US500": "h"}, "firm-h", "geometry-h", "house-h")
+    mutated_id = compute_trial_id(mutated, {"US500": "h"}, "firm-h", "geometry-h", "house-h")
     assert original_id != mutated_id
 
 
-def test_compute_trial_id_sensibilidad_a_los_tres_hashes() -> None:
+def test_compute_trial_id_sensibilidad_a_los_cuatro_hashes() -> None:
     cfg = {"alpha": 1}
-    base_id = compute_trial_id(cfg, {"US500": "h1"}, "firm-h", "risk-h")
-    assert base_id != compute_trial_id(cfg, {"US500": "h2"}, "firm-h", "risk-h")
-    assert base_id != compute_trial_id(cfg, {"US500": "h1"}, "firm-h2", "risk-h")
-    assert base_id != compute_trial_id(cfg, {"US500": "h1"}, "firm-h", "risk-h2")
+    base_id = compute_trial_id(cfg, {"US500": "h1"}, "firm-h", "geometry-h", "house-h")
+    assert base_id != compute_trial_id(cfg, {"US500": "h2"}, "firm-h", "geometry-h", "house-h")
+    assert base_id != compute_trial_id(cfg, {"US500": "h1"}, "firm-h2", "geometry-h", "house-h")
+    assert base_id != compute_trial_id(cfg, {"US500": "h1"}, "firm-h", "geometry-h2", "house-h")
+    assert base_id != compute_trial_id(cfg, {"US500": "h1"}, "firm-h", "geometry-h", "house-h2")
 
 
 def test_compute_trial_id_valor_no_serializable_lanza_trial_ledger_config_error() -> None:
@@ -104,7 +105,9 @@ def test_compute_trial_id_valor_no_serializable_lanza_trial_ledger_config_error(
         pass
 
     with pytest.raises(TrialLedgerConfigError) as exc_info:
-        compute_trial_id({"cb": _NoSerializable()}, {"US500": "h"}, "firm-h", "risk-h")
+        compute_trial_id(
+            {"cb": _NoSerializable()}, {"US500": "h"}, "firm-h", "geometry-h", "house-h"
+        )
     assert "cb" in str(exc_info.value)
 
 
@@ -171,7 +174,8 @@ def test_read_trial_summary_trial_id_duplicado_no_lanza(tmp_path: Path) -> None:
         "config_version": record.config_version,
         "dataset_hash_by_symbol": dict(record.dataset_hash_by_symbol),
         "firm_profile_hash": record.firm_profile_hash,
-        "risk_profile_hash": record.risk_profile_hash,
+        "exit_geometry_hash": record.exit_geometry_hash,
+        "house_rule_hash": record.house_rule_hash,
         "git_commit": record.git_commit,
         "recorded_at_utc": record.recorded_at_utc,
     }
@@ -252,7 +256,8 @@ def test_append_trial_round_trip(tmp_path: Path) -> None:
         config_version=raw["config_version"],
         dataset_hash_by_symbol=raw["dataset_hash_by_symbol"],
         firm_profile_hash=raw["firm_profile_hash"],
-        risk_profile_hash=raw["risk_profile_hash"],
+        exit_geometry_hash=raw["exit_geometry_hash"],
+        house_rule_hash=raw["house_rule_hash"],
         git_commit=raw["git_commit"],
         recorded_at_utc=raw["recorded_at_utc"],
     )
@@ -280,7 +285,8 @@ def test_trial_ledger_trial_id_for_config_delega_en_compute_trial_id(tmp_path: P
         cfg,
         identity.dataset_hash_by_symbol,
         identity.firm_profile_hash,
-        identity.risk_profile_hash,
+        identity.exit_geometry_hash,
+        identity.house_rule_hash,
     )
     assert ledger.trial_id_for_config(cfg) == expected
 

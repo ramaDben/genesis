@@ -15,15 +15,16 @@ from dataclasses import dataclass
 import pandas as pd
 
 from genesis.backtest.costs import CostsConfig
+from genesis.backtest.errors import BacktestConfigError
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.ledger import Ledger
 from genesis.backtest.metrics import profit_factor
-from genesis.backtest.risk_profile import RiskProfile
 from genesis.backtest.simulator import Simulator
 from genesis.data.calendar import EconomicEvent
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
-from genesis.strategy.factories import CandidateFactory, default_factory_for
+from genesis.strategy.factories import CandidateFactory, ExitGeometryProvider, default_factory_for
 from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation._windowing import slice_frame_by_day_range
 from genesis.validation.errors import SensitivityConfigError
@@ -137,13 +138,31 @@ def _replace_axis(
     return (n_minutes, atr_stop_frac, float(value))
 
 
+def _resolve_exit_geometry(
+    candidate_factory: CandidateFactory,
+    exit_geometry: ExitGeometry | None,
+    *,
+    candidate_id: str,
+) -> ExitGeometry:
+    """Precedencia del genoma sobre la config (§1.4 del diseño), reimplementación local."""
+    if isinstance(candidate_factory, ExitGeometryProvider):
+        return candidate_factory.exit_geometry
+    if exit_geometry is not None:
+        return exit_geometry
+    message = (
+        f"Sin ExitGeometry para candidate_id={candidate_id!r}: la CandidateFactory no "
+        "implementa ExitGeometryProvider y no se pasó un exit_geometry explícito (§1.4)."
+    )
+    raise BacktestConfigError(message)
+
+
 def _run_combo(
     combo: tuple[int, float, float],
     *,
     frame: pd.DataFrame,
     symbol: str,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry,
     figure: SymbolFigure,
     funnel_config: InspectorFunnelConfig,
     costs_config: CostsConfig,
@@ -174,7 +193,7 @@ def _run_combo(
         candidate,
         symbol=symbol,
         firm_profile=firm_profile,
-        risk_profile=risk_profile,
+        exit_geometry=exit_geometry,
         figure=figure,
         funnel_config=funnel_config,
         costs_config=costs_config,
@@ -192,7 +211,7 @@ def run_sensitivity(
     frame: pd.DataFrame,
     symbol: str,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry | None,
     figure: SymbolFigure,
     funnel_config: InspectorFunnelConfig,
     costs_config: CostsConfig,
@@ -221,6 +240,9 @@ def run_sensitivity(
         if candidate_factory is not None
         else default_factory_for(wfa_result.candidate_id)
     )
+    resolved_exit_geometry = _resolve_exit_geometry(
+        resolved_candidate_factory, exit_geometry, candidate_id=wfa_result.candidate_id
+    )
 
     if not wfa_result.windows:
         message = (
@@ -242,7 +264,7 @@ def run_sensitivity(
             frame=frame_oos,
             symbol=symbol,
             firm_profile=firm_profile,
-            risk_profile=risk_profile,
+            exit_geometry=resolved_exit_geometry,
             figure=figure,
             funnel_config=funnel_config,
             costs_config=costs_config,

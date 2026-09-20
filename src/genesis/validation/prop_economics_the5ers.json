@@ -19,5 +19,5 @@
   "payout_cycle_days": 14,
   "max_lots": null,
   "max_positions": null,
-  "consistency_rule_pct": null
+  "is_placeholder": true
 }

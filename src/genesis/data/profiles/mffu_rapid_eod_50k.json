@@ -1,0 +1,28 @@
+{
+  "config_version": "genesis-data-firm-profile/2",
+  "name": "MFFU Rapid EOD 50K",
+  "_fuente": "SSoT SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md §1.3.0, mem:mffu-rapid-eod-50k-reglas-confirmadas, fecha de lectura 2026-09-11",
+  "_contract_budget_no_ejecutable": "3 mini / 30 micro; comentario de procedencia (design.md §4). No se carga en ningun campo ejecutable: el SSoT prohibe simular contra el hasta #96 (Alcance OUT).",
+  "daily_reset_time": "00:00:00",
+  "daily_reset_tz": "America/New_York",
+  "server_tz": "America/New_York",
+  "news_bracket_before_minutes": 2,
+  "news_bracket_after_minutes": 2,
+  "symbols": {
+    "US500": { "expected": "US500", "aliases": ["SP500", "SPX500"] },
+    "NAS100": { "expected": "US100", "aliases": ["NAS100", "USTEC"] },
+    "US30": { "expected": "US30", "aliases": ["DJ30", "DJIA"] },
+    "GER40": { "expected": "GER40", "aliases": ["DE40", "DAX40"] }
+  },
+  "house_rule": {
+    "max_loss_limit": { "amount": 2000.0, "kind": "trailing_eod" },
+    "threshold_lock_at": 52100.0,
+    "daily_loss_limit": null,
+    "consistency_rule": { "pct": 30.0, "semantics": "terminate" },
+    "weekend_holding_allowed": false,
+    "payout_buffer": 2100.0,
+    "min_net_profit_between_payouts": 500.0,
+    "funded_starting_balance": 0.0,
+    "account_size": 50000.0
+  }
+}

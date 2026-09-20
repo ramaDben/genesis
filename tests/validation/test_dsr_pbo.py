@@ -10,8 +10,8 @@ from hypothesis import strategies as st
 
 import genesis.validation.dsr_pbo as dsr_pbo_module
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.ledger import Ledger, RunProvenance
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
+from genesis.backtest.ledger import ExhaustionPolicy, Ledger, RunProvenance
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -36,7 +36,9 @@ _PROVENANCE = RunProvenance(
     config_version="genesis-backtest/1",
     dataset_hash="test-dataset-hash",
     firm_profile_hash="test-firm-profile-hash",
-    risk_profile_hash="test-risk-profile-hash",
+    exit_geometry_hash="test-exit-geometry-hash",
+    house_rule_hash="test-house-rule-hash",
+    exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
 )
 
 
@@ -235,7 +237,7 @@ def test_build_signal_trial_matrix_sin_paralelismo() -> None:
 @pytest.mark.unit
 def test_build_signal_trial_matrix_few_windows_raises(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -251,7 +253,7 @@ def test_build_signal_trial_matrix_few_windows_raises(
             "US500",
             short_wfa_frame,
             firm_profile_fixture,
-            risk_profile_fixture,
+            exit_geometry_fixture,
             symbol_figure_fixture,
             funnel_config_fixture,
             costs_config_fixture,
@@ -275,7 +277,7 @@ def test_run_dsr_pbo_few_windows_raises(trial_matrix_fixture: SignalTrialMatrix)
 def test_trial_matrix_min_trades(
     monkeypatch: pytest.MonkeyPatch,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -297,7 +299,7 @@ def test_trial_matrix_min_trades(
         "US500",
         i_frame,
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,
@@ -322,7 +324,7 @@ def test_trial_matrix_min_trades(
 def test_trial_matrix_todas_inf_lanza_dsr_pbo_config_error(
     monkeypatch: pytest.MonkeyPatch,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -344,7 +346,7 @@ def test_trial_matrix_todas_inf_lanza_dsr_pbo_config_error(
             "US500",
             i_frame,
             firm_profile_fixture,
-            risk_profile_fixture,
+            exit_geometry_fixture,
             symbol_figure_fixture,
             funnel_config_fixture,
             costs_config_fixture,
@@ -360,7 +362,7 @@ def test_trial_matrix_todas_inf_lanza_dsr_pbo_config_error(
 @pytest.mark.integration
 def test_build_signal_trial_matrix_real_pequeno(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -375,7 +377,7 @@ def test_build_signal_trial_matrix_real_pequeno(
         "US500",
         i_frame,
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,

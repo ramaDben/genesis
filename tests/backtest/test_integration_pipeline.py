@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.metrics import (
     max_concurrent_exposure,
     max_drawdown,
@@ -20,7 +21,6 @@ from genesis.backtest.metrics import (
     win_rate,
     worst_daily_floating_excursion,
 )
-from genesis.backtest.risk_profile import RiskProfile
 from genesis.backtest.simulator import Simulator
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -35,7 +35,7 @@ _FUNNEL_CONFIG = InspectorFunnelConfig(min_rr=0.1, min_lot=0.01, max_lot=10.0)
 def test_pipeline_completo_produce_ledger_no_vacio_y_metricas_finitas(
     sample_m1_frame: pd.DataFrame,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     costs_config_fixture: CostsConfig,
 ) -> None:
@@ -45,7 +45,7 @@ def test_pipeline_completo_produce_ledger_no_vacio_y_metricas_finitas(
         candidate,
         symbol="US500",
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        exit_geometry=exit_geometry_fixture,
         figure=symbol_figure_fixture,
         funnel_config=_FUNNEL_CONFIG,
         costs_config=costs_config_fixture,
@@ -65,10 +65,14 @@ def test_pipeline_completo_produce_ledger_no_vacio_y_metricas_finitas(
         max_drawdown(ledger),
         win_rate(ledger),
         worst_daily_floating_excursion(ledger),
-        min_distance_to_daily_limit(ledger, firm_profile_fixture),
     ]
     for value in finite_metrics:
         assert math.isfinite(value), f"métrica no finita: {value!r}"
+
+    # DT-2 (B3b): `min_distance_to_daily_limit` puede ser `None` sin DLL en la ficha;
+    # sale de `finite_metrics` porque `math.isfinite(None)` levantaría `TypeError`.
+    daily_limit_distance = min_distance_to_daily_limit(ledger, firm_profile_fixture)
+    assert daily_limit_distance is None or math.isfinite(daily_limit_distance)
 
     assert isinstance(max_concurrent_exposure(ledger), int)
     for rate in rejection_rate_by_reason(ledger).values():

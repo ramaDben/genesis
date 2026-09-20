@@ -3002,3 +3002,338 @@ ENTONCES 0 coincidencias (sin dependencias nuevas; el módulo usa solo stdlib + 
   afecte a `ledger/trials.jsonl`)
 - `.pulse/specs/validation/spec.md:815,1977-2008` (Issue I decisión 1 §3, R19/R23/Rg-1;
   R91-R95bis, `VerdictKind`, `no_go_iteration_used`)
+
+<!-- change:109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa -->
+# Specification: El modelo de la firma no es MFFU — separar restricción de la casa de geometría de estrategia
+
+Change #109 (Issue #109). Dominio `validation` (toca además `backtest` y `data`). Fase `specify`.
+Formaliza `proposal.md` (fase `propose`, cerrado); no reabre ninguna de sus cinco decisiones.
+Contra: `fe5e683` (HEAD de `docs/spec-v1-5-futuros-cme` al iniciar esta fase).
+
+## 0. Objetivo
+
+Hacer que `p_pass` (`validation/prop_sim.py`) y los gates G6/G7/G1 midan la cuenta real —
+MyFundedFutures Rapid EOD 50K— en vez de una cuenta más fácil (the5ers CFD, estática, 2,5× más
+colchón), sin sesgar la muestra que los alimenta y sin que el simulador siga sustituyendo en
+silencio los parámetros de geometría de salida que un genoma declara. `p_pass` es el juicio que
+decide si un candidato sirve para operar (`idea.md`); hoy protege contra un contrato que no existe,
+y el arquitecto (#57) no puede encenderse sobre un juicio que no protege.
+
+## 1. Alcance IN / OUT
+
+### IN
+
+1. Partición de `RiskProfile` en restricción de la casa (migra a la ficha de firma) y geometría de
+   salida (queda en un contenedor propio, gobernado por el genoma).
+2. Ficha de firma extendida (§1.1 del SSoT) con `max_loss_limit` en monto absoluto y tipo
+   `static | trailing_intraday | trailing_eod`, `threshold_lock_at`, `daily_loss_limit` opcional,
+   `consistency_rule` con semántica de terminación, `payout_buffer`,
+   `min_net_profit_between_payouts`, `funded_starting_balance`.
+3. Ficha MFFU Rapid EOD 50K activa con los valores confirmados en SSoT §1.3.0 /
+   `mem:mffu-rapid-eod-50k-reglas-confirmadas`. `the5ers.json`/`ftmo.json` quedan como fichas
+   históricas, sin editar (patrón `--firm`/`--profile` se conserva).
+4. Una sola fuente del contrato del `max_loss_limit`: tipo, monto, ancla y `threshold_lock_at` se
+   leen de la ficha en capa 3 y en capa 4; cada evaluador declara su aproximación y el sesgo que
+   introduce (capa 3 exacta sobre equity flotante; capa 4 con el proxy cierre-a-cierre de ADR-J4,
+   sesgo declarado como optimista sobre `p_pass`).
+5. Resolución del truncamiento de la muestra OOS: el ledger que capa 4 remuestrea para `p_pass` no
+   se corta por agotamiento de cuenta (R30); el agotamiento se registra como `BreachEvent` y el
+   corte de intentos pasa a ser competencia de `prop_sim`.
+6. Precedencia del genoma sobre `risk_exit.params`: todo parámetro de geometría de salida
+   (`atr_multiplier`, `lookback_bars`, y los ya vinculantes `atr_stop_frac`, `atr_period`,
+   `tp_rr_multiple`) se toma del genoma cuando está declarado, corre exactamente como se declaró
+   (sin recorte, sin techo, sin piso) y la huella de procedencia registra el valor que corrió.
+   Ninguna clave de `risk_exit.params` se ignora en silencio: gobierna, o se rechaza por
+   desconocida con su nombre en el mensaje de error.
+7. `risk_profile_hash()` deja de mezclar restricción de la casa con geometría de salida:
+   dos huellas separadas.
+8. `consistency_rule` (hoy `consistency_rule_pct`) se lee en alguna rama de decisión con semántica
+   de terminación (obliga a operar más días hasta bajar el ratio, no descalifica), o se declara
+   explícitamente no aplicable con el motivo escrito en el artefacto.
+9. Migración de `risk_profile.json`, `prop_economics_*.json` y perfiles de firma al esquema nuevo,
+   con `config_version` explícito.
+
+### OUT (YAGNI, declarado en `proposal.md` §4)
+
+- Techo de contratos compartido entre instrumentos en tiempo real (`contract_budget`), bloqueado
+  por el SSoT hasta el árbitro de exposición (#96).
+- Números de política de #96 (tope de concurrencia, riesgo unitario por clima).
+- Re-derivación de `risk_pct` (PA-106-5, issue propio).
+- El arquitecto (#57) y el ledger de ensayos (#53).
+- El resto del genoma: `universe` y la grilla de búsqueda.
+- Exportador CME y empalme de continuos (capa 1, change separado).
+- Refactor general de gestión de riesgo de capa 3 más allá de la fuente única del `max_loss_limit`
+  y de resolver el truncamiento de la muestra.
+- Cualquier cota (techo o piso) sobre un parámetro de estrategia declarado por el genoma. Decisión
+  humana resuelta el 2026-09-14 (`mem:genoma-gobierna-parametros-la-prop-gobierna-la-cuenta`):
+  genesis es un evaluador de caja negra y no valida rangos de parámetros, solo estados imposibles
+  (`trailing_atr_mult > 0`, `trailing_lookback ≥ 1`).
+- Medir cuánto `p_pass` regala el proxy de ADR-J4 frente a una evaluación intradía: es medición,
+  issue propio (`proposal.md` §6).
+- Simulación multi-activo concurrente contra `contract_budget`: bloqueada por el SSoT hasta #96.
+
+## 2. Requisitos funcionales
+
+**R1 — Ficha de firma extendida.** `FirmProfile` (o su sucesor) gana `max_loss_limit` (monto
+absoluto, `kind: static | trailing_intraday | trailing_eod`), `threshold_lock_at`,
+`daily_loss_limit` opcional (monto absoluto, semántica `breach | pause`), `consistency_rule`
+(pct + semántica `fail | terminate`), `payout_buffer`, `min_net_profit_between_payouts`,
+`funded_starting_balance`. Verificado: hoy `max_loss_limit_pct`/`max_loss_limit_kind` viven en
+`RiskProfile` (`src/genesis/backtest/risk_profile.py:40-44`), no en `FirmProfile`
+(`src/genesis/data/profile.py:33-46`), y `daily_loss_limit_pct` es campo obligatorio de
+`FirmProfile` (`profile.py:44`). SSoT: §1.1 (`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md:204-232`).
+
+**R2 — Ficha MFFU activa.** Existe una ficha de firma con: objetivo $3.000, `max_loss_limit`
+$2.000/`trailing_eod`, `threshold_lock_at` $52.100 (balance inicial + $100), sin
+`daily_loss_limit`, `contract_budget` 3 mini/30 micro (declarado, no simulado — ver Alcance OUT),
+`consistency_rule` 30%/terminación, `min_profitable_days` 4, `payout_buffer` $2.100,
+`min_net_profit_between_payouts` $500, `funded_starting_balance` $0 con saldo negativo permitido.
+Fuente: SSoT §1.3.0 (`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md:280-355`),
+`mem:mffu-rapid-eod-50k-reglas-confirmadas`. Las fichas the5ers/FTMO quedan sin editar
+(SSoT §1.3.1/§1.3.2).
+
+**R3 — Partición del contenedor.** `RiskProfile` se divide en dos artefactos: uno con
+`max_loss_limit*`, `threshold_lock_at`, `weekend_holding_allowed` (restricción de la casa, migra a
+la ficha de firma o a un contenedor propio que la ficha alimenta) y otro con `trailing_lookback`,
+`trailing_atr_mult` (geometría de salida, contenedor propio gobernado por el genoma). Verificado:
+mezcla actual en `risk_profile.py:32-44`; `risk_profile_hash()` (`risk_profile.py:88-101`) hashea
+ambas clases juntas.
+
+**R4 — Huella separada.** Existen dos funciones hash (o una función parametrizada que produce dos
+huellas independientes): una para restricción de la casa (`firm_profile_hash` extendido o
+equivalente) y otra para geometría de salida. Cambiar `max_loss_limit` no altera la huella de
+geometría y viceversa.
+
+**R5 — Una sola fuente del `max_loss_limit`.** `simulator.py::_evaluate_total_breach`
+(`src/genesis/backtest/simulator.py:490-516`) y `prop_sim.py::_simulate_single_path`
+(`src/genesis/validation/prop_sim.py:376-436`) leen tipo, monto, ancla y `threshold_lock_at` de la
+ficha; ninguno de los dos codifica su propio umbral o su propio `kind` embebido. Capa 3 evalúa
+contra equity flotante intradía (exacto, doble tiempo de `trailing_eod` según SSoT §1.1); capa 4
+mantiene el proxy cierre-a-cierre de ADR-J4 (`prop_sim.py:387-390`) y su artefacto declara que ese
+proxy **subestima** la probabilidad de breach (sesga `p_pass` al alza).
+
+**R6 — La muestra no se trunca por agotamiento de cuenta.** El ledger OOS que
+`prop_sim.py::_build_daily_basket` (`prop_sim.py:245-261`) consume para construir la canasta de
+`p_pass` contiene los trades posteriores a un `BreachEvent(kind=TOTAL, account_exhausted=True)`.
+El corte de R30 (`simulator.py:374`, `not self.account.account_exhausted`) dentro del propio
+simulador deja de aplicar a la muestra de validación; `BreachEvent` (`backtest/ledger.py:36-48`,
+ya existe) sigue registrándose. La forma concreta (modo de generación sin corte, o dos artefactos
+separados) es decisión de `design`; este requisito fija el resultado observable, no el mecanismo.
+
+**R7 — Precedencia del genoma sobre `risk_exit`.** `CompiledGenomeCandidate` toma
+`lookback_bars`/`atr_multiplier` (y cualquier clave futura de `risk_exit.params`) del genoma con la
+misma precedencia que ya aplica a `atr_stop_frac`/`atr_period`/`tp_rr_multiple`
+(`src/genesis/strategy/genome/candidate.py:63-79`). El simulador dejar de tomar
+`trailing_lookback`/`trailing_atr_mult` del JSON global cuando el genoma los declara
+(`simulator.py:391,399`; `scripts/run_pipeline.py:225,244,272` carga el perfil antes de compilar
+el genoma — la instanciación pasa a ocurrir después, o el perfil se reconstruye con los valores del
+genoma antes de invocar `run_wfa`).
+
+**R8 — Rechazo de claves desconocidas.** Toda clave de `risk_exit.params` que no gobierna ningún
+comportamiento levanta un error de validación con su nombre, en vez de descartarse en silencio.
+Caso ya existente en el árbol: `candidates/specs/candidate_c1_gold_lob.yaml:35` declara
+`atr_multiplier: 2.5`.
+
+**R9 — Sin cotas sobre parámetros de estrategia.** Ningún valor declarado por un genoma
+(`atr_multiplier`, `lookback_bars`, `atr_period`, `atr_stop_frac`, `tp_rr_multiple`, `risk_pct`,
+o cualquier parámetro de estrategia futuro) se recorta, redondea a un rango "razonable" o rechaza
+por estar fuera de un umbral de negocio. Sobreviven únicamente las guardas de estado imposible ya
+existentes (`trailing_atr_mult > 0.0`, `trailing_lookback >= 1`, `risk_profile.py:47-53`, migradas
+al nuevo contenedor de geometría). Excepción explícita: `_rounded_to_volume_step` (discretización
+física del instrumento sobre una cantidad *calculada*, no sobre un parámetro declarado) no se
+toca — ver Invariante 3b/advertencia de `proposal.md` §2 Decisión 5.
+
+**R10 — `consistency_rule` con semántica de terminación.** `PropEconomicsProfile.consistency_rule_pct`
+(`prop_sim.py:80`, cargado en `:164-174`, serializado en `:206`, hoy nunca leído en ninguna rama de
+decisión) se lee en `_simulate_single_path` o equivalente: exceder el % del profit total atribuible
+a un solo día obliga a operar más días en vez de descalificar la fase. Si modelarlo completo excede
+este change, se declara semántica parcial con issue de continuación explícito en el artefacto —
+lo que no sobrevive es el campo muerto (cargado, serializado, nunca leído).
+
+**R11 — Migración de esquema.** `risk_profile.json`, los perfiles de firma y
+`prop_economics_*.json` versionan `config_version` de forma que una corrida vieja y una nueva no
+colapsen bajo el mismo contador de procedencia (Invariante 5 de `proposal.md`, mismo criterio que
+fijó #106).
+
+## 3. Modelo de datos (arquitectura)
+
+```
+FirmProfile (capa 1, data/profile.py)          HouseRule (capa 3, nuevo o RiskProfile reducido)
+├── name                                        ├── max_loss_limit: float (monto absoluto)
+├── daily_reset_time / tz                       ├── max_loss_limit_kind: static|trailing_intraday|
+├── daily_loss_limit: float | None (NUEVO,      │                        trailing_eod
+│   monto absoluto, semántica breach|pause)     ├── threshold_lock_at: float
+├── max_loss_limit: float (monto absoluto,      ├── daily_loss_limit: float | None
+│   NUEVO — o vive en HouseRule, ver Riesgo R1) ├── weekend_holding_allowed: bool
+├── max_loss_limit_kind (NUEVO)                 └── house_rule_hash() -> str
+├── threshold_lock_at (NUEVO)
+├── consistency_rule: (pct, semántica) (NUEVO)
+├── payout_buffer / min_net_profit_between_
+│   payouts / funded_starting_balance (NUEVO)
+├── server_tz, symbols, news_bracket_*
+└── firm_profile_hash()
+
+ExitGeometry (capa 3, nuevo — antes RiskProfile) StrategyGenome.risk_exit.params (capa 2, ya existe)
+├── trailing_lookback: int                      ├── lee con precedencia sobre ExitGeometry
+├── trailing_atr_mult: float                    └── procedencia = valor del genoma cuando declarado
+└── exit_geometry_hash()
+```
+
+`RiskProfile` tal como existe hoy (`risk_profile.py:32-44`) se descompone en `HouseRule` +
+`ExitGeometry` (o nombres equivalentes que `design` fije); `risk_profile_hash()` se reemplaza por
+dos funciones de huella independientes. Dónde exactamente vive `max_loss_limit` — dentro de
+`FirmProfile` extendido o en un `HouseRule` separado que la ficha de firma alimenta — es una
+decisión de `design`, no de esta spec: el requisito observable (R1, R3, R4) es que la restricción
+de la casa tenga una sola fuente de verdad y una huella propia, no que ocupe una clase concreta.
+
+`BreachEvent` (`backtest/ledger.py:36-48`) no cambia de forma; su rol se extiende: bajo R6, un
+`BreachEvent(kind=TOTAL, account_exhausted=True)` deja de ser el punto donde el ledger de
+validación se corta. El artefacto de `prop_sim` (R5) gana un campo o sección que declare
+explícitamente el proxy usado y su dirección de sesgo — la forma concreta (campo estructurado vs.
+nota en metadata) es decisión de `design`.
+
+## 4. Criterios de aceptación (evals ejecutables)
+
+Formato BDD. Todos deben poder correr bajo `mise run test` o verificarse por lectura de artefacto
+(`rg`) sin ambigüedad.
+
+**AC1 — Ficha MFFU carga con los valores del SSoT.**
+DADO el recurso empaquetado de la ficha MFFU Rapid EOD 50K
+CUANDO se carga con la función de carga de fichas de firma
+ENTONCES `max_loss_limit == 2000.0`, `max_loss_limit_kind == "trailing_eod"`,
+`threshold_lock_at == 52100.0`, `daily_loss_limit is None`,
+`consistency_rule.pct == 30.0` con semántica de terminación, `payout_buffer == 2100.0`,
+`min_net_profit_between_payouts == 500.0`.
+Test: `tests/data/test_profile.py::test_load_mffu_rapid_eod_50k` (nuevo).
+
+**AC2 — Ficha sin `daily_loss_limit` es válida.**
+DADO un JSON de ficha de firma sin la clave `daily_loss_limit`
+CUANDO se carga
+ENTONCES no lanza `GenesisDataError`/`BacktestConfigError` y el campo resuelve a `None`.
+
+**AC3 — Los tres tipos de `max_loss_limit_kind` producen veredictos distintos (golden).**
+DADO el mismo ledger OOS sintético con una secuencia de equity que cruza $2.000 de pérdida bajo
+`trailing_intraday` pero no bajo `trailing_eod` (o viceversa, según el fixture)
+CUANDO se evalúa el breach total con `kind=static`, `kind=trailing_intraday` y `kind=trailing_eod`
+respectivamente, ficha idéntica salvo el `kind`
+ENTONCES los tres veredictos de breach (ocurre / no ocurre / día en que ocurre) difieren entre sí
+para al menos un caso del fixture.
+Test: `tests/backtest/test_risk_profile.py::test_max_loss_limit_kind_produces_distinct_verdicts`
+(nuevo, golden).
+
+**AC4 — La muestra no se trunca por agotamiento de cuenta.**
+DADO un ledger OOS generado con un umbral de `max_loss_limit` que la corrida cruza a mitad de la
+ventana (p. ej. $500 sobre una serie que ya se usa en `tests/backtest/test_simulator_breaches.py`)
+CUANDO se construye la canasta diaria que alimenta `p_pass`
+(`prop_sim.py::_build_daily_basket` o su equivalente)
+ENTONCES el ledger contiene trades con `timestamp_utc` posteriores al `BreachEvent(kind=TOTAL)`, y
+el conteo total de trades OOS **no** depende del valor del umbral (correr el mismo fixture con
+$5.000 y con $2.000 de `max_loss_limit` da el mismo conteo de trades, aunque el número de
+`BreachEvent` registrados difiera).
+Test: `tests/validation/test_prop_sim.py::test_sample_not_truncated_by_account_exhaustion` (nuevo).
+
+**AC5 — El sesgo del proxy está declarado en el artefacto.**
+DADO un artefacto de resultado de `run_prop_sim`
+CUANDO se lee sin abrir código fuente
+ENTONCES contiene un campo o sección legible que dice que el `max_loss_limit` se evaluó con el
+proxy cierre-a-cierre de ADR-J4 y que ese proxy **subestima** la probabilidad de breach.
+Verificable con: `rg -i "cierre-a-cierre|proxy.*breach|subestima" <artefacto>` da match.
+
+**AC6 — Un `atr_multiplier` declarado en el genoma corre tal cual.**
+DADO un genoma con `risk_exit.params.atr_multiplier: 2.5` (`candidates/specs/candidate_c1_gold_lob.yaml`
+es el caso real ya existente)
+CUANDO se compila y se corre sobre un fixture de barras determinista
+ENTONCES el `RollingExtreme`/Chandelier del simulador usa `atr_mult=2.5` (no el `3.0` del JSON
+global), y la huella de procedencia (`risk_profile_hash`/`exit_geometry_hash`) registra `2.5`.
+Test: `tests/strategy/genome/test_candidate.py::test_atr_multiplier_precedence_over_global_json`
+(nuevo).
+
+**AC7 — Ninguna clave de `risk_exit.params` se descarta en silencio.**
+DADO un genoma con una clave desconocida en `risk_exit.params` (p. ej. `foo_bar: 1.0`)
+CUANDO se compila
+ENTONCES levanta `GenomeValidationError` (o equivalente) citando `foo_bar` por nombre en el mensaje.
+Y DADO `lookback_bars`/`atr_multiplier` (hoy descartadas silenciosamente, `candidate.py:63-79`)
+ENTONCES gobiernan el comportamiento exactamente igual que `atr_stop_frac`/`atr_period`.
+Test: `tests/strategy/genome/test_schema.py::test_unknown_risk_exit_param_rejected` (nuevo).
+
+**AC8 — Valores extremos no se recortan.**
+DADO un genoma con `atr_multiplier: 50.0` (válido, sin techo)
+CUANDO se corre
+ENTONCES el simulador usa `50.0` exactamente y la procedencia lo registra; el test falla si alguna
+implementación lo recorta a un rango "razonable".
+Test: `tests/strategy/genome/test_candidate.py::test_extreme_atr_multiplier_not_clamped` (nuevo).
+
+**AC9 — Huellas separadas.**
+DADO dos fichas que difieren solo en `max_loss_limit` (monto)
+CUANDO se calculan ambas huellas
+ENTONCES la huella de geometría de salida es idéntica y la huella de restricción de la casa
+difiere. Y viceversa para una diferencia en `trailing_atr_mult`.
+Test: `tests/backtest/test_risk_profile.py::test_house_rule_and_exit_geometry_hash_independence`
+(nuevo).
+
+**AC10 — `consistency_rule` se lee o se declara no aplicable con motivo.**
+DADO una trayectoria simulada que excede el 30% de concentración en un solo día bajo MFFU
+CUANDO se evalúa la fase de challenge
+ENTONCES el resultado refleja la condición de terminación (exige más días, no descalifica) — o,
+si el alcance quedó parcial, el artefacto de resultado declara explícitamente
+"consistency_rule no aplicada: <motivo>" en vez de omitir el campo en silencio.
+Test: `tests/validation/test_prop_sim.py::test_consistency_rule_terminates_not_fails` (nuevo).
+
+**AC11 — `mise run ci` verde.**
+DADO el árbol tras `apply`
+CUANDO se corre `mise run ci`
+ENTONCES lint (ruff+bandit+vulture+deptry) + `ty check` + `pytest` pasan sin fallos nuevos no
+declarados en Riesgos (la ruptura esperada de `tests/validation/test_integration_pipeline_j.py` y
+asociados se migra, no se omite).
+
+## 5. Riesgos (heredados de `proposal.md` §5, sin reabrir)
+
+- **R1.** La suite de tests de perfiles/integración se rompe por el cambio de contrato; es
+  consecuencia necesaria, no una regresión a evitar.
+- **R2.** `risk_profile_hash`/`firm_profile_hash` mutan; corridas con umbral estático de $5.000 no
+  son comparables con las de contrato real y no deben colapsarse en el mismo contador del
+  `TrialLedger` (#53).
+- **R3.** El `TrialLedger` pierde comparabilidad hacia atrás; requiere declarar el corte, no
+  mezclar ensayos bajo invariantes distintos.
+- **R4.** Los veredictos empeoran por el umbral 2,5× menor y el trailing donde había estático — es
+  el objetivo del change, se declara para que `review` no lo lea como regresión.
+- **R5.** Migración de esquema JSON de `risk_profile.json` y perfiles de firma requiere
+  `config_version` explícito o migración.
+- **R6 (nuevo, de esta fase).** R6/R7 tocan `simulator.py` (capa 3, caliente, con ADR-G2 declarado)
+  y `scripts/run_pipeline.py` en el punto de orden de instanciación
+  (`risk_profile` antes de `compile_genome`, líneas 225/244/272); un error de secuencia ahí
+  rompería la inyección de `reference_balance` fijo que hoy protege el sizing
+  (`wfa.py:244`, `dsr_pbo.py:239`, `sensitivity.py:166`) — verificar en `apply` que el orden nuevo
+  no reintroduce una dependencia del balance corriente en el sizing.
+
+## 6. Preguntas abiertas para `design`
+
+Ninguna pregunta de política queda abierta: las cuatro del `idea.md` están resueltas (tres por el
+SSoT, una — geometría de salida gobernada por el genoma, sin cotas — por decisión humana del
+2026-09-14, `proposal.md` Decisiones 4-5). Lo que sigue abierto es **mecanismo**, explícitamente
+diferido a `design` por `proposal.md`:
+
+1. **Forma concreta de R6 (no-truncamiento).** `proposal.md` deja dos salidas plausibles sin
+   elegir: (a) un modo de generación de muestra en `simulator.py` que no corta procesamiento al
+   cruzar `account_exhausted` pero preserva R30 para otros consumidores; o (b) dos artefactos
+   separados — ledger de comportamiento (completo) y eventos de cuenta (con el corte) — que
+   `prop_sim` combine. Ambas tienen consecuencias distintas sobre la procedencia y el
+   `trial_id`; `design` debe elegir y justificar contra R30.
+2. **Dónde vive exactamente `max_loss_limit`** tras la partición: ¿campo de `FirmProfile`
+   extendido, o `HouseRule` separado que `FirmProfile` referencia? El modelo de datos (§3) deja
+   ambas formas compatibles con los requisitos; `design` fija la clase concreta.
+3. **Forma de declarar el sesgo del proxy (AC5)**: campo estructurado en el artefacto de
+   `prop_sim` vs. nota en la metadata existente. `design` elige el mecanismo mínimo que satisface
+   AC5 sin inventar un nuevo esquema de artefacto si uno ya sirve.
+
+## 7. Nota de verificación
+
+Ninguna contradicción real se encontró entre `proposal.md` y el código en esta fase: los `file:line`
+citados en el proposal se verificaron contra `fe5e683` y coinciden (`risk_profile.py:40-44,88-101`,
+`simulator.py:374,490-516`, `prop_sim.py:80,164-174,206,245-261,376-436`, `candidate.py:63-79,284`,
+`candidate_b/candidate.py:307`, `data/profile.py:33-46`, `run_pipeline.py:225-244`,
+`candidates/specs/candidate_c1_gold_lob.yaml:35`). Única imprecisión menor, no de fondo: el
+proposal cita "§2.3" del SSoT para el criterio de admisión al universo intrínseco al activo; el
+criterio vive bajo "§2.x. Universos por candidato" → "Criterio de admisión al universo (normativo)"
+(`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md:566-578`), no dentro de la subsección 2.3
+del Candidato B. El contenido citado es correcto; solo el número de sección es aproximado.

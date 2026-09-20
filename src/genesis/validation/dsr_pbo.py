@@ -18,14 +18,15 @@ from dataclasses import dataclass
 import pandas as pd
 
 from genesis.backtest.costs import CostsConfig
+from genesis.backtest.errors import BacktestConfigError
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.ledger import Ledger
-from genesis.backtest.risk_profile import RiskProfile
 from genesis.backtest.simulator import Simulator
 from genesis.data.calendar import EconomicEvent
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
-from genesis.strategy.factories import CandidateFactory, default_factory_for
+from genesis.strategy.factories import CandidateFactory, ExitGeometryProvider, default_factory_for
 from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation._dsr import deflated_sharpe_ratio
 from genesis.validation._returns import extract_trade_returns
@@ -211,13 +212,31 @@ def combinatorial_symmetric_cross_validation(
     )
 
 
+def _resolve_exit_geometry(
+    candidate_factory: CandidateFactory,
+    exit_geometry: ExitGeometry | None,
+    *,
+    candidate_id: str,
+) -> ExitGeometry:
+    """Precedencia del genoma sobre la config (§1.4 del diseño), reimplementación local (R25)."""
+    if isinstance(candidate_factory, ExitGeometryProvider):
+        return candidate_factory.exit_geometry
+    if exit_geometry is not None:
+        return exit_geometry
+    message = (
+        f"Sin ExitGeometry para candidate_id={candidate_id!r}: la CandidateFactory no "
+        "implementa ExitGeometryProvider y no se pasó un exit_geometry explícito (§1.4)."
+    )
+    raise BacktestConfigError(message)
+
+
 def _run_combo(
     combo: tuple[int, float, float],
     *,
     frame: pd.DataFrame,
     symbol: str,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry,
     figure: SymbolFigure,
     funnel_config: InspectorFunnelConfig,
     costs_config: CostsConfig,
@@ -247,7 +266,7 @@ def _run_combo(
         candidate,
         symbol=symbol,
         firm_profile=firm_profile,
-        risk_profile=risk_profile,
+        exit_geometry=exit_geometry,
         figure=figure,
         funnel_config=funnel_config,
         costs_config=costs_config,
@@ -264,7 +283,7 @@ def build_signal_trial_matrix(
     symbol: str,
     frame: pd.DataFrame,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry | None,
     figure: SymbolFigure,
     funnel_config: InspectorFunnelConfig,
     costs_config: CostsConfig,
@@ -296,6 +315,9 @@ def build_signal_trial_matrix(
     resolved_candidate_factory = (
         candidate_factory if candidate_factory is not None else default_factory_for(candidate_id)
     )
+    resolved_exit_geometry = _resolve_exit_geometry(
+        resolved_candidate_factory, exit_geometry, candidate_id=candidate_id
+    )
 
     days, row_span = plan_trading_days(frame, symbol, firm_profile)
     bounds = list(iter_is_oos_bounds(len(days), resolved_window_config))
@@ -321,7 +343,7 @@ def build_signal_trial_matrix(
                     frame=frame_is,
                     symbol=symbol,
                     firm_profile=firm_profile,
-                    risk_profile=risk_profile,
+                    exit_geometry=resolved_exit_geometry,
                     figure=figure,
                     funnel_config=funnel_config,
                     costs_config=costs_config,

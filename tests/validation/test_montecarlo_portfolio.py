@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import numpy as np
 import pytest
 
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.data.house_rule import HouseRule
 from genesis.validation.errors import MonteCarloConfigError
 from genesis.validation.montecarlo import (
     _build_basket,
@@ -35,14 +35,14 @@ def _correlated_daily_deltas(
 
 
 def test_monte_carlo_portfolio_produce_block_bootstrap_finito(
-    risk_profile_fixture: RiskProfile,
+    house_rule_fixture: HouseRule,
 ) -> None:
     deltas_a, deltas_b = _correlated_daily_deltas(seed=1)
     ledger_a = build_ledger_with_daily_trades(deltas_a, symbol="US500")
     ledger_b = build_ledger_with_daily_trades(deltas_b, symbol="NAS100")
 
     result = monte_carlo_portfolio(
-        {"US500": ledger_a, "NAS100": ledger_b}, risk_profile_fixture, n_paths=200, seed=42
+        {"US500": ledger_a, "NAS100": ledger_b}, house_rule_fixture, n_paths=200, seed=42
     )
 
     assert len(result.block_bootstrap.max_drawdown_per_path) == 200
@@ -50,14 +50,14 @@ def test_monte_carlo_portfolio_produce_block_bootstrap_finito(
     assert result.block_bootstrap.block_size == 5  # default (R44)
 
 
-def test_monte_carlo_portfolio_block_size_explicito(risk_profile_fixture: RiskProfile) -> None:
+def test_monte_carlo_portfolio_block_size_explicito(house_rule_fixture: HouseRule) -> None:
     deltas_a, deltas_b = _correlated_daily_deltas(seed=2)
     ledger_a = build_ledger_with_daily_trades(deltas_a, symbol="US500")
     ledger_b = build_ledger_with_daily_trades(deltas_b, symbol="NAS100")
 
     result = monte_carlo_portfolio(
         {"US500": ledger_a, "NAS100": ledger_b},
-        risk_profile_fixture,
+        house_rule_fixture,
         n_paths=50,
         seed=1,
         block_size=10,
@@ -65,14 +65,14 @@ def test_monte_carlo_portfolio_block_size_explicito(risk_profile_fixture: RiskPr
     assert result.block_bootstrap.block_size == 10
 
 
-def test_monte_carlo_portfolio_determinismo(risk_profile_fixture: RiskProfile) -> None:
+def test_monte_carlo_portfolio_determinismo(house_rule_fixture: HouseRule) -> None:
     deltas_a, deltas_b = _correlated_daily_deltas(seed=3)
     ledger_a = build_ledger_with_daily_trades(deltas_a, symbol="US500")
     ledger_b = build_ledger_with_daily_trades(deltas_b, symbol="NAS100")
     ledgers = {"US500": ledger_a, "NAS100": ledger_b}
 
-    result1 = monte_carlo_portfolio(ledgers, risk_profile_fixture, n_paths=100, seed=9)
-    result2 = monte_carlo_portfolio(ledgers, risk_profile_fixture, n_paths=100, seed=9)
+    result1 = monte_carlo_portfolio(ledgers, house_rule_fixture, n_paths=100, seed=9)
+    result2 = monte_carlo_portfolio(ledgers, house_rule_fixture, n_paths=100, seed=9)
 
     assert np.array_equal(
         result1.block_bootstrap.max_drawdown_per_path,
@@ -84,21 +84,21 @@ def test_monte_carlo_portfolio_determinismo(risk_profile_fixture: RiskProfile) -
 
 
 def test_monte_carlo_portfolio_todos_los_ledgers_vacios_lanza(
-    risk_profile_fixture: RiskProfile,
+    house_rule_fixture: HouseRule,
 ) -> None:
     ledgers = {"US500": build_empty_ledger(), "NAS100": build_empty_ledger()}
     with pytest.raises(MonteCarloConfigError):
-        monte_carlo_portfolio(ledgers, risk_profile_fixture, n_paths=10, seed=1)
+        monte_carlo_portfolio(ledgers, house_rule_fixture, n_paths=10, seed=1)
 
 
-def test_monte_carlo_portfolio_n_paths_no_positivo_lanza(risk_profile_fixture: RiskProfile) -> None:
+def test_monte_carlo_portfolio_n_paths_no_positivo_lanza(house_rule_fixture: HouseRule) -> None:
     deltas_a, deltas_b = _correlated_daily_deltas(seed=4)
     ledgers = {
         "US500": build_ledger_with_daily_trades(deltas_a, symbol="US500"),
         "NAS100": build_ledger_with_daily_trades(deltas_b, symbol="NAS100"),
     }
     with pytest.raises(MonteCarloConfigError):
-        monte_carlo_portfolio(ledgers, risk_profile_fixture, n_paths=0, seed=1)
+        monte_carlo_portfolio(ledgers, house_rule_fixture, n_paths=0, seed=1)
 
 
 def test_correlation_preserved_golden() -> None:

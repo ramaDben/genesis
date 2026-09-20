@@ -9,6 +9,7 @@ from genesis.backtest.ledger import (
     CONFIG_VERSION,
     BreachEvent,
     BreachKind,
+    ExhaustionPolicy,
     FillRecord,
     Ledger,
     LedgerEntry,
@@ -26,8 +27,21 @@ _PROVENANCE = RunProvenance(
     config_version=CONFIG_VERSION,
     dataset_hash="dataset-hash",
     firm_profile_hash="firm-hash",
-    risk_profile_hash="risk-hash",
+    exit_geometry_hash="geometry-hash",
+    house_rule_hash="house-rule-hash",
+    exhaustion_policy=ExhaustionPolicy.HALT_ENTRIES,
 )
+
+
+def test_run_provenance_separa_exit_geometry_y_house_rule_hash() -> None:
+    """Eval PROP-2 (B2): mutar un hash deja el otro intacto en `RunProvenance`."""
+    otro_geometry = dataclasses.replace(_PROVENANCE, exit_geometry_hash="otra-geometria")
+    assert otro_geometry.house_rule_hash == _PROVENANCE.house_rule_hash
+    assert otro_geometry.exit_geometry_hash != _PROVENANCE.exit_geometry_hash
+
+    otra_casa = dataclasses.replace(_PROVENANCE, house_rule_hash="otra-casa")
+    assert otra_casa.exit_geometry_hash == _PROVENANCE.exit_geometry_hash
+    assert otra_casa.house_rule_hash != _PROVENANCE.house_rule_hash
 
 
 def test_config_version_es_el_normativo() -> None:

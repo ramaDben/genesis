@@ -13,7 +13,22 @@ import yaml
 from genesis.strategy.genome.errors import (
     GenomeValidationError,
     MissingAcademicProvenanceError,
+    UnknownRiskExitParamError,
 )
+
+_RISK_EXIT_PARAM_ALLOWLIST: Mapping[str, frozenset[str]] = {
+    "chandelier_trailing": frozenset(
+        {"lookback_bars", "atr_multiplier", "atr_stop_frac", "atr_period", "tp_rr_multiple"}
+    ),
+}
+"""Allowlist de `risk_exit.params` por `kind` (D5 diseño, R8). Solo `chandelier_trailing`
+tiene allowlist declarada hoy: otros `kind` pasan sin restricción hasta que tengan la
+suya propia — no es una laxitud, es que ningún otro `kind` está implementado aún."""
+
+_CHANDELIER_REQUIRED_PARAMS: tuple[str, ...] = ("lookback_bars", "atr_multiplier")
+"""`chandelier_trailing` exige estas dos claves sin default silencioso (§1.4 del diseño):
+el genoma es quien gobierna la geometría de salida, y un default acá reintroduciría el
+mismo defecto de "parámetro muerto" que R8 ataca."""
 
 
 class GenomeFidelity(StrEnum):
@@ -189,6 +204,23 @@ def parse_genome(source: Path | str | Mapping[str, Any]) -> StrategyGenome:
     risk_params = risk_exit_dict.get("params", {})
     if not isinstance(risk_params, Mapping):
         raise GenomeValidationError("Field 'params' must be a mapping in risk_exit section")
+
+    normalized_kind = str(risk_kind).strip()
+    allowed_params = _RISK_EXIT_PARAM_ALLOWLIST.get(normalized_kind)
+    if allowed_params is not None:
+        for param_key in risk_params:
+            if param_key not in allowed_params:
+                raise UnknownRiskExitParamError(
+                    f"Clave desconocida {param_key!r} en risk_exit.params para "
+                    f"kind={normalized_kind!r}; admitidas: {sorted(allowed_params)}."
+                )
+    if normalized_kind == "chandelier_trailing":
+        for required_key in _CHANDELIER_REQUIRED_PARAMS:
+            if required_key not in risk_params:
+                raise GenomeValidationError(
+                    f"risk_exit.params.{required_key} es obligatorio para "
+                    "kind='chandelier_trailing' (sin default silencioso, R9)."
+                )
 
     risk_exit = GenomeRiskExit(
         kind=str(risk_kind).strip(),

@@ -9,6 +9,7 @@ from genesis.backtest.ledger import (
     CONFIG_VERSION,
     BreachEvent,
     BreachKind,
+    ExhaustionPolicy,
     FillRecord,
     Ledger,
     LedgerEntry,
@@ -38,7 +39,9 @@ _PROVENANCE = RunProvenance(
     config_version=CONFIG_VERSION,
     dataset_hash="dataset-hash",
     firm_profile_hash="firm-hash",
-    risk_profile_hash="risk-hash",
+    exit_geometry_hash="geometry-hash",
+    house_rule_hash="house-rule-hash",
+    exhaustion_policy=ExhaustionPolicy.HALT_ENTRIES,
 )
 
 
@@ -162,12 +165,29 @@ def test_min_distance_to_daily_limit_calculado_a_mano() -> None:
     assert min_distance_to_daily_limit(ledger, firm_profile) == pytest.approx(-1_000.0)
 
 
-def test_min_distance_to_daily_limit_sin_breaches_usa_limite_de_la_firma() -> None:
+def test_min_distance_to_daily_limit_sin_breaches_usa_el_monto_del_dll_de_la_ficha() -> None:
+    """`house_rule.daily_loss_limit.amount` reemplaza al `daily_loss_limit_pct` eliminado."""
     firm_profile = load_firm_profile()
+    assert firm_profile.house_rule is not None
+    assert firm_profile.house_rule.daily_loss_limit is not None
     ledger = Ledger(provenance=_PROVENANCE, entries=[])
     assert min_distance_to_daily_limit(ledger, firm_profile) == pytest.approx(
-        firm_profile.daily_loss_limit_pct
+        firm_profile.house_rule.daily_loss_limit.amount
     )
+
+
+def test_min_distance_to_daily_limit_sin_dll_en_el_contrato_retorna_none() -> None:
+    """Eval DT-2 (B3b): sin `daily_loss_limit` en la ficha, `None` — sin inventar un número."""
+    import dataclasses
+
+    firm_profile = load_firm_profile()
+    assert firm_profile.house_rule is not None
+    firm_profile_sin_dll = dataclasses.replace(
+        firm_profile,
+        house_rule=dataclasses.replace(firm_profile.house_rule, daily_loss_limit=None),
+    )
+    ledger = Ledger(provenance=_PROVENANCE, entries=[])
+    assert min_distance_to_daily_limit(ledger, firm_profile_sin_dll) is None
 
 
 def test_max_concurrent_exposure_calculado_a_mano() -> None:

@@ -27,17 +27,19 @@ import pandas as pd
 
 import genesis.backtest.ledger as backtest_ledger
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.ledger import FillRecord, Ledger, LedgerEntry, RunProvenance
+from genesis.backtest.errors import BacktestConfigError
+from genesis.backtest.exit_geometry import ExitGeometry, exit_geometry_hash
+from genesis.backtest.ledger import ExhaustionPolicy, FillRecord, Ledger, LedgerEntry, RunProvenance
 from genesis.backtest.metrics import sharpe_pointwise
-from genesis.backtest.risk_profile import RiskProfile, risk_profile_hash
 from genesis.backtest.simulator import Simulator
 from genesis.backtest.ticks import TickCache
 from genesis.data.calendar import EconomicEvent
+from genesis.data.house_rule import house_rule_hash
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash
 from genesis.data.store import iter_bars
 from genesis.data.symbols import SymbolFigure
-from genesis.strategy.factories import CandidateFactory, default_factory_for
+from genesis.strategy.factories import CandidateFactory, ExitGeometryProvider, default_factory_for
 from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation import window_config as window_config_module
 from genesis.validation._dsr import deflated_sharpe_ratio
@@ -213,13 +215,38 @@ def _plan_and_validate_windows(
     return days, row_span
 
 
+def _resolve_exit_geometry(
+    candidate_factory: CandidateFactory,
+    exit_geometry: ExitGeometry | None,
+    *,
+    candidate_id: str,
+) -> ExitGeometry:
+    """Precedencia del genoma sobre la config (§1.4, §D8 del diseño), resuelta una sola vez.
+
+    `candidate_factory` implementa `ExitGeometryProvider` -> su `exit_geometry`
+    (`source=GENOME`) gana; si no, el `exit_geometry` explícito (`source=CONFIG`);
+    si no hay ninguno de los dos, `BacktestConfigError` con el `candidate_id`. Se
+    resuelve una única vez por corrida y antes de instanciar el `Simulator`
+    (RD-3): todas las posiciones de la corrida usan la misma instancia.
+    """
+    if isinstance(candidate_factory, ExitGeometryProvider):
+        return candidate_factory.exit_geometry
+    if exit_geometry is not None:
+        return exit_geometry
+    message = (
+        f"Sin ExitGeometry para candidate_id={candidate_id!r}: la CandidateFactory no "
+        "implementa ExitGeometryProvider y no se pasó un exit_geometry explícito (§1.4)."
+    )
+    raise BacktestConfigError(message)
+
+
 def _run_execution_combo(
     combo: tuple[int, float, float],
     *,
     frame: pd.DataFrame,
     symbol: str,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry,
     figure: SymbolFigure,
     funnel_config: InspectorFunnelConfig,
     costs_config: CostsConfig,
@@ -237,6 +264,10 @@ def _run_execution_combo(
 
     El `tick_cache` es del orquestador de la ventana, no de esta llamada: los combos
     comparten los mismos días y así no se relee el store por cada uno (Change #46, R30).
+
+    `exhaustion_policy=RECORD_AND_CONTINUE` (D1 del diseño): la validación no debe
+    truncar la muestra OOS en el primer breach TOTAL — es el único punto donde capa 4
+    construye un `Simulator`.
     """
     n_minutes, atr_stop_frac, risk_pct = combo
     candidate = candidate_factory(
@@ -252,7 +283,7 @@ def _run_execution_combo(
         candidate,
         symbol=symbol,
         firm_profile=firm_profile,
-        risk_profile=risk_profile,
+        exit_geometry=exit_geometry,
         figure=figure,
         funnel_config=funnel_config,
         costs_config=costs_config,
@@ -261,6 +292,7 @@ def _run_execution_combo(
         starting_balance=starting_balance,
         dataset_hash=dataset_hash,
         tick_cache=tick_cache,
+        exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
     )
     return simulator.run(frame)
 
@@ -316,7 +348,7 @@ def _run_single_window(
     dataset_hash_is: str,
     dataset_hash_oos: str,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry,
     figure: SymbolFigure,
     funnel_config: InspectorFunnelConfig,
     costs_config: CostsConfig,
@@ -339,7 +371,7 @@ def _run_single_window(
             frame=frame_is,
             symbol=symbol,
             firm_profile=firm_profile,
-            risk_profile=risk_profile,
+            exit_geometry=exit_geometry,
             figure=figure,
             funnel_config=funnel_config,
             costs_config=costs_config,
@@ -365,7 +397,7 @@ def _run_single_window(
         frame=frame_oos,
         symbol=symbol,
         firm_profile=firm_profile,
-        risk_profile=risk_profile,
+        exit_geometry=exit_geometry,
         figure=figure,
         funnel_config=funnel_config,
         costs_config=costs_config,
@@ -404,19 +436,28 @@ def _stitch_oos_ledgers(
     candidate_id: str,
     symbol: str,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry,
     dataset_hash: str,
 ) -> Ledger:
     """Cose los `Ledger` OOS de todas las ventanas, en orden, bajo una única `RunProvenance` (R30).
 
     Sin solape entre ventanas (garantizado por R9); solo contiene trades OOS (R62).
     """
+    house_rule = firm_profile.house_rule
+    if house_rule is None:
+        message = (
+            f"La ficha de firma {firm_profile.name!r} no declara 'house_rule'; no se "
+            f"puede coser el ledger OOS de candidate_id={candidate_id!r} symbol={symbol!r}."
+        )
+        raise BacktestConfigError(message)
     provenance = RunProvenance(
         candidate_id=candidate_id,
         config_version=backtest_ledger.CONFIG_VERSION,
         dataset_hash=dataset_hash,
         firm_profile_hash=firm_profile_hash(firm_profile),
-        risk_profile_hash=risk_profile_hash(risk_profile),
+        exit_geometry_hash=exit_geometry_hash(exit_geometry),
+        house_rule_hash=house_rule_hash(house_rule),
+        exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
     )
     entries = [
         LedgerEntry(provenance=provenance, payload=entry.payload)
@@ -445,7 +486,7 @@ def run_wfa(
     symbol: str,
     frame: pd.DataFrame,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    exit_geometry: ExitGeometry | None,
     figure: SymbolFigure,
     funnel_config: InspectorFunnelConfig,
     costs_config: CostsConfig,
@@ -485,6 +526,9 @@ def run_wfa(
     resolved_candidate_factory = (
         candidate_factory if candidate_factory is not None else default_factory_for(candidate_id)
     )
+    resolved_exit_geometry = _resolve_exit_geometry(
+        resolved_candidate_factory, exit_geometry, candidate_id=candidate_id
+    )
 
     days, row_span = _plan_and_validate_windows(
         frame, symbol, firm_profile, resolved_window_config, candidate_id=candidate_id
@@ -512,7 +556,7 @@ def run_wfa(
             dataset_hash_is=dataset_hash_is,
             dataset_hash_oos=dataset_hash_oos,
             firm_profile=firm_profile,
-            risk_profile=risk_profile,
+            exit_geometry=resolved_exit_geometry,
             figure=figure,
             funnel_config=funnel_config,
             costs_config=costs_config,
@@ -530,7 +574,7 @@ def run_wfa(
         candidate_id=candidate_id,
         symbol=symbol,
         firm_profile=firm_profile,
-        risk_profile=risk_profile,
+        exit_geometry=resolved_exit_geometry,
         dataset_hash=full_dataset_hash,
     )
     wfe = _compute_wfe(oos_ledger_cosido, windows)

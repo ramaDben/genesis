@@ -27,13 +27,17 @@ from typing import Any
 import numpy as np
 
 from genesis.backtest.ledger import FillRecord, Ledger
-from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
+from genesis.data.house_rule import ConsistencySemantics, HouseRule
 from genesis.data.profile import FirmProfile
 from genesis.validation._shared import clip
 from genesis.validation.errors import PropSimConfigError
 
-CONFIG_VERSION: str = "genesis-validation-j/1"
-"""Versión del esquema de configuración de este Change (Issue J, decisión 10 §3)."""
+CONFIG_VERSION: str = "genesis-validation-j/2"
+"""Versión del esquema de configuración de este Change (Issue J, decisión 10 §3).
+
+`/2` desde Change #109: `PropEconomicsProfile` pierde el porcentaje de consistencia
+que antes duplicaba la regla de la casa (D4a; la fuente pasa a ser
+`HouseRule.consistency_rule`) y gana `is_placeholder` obligatorio (D4b)."""
 
 _CONFIG_PACKAGE = "genesis.validation"
 _CONFIG_RESOURCE = "prop_economics_the5ers.json"
@@ -63,11 +67,19 @@ class PropEconomicsProfile:
     """Ficha propia de economía del challenge, capa 4 (R8, ADR-J1).
 
     No duplica ningún campo ya expuesto por `FirmProfile` (capa 1) ni por
-    `RiskProfile` (capa 3): `phases`/`challenge_cost_pct_of_balance`/
+    `ExitGeometry` (capa 3): `phases`/`challenge_cost_pct_of_balance`/
     `profit_split_pct`/`payout_cycle_days` no existen en ninguna de las dos.
     `challenge_cost_pct_of_balance=3.0` y `profit_split_pct=80.0` son
     **placeholders** explícitos "a confirmar" (R9, decisión 2 del gate humano);
     `payout_cycle_days=14` ("payouts quincenales") es definitivo, no placeholder.
+
+    Change #109 (D4a/D4b): el porcentaje de consistencia **sale** de esta ficha — es
+    una regla de la casa (SSoT §1.1) y su única fuente pasa a ser
+    `HouseRule.consistency_rule`; una sola fuente por regla (Invariante 4). Entra
+    `is_placeholder`, obligatorio: `economics_confirmed` (`verdict.py`) deja de
+    inferirse comparando `prop_economics_profile_hash` contra un hash de fábrica
+    (falso positivo/negativo en las dos direcciones, D4b) y pasa a ser
+    `not profile.is_placeholder`.
     """
 
     name: str
@@ -77,7 +89,7 @@ class PropEconomicsProfile:
     payout_cycle_days: int
     max_lots: float | None
     max_positions: int | None
-    consistency_rule_pct: float | None
+    is_placeholder: bool
 
     def __post_init__(self) -> None:
         """Valida la ficha, fail-fast vía `PropSimConfigError` (R12)."""
@@ -161,7 +173,19 @@ def load_prop_economics_profile(path: Path | None = None) -> PropEconomicsProfil
         phases = tuple(_phase_spec_from_payload(phase) for phase in payload["phases"])
         max_lots_raw = payload["max_lots"]
         max_positions_raw = payload["max_positions"]
-        consistency_rule_pct_raw = payload["consistency_rule_pct"]
+        if "is_placeholder" not in payload:
+            message = (
+                f"Ficha de economía del challenge en '{source}' sin la clave "
+                "obligatoria 'is_placeholder' (D4b, Change #109)."
+            )
+            raise PropSimConfigError(message)
+        is_placeholder_raw = payload["is_placeholder"]
+        if not isinstance(is_placeholder_raw, bool):
+            message = (
+                f"Ficha de economía del challenge en '{source}': 'is_placeholder' debe ser "
+                f"un booleano, recibido: {is_placeholder_raw!r}."
+            )
+            raise PropSimConfigError(message)
         return PropEconomicsProfile(
             name=payload["name"],
             phases=phases,
@@ -170,9 +194,7 @@ def load_prop_economics_profile(path: Path | None = None) -> PropEconomicsProfil
             payout_cycle_days=int(payload["payout_cycle_days"]),
             max_lots=None if max_lots_raw is None else float(max_lots_raw),
             max_positions=None if max_positions_raw is None else int(max_positions_raw),
-            consistency_rule_pct=(
-                None if consistency_rule_pct_raw is None else float(consistency_rule_pct_raw)
-            ),
+            is_placeholder=is_placeholder_raw,
         )
     except PropSimConfigError:
         raise
@@ -203,19 +225,10 @@ def prop_economics_profile_hash(profile: PropEconomicsProfile) -> str:
         "payout_cycle_days": profile.payout_cycle_days,
         "max_lots": profile.max_lots,
         "max_positions": profile.max_positions,
-        "consistency_rule_pct": profile.consistency_rule_pct,
+        "is_placeholder": profile.is_placeholder,
     }
     raw = json.dumps(canonical, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
-
-
-_DEFAULT_PROFILE_HASH = prop_economics_profile_hash(load_prop_economics_profile())
-"""Hash de la ficha placeholder empaquetada, calculado en tiempo de import (R14).
-
-Base de `VerdictResult.economics_confirmed` (`verdict.py`, B4): `True` solo si el
-llamador de `run_verdict` pasó una `PropEconomicsProfile` con un hash distinto de
-este (es decir, una ficha confirmada, no el placeholder de fábrica).
-"""
 
 
 def _default_block_size(n_days: int) -> int:
@@ -373,28 +386,52 @@ class PathOutcome:
     n_funded_months_with_daily_breach: int
 
 
+def _binding_daily_threshold(
+    house_rule: HouseRule, *, phase_start_of_day_balance: float, anchor: float
+) -> float:
+    """Umbral vinculante de P3 (D6, §7.3 del SSoT): `daily_loss_limit.amount` si está
+    declarado; si no, el colchón hasta el umbral del `max_loss_limit` vigente.
+
+    Nunca puede volverse cero por ausencia de DLL (SSoT §7.3 lo llama "bypass"): sin
+    esta salvaguarda, una estrategia a un paso de liquidar la cuenta pasaría el gate.
+    """
+    if house_rule.daily_loss_limit is not None:
+        return house_rule.daily_loss_limit.amount
+    return phase_start_of_day_balance - house_rule.max_loss_limit.threshold_from(anchor)
+
+
 def _simulate_single_path(
     daily_pnl: Sequence[float] | np.ndarray,
     starting_balance: float,
     prop_economics_profile: PropEconomicsProfile,
-    firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    house_rule: HouseRule,
     config: PropSimConfig,
 ) -> tuple[PathOutcome, float]:
     """Recorre `daily_pnl` día a día para UNA trayectoria (forward-only, R24).
 
-    Reproduce la semántica de ancla de `simulator._evaluate_total_breach`
-    (`simulator.py:380-406`): base balance-a-balance para el breach DIARIO (R25/R33,
-    **nunca** la base de equity flotante intradía: ADR-J4, R34/R35 — el proxy
-    cierre-a-cierre es una **cota inferior conservadora** de la probabilidad real de
-    breach diario, la equity flotante intradía real puede disparar antes) y ancla
-    dual `STATIC`/`TRAILING` para el breach TOTAL (R25/R27/R36). Retorna
-    `(PathOutcome, challenge_cost_paid)`: el costo del challenge se acumula aparte
-    porque `PathOutcome` no lo expone (R31) — se agrega a
+    Lee el contrato de `house_rule` (D2, Change #109): llama a los métodos de
+    `MaxLossLimit` con `floating_equity = session_close_balance = balance` — proxy
+    cierre-a-cierre de ADR-J4, una vez por día (R34/R35: **cota inferior
+    conservadora** de la probabilidad real de breach, la equity flotante intradía
+    real puede disparar antes). El umbral DIARIO vinculante es
+    `_binding_daily_threshold` (D6, P3 nunca N/A por ausencia de DLL). La
+    `consistency_rule` bloquea la promoción de fase, no descalifica (D5): si su
+    tercera cláusula falla, el día simplemente no promociona.
+
+    Retorna `(PathOutcome, challenge_cost_paid)`: el costo del challenge se acumula
+    aparte porque `PathOutcome` no lo expone (R31) — se agrega a
     `PropSimResult.total_challenge_cost_paid` en `simulate_challenge_paths`/
     `run_prop_sim` (R37, informativo, no es un gate).
     """
-    is_trailing = risk_profile.max_loss_limit_kind is MaxLossLimitKind.TRAILING
+    max_loss_limit = house_rule.max_loss_limit
+    consistency_rule = house_rule.consistency_rule
+    if consistency_rule is not None and consistency_rule.semantics is ConsistencySemantics.FAIL:
+        message = (
+            "consistency_rule con semántica 'fail' no está modelada (Change #109, "
+            "alcance declarado)."
+        )
+        raise PropSimConfigError(message)
+
     phases = prop_economics_profile.phases
     challenge_cost = starting_balance * prop_economics_profile.challenge_cost_pct_of_balance / 100.0
     horizon_days = config.horizon_months * config.trading_days_per_month
@@ -402,9 +439,10 @@ def _simulate_single_path(
     attempt = 1
     phase_index = 0
     balance = starting_balance
+    anchor = max_loss_limit.initial_anchor(starting_balance)
     phase_start_balance = starting_balance
     phase_profitable_days = 0
-    attempt_peak_balance = starting_balance
+    attempt_daily_profits: list[float] = []
     is_funded = False
     funded_trading_day_index: int | None = None
     funded_reference_balance = 0.0
@@ -421,29 +459,31 @@ def _simulate_single_path(
     for day_index, pnl in enumerate(daily_pnl):
         phase_start_of_day_balance = balance
         balance += pnl
-        attempt_peak_balance = max(attempt_peak_balance, balance)
 
         daily_loss = max(0.0, phase_start_of_day_balance - balance)
-        daily_threshold = phase_start_of_day_balance * firm_profile.daily_loss_limit_pct / 100.0
+        daily_threshold = _binding_daily_threshold(
+            house_rule, phase_start_of_day_balance=phase_start_of_day_balance, anchor=anchor
+        )
         breach_daily = daily_loss >= daily_threshold
 
-        if is_funded:
-            attempt_reference = attempt_peak_balance if is_trailing else funded_reference_balance
-        else:
-            attempt_reference = attempt_peak_balance if is_trailing else starting_balance
-        total_loss = max(0.0, attempt_reference - balance)
-        total_threshold = attempt_reference * risk_profile.max_loss_limit_pct / 100.0
-        breach_total = total_loss >= total_threshold
+        anchor = max_loss_limit.next_anchor(
+            anchor,
+            floating_equity=balance,
+            session_close_balance=balance,
+            threshold_lock_at=house_rule.threshold_lock_at,
+        )
+        breach_total = max_loss_limit.is_breached(anchor, balance)
 
         if not is_funded:
             if breach_daily or breach_total:
                 if attempt < config.max_attempts:
                     attempt += 1
                     balance = starting_balance
+                    anchor = max_loss_limit.initial_anchor(starting_balance)
                     phase_index = 0
                     phase_start_balance = starting_balance
                     phase_profitable_days = 0
-                    attempt_peak_balance = starting_balance
+                    attempt_daily_profits = []
                     total_challenge_cost_paid += challenge_cost
                     continue
                 return (
@@ -461,6 +501,8 @@ def _simulate_single_path(
                 )
 
             phase = phases[phase_index]
+            if pnl > 0.0:
+                attempt_daily_profits.append(pnl)
             daily_return_pct = (
                 0.0
                 if phase_start_of_day_balance == 0.0
@@ -470,15 +512,21 @@ def _simulate_single_path(
                 phase_profitable_days += 1
             profit_since_phase_start = balance - phase_start_balance
             target_amount = phase_start_balance * phase.profit_target_pct / 100.0
+            consistency_ok = consistency_rule is None or (
+                max(attempt_daily_profits, default=0.0)
+                <= consistency_rule.pct / 100.0 * profit_since_phase_start
+            )
             if (
                 profit_since_phase_start >= target_amount
                 and phase_profitable_days >= phase.min_profitable_days
+                and consistency_ok
             ):
                 if phase_index + 1 == len(phases):
                     is_funded = True
                     funded_trading_day_index = day_index
                     funded_reference_balance = balance
                     days_since_last_payout = 0
+                    anchor = max_loss_limit.initial_anchor(funded_reference_balance)
                 else:
                     phase_index += 1
                     phase_start_balance = balance
@@ -489,6 +537,22 @@ def _simulate_single_path(
         if breach_daily:
             current_month_had_daily_breach = True
         if breach_total:
+            # D6/P3 (Change #109): sin DLL, `binding_daily_threshold` es exactamente la
+            # distancia al piso de `max_loss_limit` — por construcción, `breach_daily`
+            # implica `breach_total` el mismo día (nunca es un evento continuable
+            # aislado). Sin cerrar el mes parcial en curso acá, ese día quedaría
+            # descartado del todo y `p_daily_breach_funded_month` colapsaría a cero en
+            # cualquier ficha sin DLL — el "bypass" que SSoT §7.3 prohíbe. Se cierra el
+            # mes en curso (aunque tenga menos de `trading_days_per_month` días) para
+            # que el único día que evidenció el breach cuente.
+            final_months_observed = n_funded_months_observed
+            final_months_with_breach = n_funded_months_with_daily_breach
+            if n_funded_days_observed % config.trading_days_per_month != 0 or (
+                current_month_had_daily_breach
+            ):
+                final_months_observed += 1
+                if current_month_had_daily_breach:
+                    final_months_with_breach += 1
             return (
                 PathOutcome(
                     outcome=PropSimOutcomeKind.FUNDED_BREACHED_TOTAL,
@@ -497,8 +561,8 @@ def _simulate_single_path(
                     breach_trading_day_index=day_index,
                     funded_survival_trading_days=n_funded_days_observed,
                     net_payout_12m=cumulative_net_payout,
-                    n_funded_months_observed=n_funded_months_observed,
-                    n_funded_months_with_daily_breach=n_funded_months_with_daily_breach,
+                    n_funded_months_observed=final_months_observed,
+                    n_funded_months_with_daily_breach=final_months_with_breach,
                 ),
                 total_challenge_cost_paid,
             )
@@ -563,9 +627,30 @@ breach total, por lo que no cuenta como "fondeo resuelto" para los agregados P.
 """
 
 
+class BreachEvaluationBasis(StrEnum):
+    """Qué dato de equity evaluó cada breach de la trayectoria (D7 del diseño, Change #109)."""
+
+    CLOSE_TO_CLOSE_PROXY = "close_to_close_proxy_adr_j4"
+    INTRADAY_FLOATING_EQUITY = "intraday_floating_equity"
+
+
+class BiasDirection(StrEnum):
+    """Dirección del sesgo introducido por `breach_evaluation_basis` sobre `p_pass`."""
+
+    UNDERESTIMATES_BREACH = "underestimates_breach_probability"
+    EXACT = "exact"
+
+
 @dataclass(frozen=True, slots=True)
 class PropSimResult:
-    """Resultado agregado de `simulate_challenge_paths`/`run_prop_sim` (R41)."""
+    """Resultado agregado de `simulate_challenge_paths`/`run_prop_sim` (R41).
+
+    `breach_evaluation_basis`/`bias_direction` (D7, Change #109): `prop_sim.py`
+    evalúa siempre sobre el proxy cierre-a-cierre de ADR-J4 (nunca equity flotante
+    intradía real), lo que **subestima** la probabilidad de breach y por lo tanto
+    sesga `p_pass` al alza. Declarado estructurado acá y en prosa en el tearsheet
+    (`verdict.render_tearsheet`) — no es un margen de seguridad.
+    """
 
     candidate_id: str
     config_version: str
@@ -582,6 +667,8 @@ class PropSimResult:
     n_paths_funded_breached_total: int
     n_paths_funded_survived_horizon: int
     total_challenge_cost_paid: float
+    breach_evaluation_basis: BreachEvaluationBasis
+    bias_direction: BiasDirection
 
 
 def _aggregate_path_outcomes(
@@ -660,7 +747,21 @@ def _aggregate_path_outcomes(
             if outcome.outcome is PropSimOutcomeKind.FUNDED_SURVIVED_HORIZON
         ),
         total_challenge_cost_paid=total_challenge_cost_paid,
+        breach_evaluation_basis=BreachEvaluationBasis.CLOSE_TO_CLOSE_PROXY,
+        bias_direction=BiasDirection.UNDERESTIMATES_BREACH,
     )
+
+
+def _require_house_rule(firm_profile: FirmProfile, *, candidate_id: str) -> HouseRule:
+    """Guarda D2: `house_rule is None` inyectado en una evaluación prop falla ruidoso."""
+    house_rule = firm_profile.house_rule
+    if house_rule is None:
+        message = (
+            f"La ficha de firma {firm_profile.name!r} no declara 'house_rule' (no es una "
+            f"prop firm, D2); no se puede evaluar candidate_id={candidate_id!r} en capa 4."
+        )
+        raise PropSimConfigError(message)
+    return house_rule
 
 
 def simulate_challenge_paths(
@@ -668,7 +769,6 @@ def simulate_challenge_paths(
     starting_balance: float,
     prop_economics_profile: PropEconomicsProfile,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
     config: PropSimConfig,
     candidate_id: str,
 ) -> PropSimResult:
@@ -679,9 +779,11 @@ def simulate_challenge_paths(
     canasta ponderada del ensemble sin fabricar `Ledger`s sintéticos.
     `PropSimConfigError` si `daily_pnl_by_day` está vacío (guarda defensiva; el
     disparo normativo R17 vive en `run_prop_sim`/la construcción del ensemble en
-    `verdict.py`). RNG explícito (`numpy.random.default_rng(config.seed)`), loop
-    secuencial sobre `n_paths` (R22/R124): determinismo bit a bit (R51).
+    `verdict.py`), o si `firm_profile.house_rule is None` (D2). RNG explícito
+    (`numpy.random.default_rng(config.seed)`), loop secuencial sobre `n_paths`
+    (R22/R124): determinismo bit a bit (R51).
     """
+    house_rule = _require_house_rule(firm_profile, candidate_id=candidate_id)
     if not daily_pnl_by_day:
         message = (
             f"simulate_challenge_paths: daily_pnl_by_day vacío para "
@@ -711,8 +813,7 @@ def simulate_challenge_paths(
             resampled_pnl,
             starting_balance,
             prop_economics_profile,
-            firm_profile,
-            risk_profile,
+            house_rule,
             config,
         )
         outcomes.append(outcome)
@@ -732,7 +833,6 @@ def run_prop_sim(
     oos_ledgers_by_symbol: Mapping[str, Ledger],
     starting_balance: float,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
     prop_economics_profile: PropEconomicsProfile,
     config: PropSimConfig,
     candidate_id: str,
@@ -742,8 +842,10 @@ def run_prop_sim(
     Construye la canasta diaria (`_build_daily_basket`, R15) y delega en
     `simulate_challenge_paths` (núcleo puro). `PropSimConfigError` si la canasta
     resultante queda vacía (R17): ningún trade OOS extraíble de
-    `oos_ledgers_by_symbol` en ningún símbolo.
+    `oos_ledgers_by_symbol` en ningún símbolo; o si `firm_profile.house_rule is
+    None` (D2, I-6): ficha de exchange sin contrato de casa inyectada acá.
     """
+    _require_house_rule(firm_profile, candidate_id=candidate_id)
     basket_days, daily_totals = _build_daily_basket(oos_ledgers_by_symbol)
     if not basket_days:
         message = (
@@ -757,7 +859,6 @@ def run_prop_sim(
         starting_balance,
         prop_economics_profile,
         firm_profile,
-        risk_profile,
         config,
         candidate_id,
     )
