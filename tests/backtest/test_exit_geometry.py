@@ -203,7 +203,23 @@ def test_hallazgo_trailing_lookback_float_no_entero_no_se_trunca(tmp_path: Path)
 
 
 def test_no_hay_defaults_silenciosos_en_el_codigo_fuente() -> None:
-    """Eval de no-regresión: sin `trailing_lookback: int = ` / `trailing_atr_mult: float = `."""
-    source = Path("src/genesis/backtest/exit_geometry.py").read_text(encoding="utf-8")
+    """Eval de no-regresión: sin `trailing_lookback: int = ` / `trailing_atr_mult: float = `.
+
+    La ruta apunta a capa 2, que es donde el dataclass declara sus campos desde que
+    `ExitGeometry` bajó de `genesis.backtest`. Leer el archivo viejo dejaba la
+    aserción vacuamente verdadera: pasaba siempre, sin importar lo que hubiera en el
+    archivo real, y el invariante quedaba sin red.
+    """
+    source = Path("src/genesis/strategy/exit_geometry.py").read_text(encoding="utf-8")
+
+    # Guarda contra el test ciego: si los campos se mudan otra vez, esto falla
+    # ruidoso en vez de dejar pasar las dos aserciones de abajo por vacuidad.
+    assert "trailing_lookback: int" in source, (
+        "trailing_lookback ya no se declara acá: reapuntá la ruta o esta prueba no protege nada"
+    )
+    assert "trailing_atr_mult: float" in source, (
+        "trailing_atr_mult ya no se declara acá: reapuntá la ruta o esta prueba no protege nada"
+    )
+
     assert "trailing_lookback: int = " not in source
     assert "trailing_atr_mult: float = " not in source

@@ -10,6 +10,7 @@ import pytest
 from genesis.backtest.exit_geometry import ExitGeometrySource
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.contract import StrategyCandidate
+from genesis.strategy.errors import ExitGeometryConfigError
 from genesis.strategy.factories import CandidateFactory, ExitGeometryProvider
 from genesis.strategy.genome.compiler import compile_genome
 from genesis.strategy.genome.errors import MissingAcademicProvenanceError
@@ -159,3 +160,30 @@ def test_exit_geometry_del_candidato_c1_real_llega_al_motor():
     """Eval C2: el caso real que hoy nunca llega al motor (`design.md` C2)."""
     factory = compile_genome(Path("candidates/specs/candidate_c1_gold_lob.yaml"))
     assert factory.exit_geometry.trailing_atr_mult == 2.5
+
+
+@pytest.mark.parametrize(
+    ("target", "reemplazo", "campo"),
+    [
+        ("atr_multiplier: 3.0", "atr_multiplier: 0.0", "trailing_atr_mult"),
+        ("lookback_bars: 22", "lookback_bars: 0", "trailing_lookback"),
+    ],
+)
+def test_genoma_con_geometria_imposible_lanza_error_de_capa_2(
+    target: str, reemplazo: str, campo: str
+) -> None:
+    """Un genoma con geometría imposible falla con el error de capa 2, no el de capa 3.
+
+    La fábrica vive en capa 2 y construye la `ExitGeometry` directamente, así que la
+    guarda del contenedor le llega cruda: `ExitGeometryConfigError`. Antes de que el
+    contenedor bajara de capa, este mismo camino dejaba escapar un
+    `BacktestConfigError` —un error de capa 3 saliendo de código de capa 2—, que era
+    parte del cruce de capas que el Change #109 vino a eliminar.
+
+    `compile_genome` no valida rangos (R9, sin cotas): el genoma declara y el
+    contenedor rechaza sólo lo imposible, así que el error aparece al resolver la
+    propiedad, no al compilar.
+    """
+    factory = compile_genome(GENOME_YAML_1.replace(target, reemplazo))
+    with pytest.raises(ExitGeometryConfigError, match=campo):
+        _ = factory.exit_geometry
