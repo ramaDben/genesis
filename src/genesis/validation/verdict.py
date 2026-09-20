@@ -369,9 +369,8 @@ def build_candidate_gate_summary(
 
     `ledger_extra_trials` (Change #53) default `0`: con ledger ausente, comportamiento
     bit a bit idéntico al pre-Change (R12/R21). `house_rule` (Change #109, D8): G6
-    lee `house_rule.max_loss_limit.amount` directo, ya no un `max_loss_limit_pct`
-    derivado de `starting_balance` — el parámetro `starting_balance` deja de ser
-    necesario acá.
+    lee `house_rule.max_loss_limit.amount` directo, ya no un porcentaje derivado de
+    `starting_balance` — el parámetro `starting_balance` deja de ser necesario acá.
     """
     symbol_gate_outcomes = {
         symbol: _build_symbol_gate_outcome(

@@ -17,8 +17,8 @@ class SimulationClock:
 
     `previous_day_close_balance` es un atributo público mutable actualizado por el
     consumidor del loop (`Simulator`, T8/T9) al cruzar `daily_reset_time` — nunca se
-    lee de `FirmProfile` ni de `RiskProfile` (R7/R14). No expone `window(n)` ni
-    `peek_confirmed(t)` (R8).
+    lee de `FirmProfile` ni del contrato de la casa/geometría de salida (R7/R14).
+    No expone `window(n)` ni `peek_confirmed(t)` (R8).
     """
 
     def __init__(self) -> None:

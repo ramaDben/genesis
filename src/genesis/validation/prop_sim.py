@@ -35,9 +35,9 @@ from genesis.validation.errors import PropSimConfigError
 CONFIG_VERSION: str = "genesis-validation-j/2"
 """Versión del esquema de configuración de este Change (Issue J, decisión 10 §3).
 
-`/2` desde Change #109: `PropEconomicsProfile` pierde `consistency_rule_pct` (D4a,
-la fuente pasa a ser `HouseRule.consistency_rule`) y gana `is_placeholder`
-obligatorio (D4b)."""
+`/2` desde Change #109: `PropEconomicsProfile` pierde el porcentaje de consistencia
+que antes duplicaba la regla de la casa (D4a; la fuente pasa a ser
+`HouseRule.consistency_rule`) y gana `is_placeholder` obligatorio (D4b)."""
 
 _CONFIG_PACKAGE = "genesis.validation"
 _CONFIG_RESOURCE = "prop_economics_the5ers.json"
@@ -73,8 +73,8 @@ class PropEconomicsProfile:
     **placeholders** explícitos "a confirmar" (R9, decisión 2 del gate humano);
     `payout_cycle_days=14` ("payouts quincenales") es definitivo, no placeholder.
 
-    Change #109 (D4a/D4b): `consistency_rule_pct` **sale** de esta ficha — es una
-    regla de la casa (SSoT §1.1) y su única fuente pasa a ser
+    Change #109 (D4a/D4b): el porcentaje de consistencia **sale** de esta ficha — es
+    una regla de la casa (SSoT §1.1) y su única fuente pasa a ser
     `HouseRule.consistency_rule`; una sola fuente por regla (Invariante 4). Entra
     `is_placeholder`, obligatorio: `economics_confirmed` (`verdict.py`) deja de
     inferirse comparando `prop_economics_profile_hash` contra un hash de fábrica
@@ -537,6 +537,22 @@ def _simulate_single_path(
         if breach_daily:
             current_month_had_daily_breach = True
         if breach_total:
+            # D6/P3 (Change #109): sin DLL, `binding_daily_threshold` es exactamente la
+            # distancia al piso de `max_loss_limit` — por construcción, `breach_daily`
+            # implica `breach_total` el mismo día (nunca es un evento continuable
+            # aislado). Sin cerrar el mes parcial en curso acá, ese día quedaría
+            # descartado del todo y `p_daily_breach_funded_month` colapsaría a cero en
+            # cualquier ficha sin DLL — el "bypass" que SSoT §7.3 prohíbe. Se cierra el
+            # mes en curso (aunque tenga menos de `trading_days_per_month` días) para
+            # que el único día que evidenció el breach cuente.
+            final_months_observed = n_funded_months_observed
+            final_months_with_breach = n_funded_months_with_daily_breach
+            if n_funded_days_observed % config.trading_days_per_month != 0 or (
+                current_month_had_daily_breach
+            ):
+                final_months_observed += 1
+                if current_month_had_daily_breach:
+                    final_months_with_breach += 1
             return (
                 PathOutcome(
                     outcome=PropSimOutcomeKind.FUNDED_BREACHED_TOTAL,
@@ -545,8 +561,8 @@ def _simulate_single_path(
                     breach_trading_day_index=day_index,
                     funded_survival_trading_days=n_funded_days_observed,
                     net_payout_12m=cumulative_net_payout,
-                    n_funded_months_observed=n_funded_months_observed,
-                    n_funded_months_with_daily_breach=n_funded_months_with_daily_breach,
+                    n_funded_months_observed=final_months_observed,
+                    n_funded_months_with_daily_breach=final_months_with_breach,
                 ),
                 total_challenge_cost_paid,
             )

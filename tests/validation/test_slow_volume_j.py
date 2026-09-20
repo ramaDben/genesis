@@ -11,8 +11,7 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 import pytest
 
-from genesis.backtest.ledger import FillRecord, Ledger, RunProvenance
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.ledger import ExhaustionPolicy, FillRecord, Ledger, RunProvenance
 from genesis.data.profile import FirmProfile
 from genesis.strategy.contract import Direction
 from genesis.validation import (
@@ -49,7 +48,9 @@ def _daily_ledger(daily_values: list, *, symbol: str = "US500") -> Ledger:
         config_version="genesis-backtest/1",
         dataset_hash="slow-hash",
         firm_profile_hash="slow-hash",
-        risk_profile_hash="slow-hash",
+        exit_geometry_hash="slow-hash",
+        house_rule_hash="slow-hash",
+        exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
     )
     base_day = date(2024, 1, 1)
     ledger = Ledger(provenance=provenance, entries=[])
@@ -147,7 +148,6 @@ def _build_candidate_bundle(
     candidate_id: str,
     daily_values: list,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
 ) -> CandidateValidationBundle:
     ledger = _daily_ledger(daily_values)
     oos_ledgers_by_symbol = {"US500": ledger}
@@ -167,7 +167,6 @@ def _build_candidate_bundle(
         oos_ledgers_by_symbol,
         _STARTING_BALANCE,
         firm_profile,
-        risk_profile,
         load_prop_economics_profile(),
         _REALISTIC_CONFIG,
         candidate_id,
@@ -194,20 +193,15 @@ def _build_candidate_bundle(
 
 
 def test_run_verdict_volumen_realista_3_candidatos_con_ensemble(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile,
 ) -> None:
     candidates = {
-        "A": _build_candidate_bundle(
-            "A", _synthetic_daily_series(1), firm_profile_fixture, risk_profile_fixture
-        ),
-        "B": _build_candidate_bundle(
-            "B", _synthetic_daily_series(2), firm_profile_fixture, risk_profile_fixture
-        ),
+        "A": _build_candidate_bundle("A", _synthetic_daily_series(1), firm_profile_fixture),
+        "B": _build_candidate_bundle("B", _synthetic_daily_series(2), firm_profile_fixture),
         "C": _build_candidate_bundle(
             "C",
             _synthetic_daily_series(3, mean=-40.0),
             firm_profile_fixture,
-            risk_profile_fixture,
         ),
     }
 
@@ -215,7 +209,6 @@ def test_run_verdict_volumen_realista_3_candidatos_con_ensemble(
         candidates,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _REALISTIC_CONFIG,
     )

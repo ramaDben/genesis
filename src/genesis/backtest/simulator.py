@@ -26,6 +26,7 @@ from genesis.backtest.clock import SimulationClock
 from genesis.backtest.costs import CostsConfig, commission_for, slippage_for, spread_for, swap_for
 from genesis.backtest.errors import BacktestConfigError, SessionBoundaryError
 from genesis.backtest.exit_geometry import ExitGeometry
+from genesis.backtest.exit_geometry import exit_geometry_hash as _exit_geometry_hash
 from genesis.backtest.exit_policy import _TrailingState
 from genesis.backtest.ledger import (
     CONFIG_VERSION,
@@ -38,7 +39,6 @@ from genesis.backtest.ledger import (
     RunProvenance,
     TrailingStopMoved,
 )
-from genesis.backtest.exit_geometry import exit_geometry_hash as _exit_geometry_hash
 from genesis.backtest.ticks import (
     TickCache,
     TickRow,
@@ -46,7 +46,6 @@ from genesis.backtest.ticks import (
     ticks_in_bar_window,
 )
 from genesis.data.calendar import EconomicEvent, news_windows
-from genesis.data.house_rule import HouseRule
 from genesis.data.house_rule import house_rule_hash as _house_rule_hash
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash
@@ -143,9 +142,8 @@ def _resolve_fill_from_ticks(
     for tick in ticks_in_bar_window(bar, day_ticks):
         if _touches_stop_loss(position.direction, tick.last, position.stop_loss):
             return ResolvedFill(price=position.stop_loss, timestamp_utc=tick.timestamp_utc)
-        if (
-            position.take_profit is not None
-            and _touches_take_profit(position.direction, tick.last, position.take_profit)
+        if position.take_profit is not None and _touches_take_profit(
+            position.direction, tick.last, position.take_profit
         ):
             return ResolvedFill(price=position.take_profit, timestamp_utc=tick.timestamp_utc)
     return None
@@ -156,17 +154,13 @@ def _resolve_fill_fallback(position: OpenPosition, bar: AnnotatedBar) -> Resolve
     direction = position.direction
     if _is_adverse_gap(direction, bar.open, position.stop_loss):
         return ResolvedFill(price=bar.open, timestamp_utc=bar.timestamp_utc)
-    if (
-        position.take_profit is not None
-        and _is_favorable_gap(direction, bar.open, position.take_profit)
+    if position.take_profit is not None and _is_favorable_gap(
+        direction, bar.open, position.take_profit
     ):
         return ResolvedFill(price=position.take_profit, timestamp_utc=bar.timestamp_utc)
 
     sl_in_range = bar.low <= position.stop_loss <= bar.high
-    tp_in_range = (
-        position.take_profit is not None
-        and bar.low <= position.take_profit <= bar.high
-    )
+    tp_in_range = position.take_profit is not None and bar.low <= position.take_profit <= bar.high
     if sl_in_range:
         return ResolvedFill(price=position.stop_loss, timestamp_utc=bar.timestamp_utc)
     if tp_in_range and position.take_profit is not None:

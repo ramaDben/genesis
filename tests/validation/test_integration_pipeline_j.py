@@ -15,7 +15,6 @@ import math
 import pytest
 
 from genesis.backtest.ledger import Ledger
-from genesis.backtest.risk_profile import RiskProfile
 from genesis.data.profile import FirmProfile
 from genesis.validation import (
     CandidateValidationBundle,
@@ -103,7 +102,6 @@ def _build_candidate_bundle(
     oos_ledgers_by_symbol: dict[str, Ledger],
     starting_balance: float,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
 ) -> CandidateValidationBundle:
     """Bundle sintético (G4/G5/G8/G9 trivialmente en verde) sobre ledgers reales de la fixture."""
     wfa_by_symbol = {
@@ -125,7 +123,6 @@ def _build_candidate_bundle(
         oos_ledgers_by_symbol,
         starting_balance,
         firm_profile,
-        risk_profile,
         load_prop_economics_profile(),
         _FAST_CONFIG,
         candidate_id,
@@ -151,7 +148,6 @@ def _build_candidate_bundle(
 
 def test_pipeline_completo_run_prop_sim_run_verdict_write_artifacts(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
     oos_ledgers_by_symbol_fixture: dict[str, Ledger],
     tmp_path,
 ) -> None:
@@ -162,7 +158,6 @@ def test_pipeline_completo_run_prop_sim_run_verdict_write_artifacts(
         oos_ledgers_by_symbol_fixture,
         starting_balance,
         firm_profile_fixture,
-        risk_profile_fixture,
     )
     candidates = {"B": bundle}
 
@@ -170,7 +165,6 @@ def test_pipeline_completo_run_prop_sim_run_verdict_write_artifacts(
         candidates,
         starting_balance,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_CONFIG,
     )
@@ -180,10 +174,11 @@ def test_pipeline_completo_run_prop_sim_run_verdict_write_artifacts(
     manifest_path, tearsheet_path = write_verdict_artifacts(
         result,
         tmp_path / "artifacts",
-        config_version="genesis-validation-j/1",
+        config_version="genesis-validation-j/2",
         dataset_hash_by_symbol={"US500": "hash", "NAS100": "hash"},
         firm_profile_hash="firm-hash",
-        risk_profile_hash="risk-hash",
+        exit_geometry_hash="exit-geometry-hash",
+        house_rule_hash="house-rule-hash",
         prop_economics_profile_hash_value="econ-hash",
         seeds={"B": {"mc_seed": 1, "prop_sim_seed": _FAST_CONFIG.seed}},
         git_commit="deadbeef",
@@ -198,12 +193,11 @@ def test_pipeline_completo_run_prop_sim_run_verdict_write_artifacts(
 
 def test_paridad_canasta_prop_sim_vs_verdict(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
     oos_ledgers_by_symbol_fixture: dict[str, Ledger],
 ) -> None:
     """Rg-5: la canasta de `verdict._candidate_daily_basket` == `prop_sim._build_daily_basket`."""
     bundle = _build_candidate_bundle(
-        "B", oos_ledgers_by_symbol_fixture, 100_000.0, firm_profile_fixture, risk_profile_fixture
+        "B", oos_ledgers_by_symbol_fixture, 100_000.0, firm_profile_fixture
     )
 
     basket_days_prop_sim, daily_totals_prop_sim = _build_daily_basket(oos_ledgers_by_symbol_fixture)
@@ -211,3 +205,40 @@ def test_paridad_canasta_prop_sim_vs_verdict(
 
     assert basket_days_prop_sim == basket_days_verdict
     assert daily_totals_prop_sim == daily_totals_verdict
+
+
+def _load_run_pipeline_module():
+    """Carga `scripts/run_pipeline.py` como módulo, sin depender de `sys.path` (E2b, I-5).
+
+    `scripts/` no está en `pythonpath` de pytest (solo `src`, `pyproject.toml`):
+    se carga por ruta explícita, patrón estándar de `importlib.util` para
+    ejercitar un script como si fuera un módulo, sin tocar la configuración de
+    pytest para un único test.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    module_path = Path(__file__).resolve().parents[2] / "scripts" / "run_pipeline.py"
+    spec = importlib.util.spec_from_file_location("run_pipeline_under_test", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_starting_balance_debe_coincidir_con_account_size(
+    firm_profile_fixture: FirmProfile,
+) -> None:
+    """Eval I-5 (D3b, E2b): `--starting-balance` distinto de `account_size` falla ruidoso."""
+    run_pipeline = _load_run_pipeline_module()
+    assert firm_profile_fixture.house_rule is not None
+    account_size = firm_profile_fixture.house_rule.account_size  # the5ers: 100_000.0
+
+    with pytest.raises(SystemExit) as excinfo:
+        run_pipeline._resolve_starting_balance(account_size * 2.0, firm_profile_fixture)
+    message = str(excinfo.value)
+    assert str(account_size) in message
+    assert str(account_size * 2.0) in message
+
+    resolved = run_pipeline._resolve_starting_balance(account_size, firm_profile_fixture)
+    assert resolved == account_size

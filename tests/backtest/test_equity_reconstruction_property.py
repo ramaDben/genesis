@@ -17,7 +17,12 @@ from hypothesis import strategies as st
 
 from genesis.backtest.costs import load_costs_config
 from genesis.backtest.exit_geometry import load_exit_geometry
-from genesis.backtest.ledger import Decision, ExhaustionPolicy, FillRecord, reconstruct_equity_series
+from genesis.backtest.ledger import (
+    Decision,
+    ExhaustionPolicy,
+    FillRecord,
+    reconstruct_equity_series,
+)
 from genesis.backtest.simulator import Simulator
 from genesis.data.profile import load_firm_profile
 from genesis.data.store import AnnotatedBar

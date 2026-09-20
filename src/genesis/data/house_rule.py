@@ -121,7 +121,8 @@ class ConsistencyRule:
 
 @dataclass(frozen=True, slots=True)
 class HouseRule:
-    """Contrato de la casa: la mitad "restricción" que antes vivía en `RiskProfile`.
+    """Contrato de la casa: la mitad "restricción" que antes vivía en el contenedor de
+    riesgo de capa 3 (`risk_profile.py`, eliminado por el Change #109).
 
     Embebido en `FirmProfile` (capa 1, D2 de `design.md`): es la firma la que decide
     estos números, con cita de fuente, nunca una capa de ejecución. `account_size` es

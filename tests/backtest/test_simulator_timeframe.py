@@ -219,7 +219,7 @@ def test_criterio_a6_y_a19_ancla_ignora_maximo_previo_a_apertura(
     state = sim._trailing_states.get("pos-a19")
     assert state is not None
     assert state.rolling_extreme.count == 0  # Ignoró la vela de las 15:00
-    assert state.current_stop == 90.0       # Mantiene el stop inicial
+    assert state.current_stop == 90.0  # Mantiene el stop inicial
 
 
 def test_criterio_a15_geometria_es_horaria(
@@ -392,6 +392,7 @@ def test_criterio_a4_anti_anticipacion_del_stop(
     """Criterio A4: Extensión de la propiedad central del spec §9 al stop:
     Mutar cualquier barra posterior a `t` NO cambia el stop efectivo aplicado en `t`.
     """
+
     def run_up_to_t(suffix_highs: list[float]) -> float:
         sim = _build_sim(
             load_firm_profile(),
@@ -457,4 +458,3 @@ def test_criterio_a4_anti_anticipacion_del_stop(
     stop_a = run_up_to_t(suffix_highs_a)
     stop_b = run_up_to_t(suffix_highs_b)
     assert stop_a == stop_b
-

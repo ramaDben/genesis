@@ -11,10 +11,10 @@ from collections.abc import Mapping
 
 import numpy as np
 
-from genesis.backtest.ledger import Ledger, RunProvenance
+from genesis.backtest.ledger import ExhaustionPolicy, Ledger, RunProvenance
 from genesis.validation.dsr_pbo import CscvResult, DsrPboResult
 from genesis.validation.montecarlo import McPathsResult, McPortfolioResult, McSymbolResult
-from genesis.validation.prop_sim import PropSimResult
+from genesis.validation.prop_sim import BiasDirection, BreachEvaluationBasis, PropSimResult
 from genesis.validation.sensitivity import CostStressOutcome, PerturbationOutcome, SensitivityResult
 from genesis.validation.trial_ledger import (
     TrialIdentityContext,
@@ -27,7 +27,8 @@ from tests.validation.fixtures.ledgers import build_ledger
 
 _DEFAULT_DATASET_HASH_BY_SYMBOL: Mapping[str, str] = {"US500": "dataset-hash-fake"}
 _DEFAULT_FIRM_PROFILE_HASH = "firm-profile-hash-fake"
-_DEFAULT_RISK_PROFILE_HASH = "risk-profile-hash-fake"
+_DEFAULT_EXIT_GEOMETRY_HASH = "exit-geometry-hash-fake"
+_DEFAULT_HOUSE_RULE_HASH = "house-rule-hash-fake"
 _DEFAULT_GIT_COMMIT = "0000000000000000000000000000000000000fake"
 _DEFAULT_CONFIG_VERSION = "genesis-validation-trial-ledger/1"
 _DEFAULT_RECORDED_AT_UTC = "2026-01-01T00:00:00+00:00"
@@ -37,7 +38,8 @@ def make_trial_identity_context(
     *,
     dataset_hash_by_symbol: Mapping[str, str] | None = None,
     firm_profile_hash: str = _DEFAULT_FIRM_PROFILE_HASH,
-    risk_profile_hash: str = _DEFAULT_RISK_PROFILE_HASH,
+    exit_geometry_hash: str = _DEFAULT_EXIT_GEOMETRY_HASH,
+    house_rule_hash: str = _DEFAULT_HOUSE_RULE_HASH,
     git_commit: str = _DEFAULT_GIT_COMMIT,
 ) -> TrialIdentityContext:
     """`TrialIdentityContext` determinista con defaults razonables para tests."""
@@ -48,7 +50,8 @@ def make_trial_identity_context(
             else dict(_DEFAULT_DATASET_HASH_BY_SYMBOL)
         ),
         firm_profile_hash=firm_profile_hash,
-        risk_profile_hash=risk_profile_hash,
+        exit_geometry_hash=exit_geometry_hash,
+        house_rule_hash=house_rule_hash,
         git_commit=git_commit,
     )
 
@@ -63,7 +66,8 @@ def make_trial_record(
     config_version: str = _DEFAULT_CONFIG_VERSION,
     dataset_hash_by_symbol: Mapping[str, str] | None = None,
     firm_profile_hash: str = _DEFAULT_FIRM_PROFILE_HASH,
-    risk_profile_hash: str = _DEFAULT_RISK_PROFILE_HASH,
+    exit_geometry_hash: str = _DEFAULT_EXIT_GEOMETRY_HASH,
+    house_rule_hash: str = _DEFAULT_HOUSE_RULE_HASH,
     git_commit: str = _DEFAULT_GIT_COMMIT,
     recorded_at_utc: str = _DEFAULT_RECORDED_AT_UTC,
 ) -> TrialRecord:
@@ -85,7 +89,8 @@ def make_trial_record(
             else dict(_DEFAULT_DATASET_HASH_BY_SYMBOL)
         ),
         firm_profile_hash=firm_profile_hash,
-        risk_profile_hash=risk_profile_hash,
+        exit_geometry_hash=exit_geometry_hash,
+        house_rule_hash=house_rule_hash,
         git_commit=git_commit,
         recorded_at_utc=recorded_at_utc,
     )
@@ -100,7 +105,8 @@ def make_discarded_trial_record(
     config_version: str = _DEFAULT_CONFIG_VERSION,
     dataset_hash_by_symbol: Mapping[str, str] | None = None,
     firm_profile_hash: str = _DEFAULT_FIRM_PROFILE_HASH,
-    risk_profile_hash: str = _DEFAULT_RISK_PROFILE_HASH,
+    exit_geometry_hash: str = _DEFAULT_EXIT_GEOMETRY_HASH,
+    house_rule_hash: str = _DEFAULT_HOUSE_RULE_HASH,
     git_commit: str = _DEFAULT_GIT_COMMIT,
     recorded_at_utc: str = _DEFAULT_RECORDED_AT_UTC,
 ) -> TrialRecord:
@@ -120,7 +126,8 @@ def make_discarded_trial_record(
         config_version=config_version,
         dataset_hash_by_symbol=dataset_hash_by_symbol,
         firm_profile_hash=firm_profile_hash,
-        risk_profile_hash=risk_profile_hash,
+        exit_geometry_hash=exit_geometry_hash,
+        house_rule_hash=house_rule_hash,
         git_commit=git_commit,
         recorded_at_utc=recorded_at_utc,
     )
@@ -134,7 +141,9 @@ _BUNDLE_PROVENANCE = RunProvenance(
     config_version="genesis-backtest/1",
     dataset_hash="test-dataset-hash",
     firm_profile_hash=_DEFAULT_FIRM_PROFILE_HASH,
-    risk_profile_hash=_DEFAULT_RISK_PROFILE_HASH,
+    exit_geometry_hash=_DEFAULT_EXIT_GEOMETRY_HASH,
+    house_rule_hash=_DEFAULT_HOUSE_RULE_HASH,
+    exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
 )
 
 
@@ -264,6 +273,8 @@ def make_prop_sim_result_fake(
         n_paths_funded_breached_total=10,
         n_paths_funded_survived_horizon=70,
         total_challenge_cost_paid=300.0,
+        breach_evaluation_basis=BreachEvaluationBasis.CLOSE_TO_CLOSE_PROXY,
+        bias_direction=BiasDirection.UNDERESTIMATES_BREACH,
     )
 
 

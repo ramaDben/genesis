@@ -12,7 +12,13 @@ tests de purga por solapamiento de horizonte de `purged_cv.py` (López de Prado,
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 
-from genesis.backtest.ledger import FillRecord, Ledger, RejectionRecord, RunProvenance
+from genesis.backtest.ledger import (
+    ExhaustionPolicy,
+    FillRecord,
+    Ledger,
+    RejectionRecord,
+    RunProvenance,
+)
 from genesis.strategy.contract import Direction
 from genesis.strategy.inspector import InspectorVerdict, RejectionReason
 
@@ -21,7 +27,9 @@ _TEST_PROVENANCE = RunProvenance(
     config_version="genesis-backtest/1",
     dataset_hash="test-dataset-hash",
     firm_profile_hash="test-firm-profile-hash",
-    risk_profile_hash="test-risk-profile-hash",
+    exit_geometry_hash="test-exit-geometry-hash",
+    house_rule_hash="test-house-rule-hash",
+    exhaustion_policy=ExhaustionPolicy.HALT_ENTRIES,
 )
 
 

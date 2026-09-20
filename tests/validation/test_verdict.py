@@ -10,9 +10,16 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 import genesis.validation.verdict as verdict_module
-from genesis.backtest.ledger import BreachEvent, BreachKind, FillRecord, Ledger, RunProvenance
+from genesis.backtest.ledger import (
+    BreachEvent,
+    BreachKind,
+    ExhaustionPolicy,
+    FillRecord,
+    Ledger,
+    RunProvenance,
+)
 from genesis.backtest.metrics import IntentAuthorizationCounts
-from genesis.backtest.risk_profile import MaxLossLimitKind, RiskProfile
+from genesis.data.house_rule import HouseRule, MaxLossLimit, MaxLossLimitKind
 from genesis.data.profile import FirmProfile
 from genesis.strategy.contract import Direction
 from genesis.strategy.inspector import RejectionReason
@@ -21,6 +28,8 @@ from genesis.validation.dsr_pbo import CscvResult, DsrPboResult
 from genesis.validation.errors import VerdictConfigError
 from genesis.validation.montecarlo import McPathsResult, McPortfolioResult, McSymbolResult
 from genesis.validation.prop_sim import (
+    BiasDirection,
+    BreachEvaluationBasis,
     PhaseSpec,
     PropEconomicsProfile,
     PropSimConfig,
@@ -60,15 +69,24 @@ _TEST_PROVENANCE = RunProvenance(
     config_version="genesis-backtest/1",
     dataset_hash="test-dataset-hash",
     firm_profile_hash="test-firm-profile-hash",
-    risk_profile_hash="test-risk-profile-hash",
+    exit_geometry_hash="test-exit-geometry-hash",
+    house_rule_hash="test-house-rule-hash",
+    exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
 )
 
 
-def _risk_profile(*, max_loss_limit_pct: float = 10.0) -> RiskProfile:
-    return RiskProfile(
-        max_loss_limit_pct=max_loss_limit_pct,
-        max_loss_limit_kind=MaxLossLimitKind.STATIC,
+def _house_rule(*, max_loss_limit_amount: float = 10_000.0) -> HouseRule:
+    """`HouseRule` de test: `amount=10_000.0` (10% de `_STARTING_BALANCE`, golden histórico)."""
+    return HouseRule(
+        max_loss_limit=MaxLossLimit(amount=max_loss_limit_amount, kind=MaxLossLimitKind.STATIC),
+        threshold_lock_at=None,
+        daily_loss_limit=None,
+        consistency_rule=None,
         weekend_holding_allowed=True,
+        payout_buffer=0.0,
+        min_net_profit_between_payouts=0.0,
+        funded_starting_balance=0.0,
+        account_size=_STARTING_BALANCE,
     )
 
 
@@ -195,6 +213,8 @@ def _prop_sim_result(
         n_paths_funded_breached_total=10,
         n_paths_funded_survived_horizon=70,
         total_challenge_cost_paid=300.0,
+        breach_evaluation_basis=BreachEvaluationBasis.CLOSE_TO_CLOSE_PROXY,
+        bias_direction=BiasDirection.UNDERESTIMATES_BREACH,
     )
 
 
@@ -255,8 +275,7 @@ def test_g1_umbral_300_trades() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
@@ -265,8 +284,7 @@ def test_g1_umbral_300_trades() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g1_pass is True
@@ -280,8 +298,7 @@ def test_g2_umbral_wfe_0_5() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
@@ -290,8 +307,7 @@ def test_g2_umbral_wfe_0_5() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g2_pass is True
@@ -307,8 +323,7 @@ def test_g3_umbral_profit_factor_1_3() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
@@ -317,8 +332,7 @@ def test_g3_umbral_profit_factor_1_3() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g3_pass is True
@@ -332,8 +346,7 @@ def test_g4_umbral_dsr_0_95() -> None:
         _dsr_pbo_result(dsr=0.95),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
@@ -342,8 +355,7 @@ def test_g4_umbral_dsr_0_95() -> None:
         _dsr_pbo_result(dsr=0.9499),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g4_pass is True
@@ -357,8 +369,7 @@ def test_g5_umbral_pbo_0_25() -> None:
         _dsr_pbo_result(pbo=0.2499),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
@@ -367,8 +378,7 @@ def test_g5_umbral_pbo_0_25() -> None:
         _dsr_pbo_result(pbo=0.25),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g5_pass is True
@@ -383,8 +393,7 @@ def test_g6_umbral_maxdd_p95() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(max_drawdown_p95=5_000.0),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
@@ -393,8 +402,7 @@ def test_g6_umbral_maxdd_p95() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(max_drawdown_p95=5_000.01),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g6_pass is True
@@ -408,8 +416,7 @@ def test_g7_umbral_breach_probability_0_05() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(breach_probability=0.0499),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
@@ -418,8 +425,7 @@ def test_g7_umbral_breach_probability_0_05() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(breach_probability=0.05),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g7_pass is True
@@ -433,8 +439,7 @@ def test_g8_umbral_degradacion_030_y_cliff() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(has_cliff=False, max_relative_drop=0.2999),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail_drop = _build_symbol_gate_outcome(
@@ -443,8 +448,7 @@ def test_g8_umbral_degradacion_030_y_cliff() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(has_cliff=False, max_relative_drop=0.30),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail_cliff = _build_symbol_gate_outcome(
@@ -453,8 +457,7 @@ def test_g8_umbral_degradacion_030_y_cliff() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(has_cliff=True, max_relative_drop=0.01),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g8_pass is True
@@ -469,8 +472,7 @@ def test_g9_umbral_pf_stress_1_15() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(pf_stress_1_5x=1.15),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     outcome_fail = _build_symbol_gate_outcome(
@@ -479,8 +481,7 @@ def test_g9_umbral_pf_stress_1_15() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(pf_stress_1_5x=1.1499),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_pass.g9_pass is True
@@ -494,8 +495,7 @@ def test_all_pass_es_and_de_g1_g9() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome.all_pass is True
@@ -506,8 +506,7 @@ def test_all_pass_es_and_de_g1_g9() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome_one_fail.all_pass is False
@@ -525,8 +524,7 @@ def test_sizing_evidence_insufficient_true_en_rechazo_total() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome.sizing_evidence_insufficient is True
@@ -546,8 +544,7 @@ def test_sizing_evidence_insufficient_false_sin_intents() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome.sizing_evidence_insufficient is False
@@ -563,8 +560,7 @@ def test_sizing_evidence_insufficient_false_en_rechazo_parcial() -> None:
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome.sizing_evidence_insufficient is False
@@ -581,8 +577,7 @@ def test_sizing_evidence_insufficient_false_si_motivo_dominante_no_es_lot_size()
         _dsr_pbo_result(),
         _sensitivity_result(),
         _mc_symbol_result(),
-        _risk_profile(),
-        _STARTING_BALANCE,
+        _house_rule(),
         ledger_extra_trials=0,
     )
     assert outcome.sizing_evidence_insufficient is False
@@ -624,7 +619,7 @@ def test_symbols_with_insufficient_sizing_evidence_agrega_por_candidato() -> Non
             "NAS100": _wfa_result(symbol="NAS100"),
         },
     )
-    summary_before_field = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
+    summary_before_field = build_candidate_gate_summary(bundle, _house_rule())
 
     assert summary_before_field.symbols_with_insufficient_sizing_evidence == frozenset({"US500"})
     assert summary_before_field.passes_g_c_p == (
@@ -640,7 +635,7 @@ def test_symbols_with_insufficient_sizing_evidence_agrega_por_candidato() -> Non
 
 
 def test_señal_sizing_en_tearsheet_y_manifest(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     """A5 + A6: la señal llega a ambos artefactos y `VerdictKind` sigue con 4 miembros."""
     bundle = _go_quality_bundle("A", seed=3)
@@ -656,7 +651,6 @@ def test_señal_sizing_en_tearsheet_y_manifest(
         {"A": degraded_bundle},
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -697,7 +691,7 @@ def _ledger_with_breach() -> Ledger:
 
 def test_p6_breach_marca_p6_pass_false_y_registra_violadores() -> None:
     bundle = _bundle(wfa_by_symbol={"US500": _wfa_result(ledger=_ledger_with_breach())})
-    summary = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
+    summary = build_candidate_gate_summary(bundle, _house_rule())
 
     assert summary.p6_pass is False
     assert "US500" in summary.p6_violating_symbols
@@ -706,7 +700,7 @@ def test_p6_breach_marca_p6_pass_false_y_registra_violadores() -> None:
 
 def test_p6_sin_breach_pasa() -> None:
     bundle = _bundle()
-    summary = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
+    summary = build_candidate_gate_summary(bundle, _house_rule())
     assert summary.p6_pass is True
     assert summary.p6_violating_symbols == {}
 
@@ -716,27 +710,27 @@ def test_p6_sin_breach_pasa() -> None:
 
 def test_c1_fraction_passing_y_pass() -> None:
     bundle = _bundle(symbols=("US500", "NAS100", "US30"))
-    summary = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
+    summary = build_candidate_gate_summary(bundle, _house_rule())
     assert summary.c1_fraction_passing == pytest.approx(1.0)
     assert summary.c1_pass is True
 
 
 def test_c2_min_pf_non_passing_es_inf_si_todos_pasan() -> None:
     bundle = _bundle()
-    summary = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
+    summary = build_candidate_gate_summary(bundle, _house_rule())
     assert summary.c2_min_pf_non_passing == float("inf")
     assert summary.c2_pass is True
 
 
 def test_passes_g_c_p_true_en_caso_completamente_pasante() -> None:
     bundle = _bundle()
-    summary = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
+    summary = build_candidate_gate_summary(bundle, _house_rule())
     assert summary.passes_g_c_p is True
 
 
 def test_passes_g_c_p_false_si_falla_p1() -> None:
     bundle = _bundle(prop_sim_result=_prop_sim_result(p_pass=0.1))
-    summary = build_candidate_gate_summary(bundle, _risk_profile(), _STARTING_BALANCE)
+    summary = build_candidate_gate_summary(bundle, _house_rule())
     assert summary.p1_pass is False
     assert summary.passes_g_c_p is False
 
@@ -949,14 +943,14 @@ def test_pairwise_correlation_menos_de_2_dias_comunes_lanza() -> None:
 
 
 def test_t2_elegible_par_baja_correlacion(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     candidates = {
         "A": _candidate_with_daily_series("A", _LOW_CORR_A),
         "B": _candidate_with_daily_series("B", _LOW_CORR_B),
     }
     summaries = {
-        cid: build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+        cid: build_candidate_gate_summary(bundle, house_rule_fixture)
         for cid, bundle in candidates.items()
     }
 
@@ -965,7 +959,6 @@ def test_t2_elegible_par_baja_correlacion(
         summaries,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -976,14 +969,14 @@ def test_t2_elegible_par_baja_correlacion(
 
 
 def test_t2_no_elegible_par_alta_correlacion(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     candidates = {
         "A": _candidate_with_daily_series("A", _LOW_CORR_A),
         "B": _candidate_with_daily_series("B", _LOW_CORR_A),  # idéntica -> correlación 1.0
     }
     summaries = {
-        cid: build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+        cid: build_candidate_gate_summary(bundle, house_rule_fixture)
         for cid, bundle in candidates.items()
     }
 
@@ -992,7 +985,6 @@ def test_t2_no_elegible_par_alta_correlacion(
         summaries,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1001,14 +993,14 @@ def test_t2_no_elegible_par_alta_correlacion(
 
 
 def test_t2_ningun_candidato_pasa_g_c_p_retorna_none(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     candidates = {
         "A": _bundle(candidate_id="A", prop_sim_result=_prop_sim_result(p_pass=0.1)),
         "B": _bundle(candidate_id="B", prop_sim_result=_prop_sim_result(p_pass=0.1)),
     }
     summaries = {
-        cid: build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+        cid: build_candidate_gate_summary(bundle, house_rule_fixture)
         for cid, bundle in candidates.items()
     }
 
@@ -1017,7 +1009,6 @@ def test_t2_ningun_candidato_pasa_g_c_p_retorna_none(
         summaries,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1032,7 +1023,7 @@ def test_t2_ningun_candidato_pasa_g_c_p_retorna_none(
 def test_t2_order_invariant(
     order: tuple,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    house_rule_fixture: HouseRule,
 ) -> None:
     """R87: permutar el orden de inserción de `candidates` no cambia `weights`."""
     base_candidates = {
@@ -1041,7 +1032,7 @@ def test_t2_order_invariant(
     }
     reordered_candidates = {cid: base_candidates[cid] for cid in order}
     summaries = {
-        cid: build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+        cid: build_candidate_gate_summary(bundle, house_rule_fixture)
         for cid, bundle in reordered_candidates.items()
     }
 
@@ -1050,7 +1041,6 @@ def test_t2_order_invariant(
         summaries,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1114,16 +1104,13 @@ def test_verdict_kind_tiene_exactamente_4_miembros() -> None:
     assert {member.value for member in VerdictKind} == {"go", "go-ensemble", "go-parcial", "no-go"}
 
 
-def test_verdict_rama_go(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
-) -> None:
+def test_verdict_rama_go(firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule) -> None:
     candidates = {"A": _go_quality_bundle("A", seed=3)}
 
     result = run_verdict(
         candidates,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1135,7 +1122,7 @@ def test_verdict_rama_go(
 
 
 def test_verdict_rama_no_go(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     candidates = {"A": _bad_bundle("A")}
 
@@ -1143,7 +1130,6 @@ def test_verdict_rama_no_go(
         candidates,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1155,7 +1141,7 @@ def test_verdict_rama_no_go(
 
 
 def test_verdict_rama_go_parcial(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     candidates = {"A": _partial_bundle("A", seed=3)}
 
@@ -1163,7 +1149,6 @@ def test_verdict_rama_go_parcial(
         candidates,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1191,7 +1176,7 @@ def _tiny_target_profile() -> PropEconomicsProfile:
         payout_cycle_days=2,
         max_lots=None,
         max_positions=None,
-        consistency_rule_pct=None,
+        is_placeholder=True,
     )
 
 
@@ -1201,7 +1186,7 @@ _GO_ENSEMBLE_CONFIG = PropSimConfig(
 
 
 def test_verdict_rama_go_ensemble(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     candidates = {
         "A": _candidate_with_daily_series("A", _LOW_CORR_A),
@@ -1212,7 +1197,6 @@ def test_verdict_rama_go_ensemble(
         candidates,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         _tiny_target_profile(),
         _GO_ENSEMBLE_CONFIG,
     )
@@ -1223,21 +1207,20 @@ def test_verdict_rama_go_ensemble(
 
 
 def test_verdict_candidates_vacio_lanza(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     with pytest.raises(VerdictConfigError):
         run_verdict(
             {},
             _STARTING_BALANCE,
             firm_profile_fixture,
-            risk_profile_fixture,
             load_prop_economics_profile(),
             _FAST_ENSEMBLE_CONFIG,
         )
 
 
 def test_verdict_starting_balance_no_positivo_lanza(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     candidates = {"A": _go_quality_bundle("A", seed=3)}
     with pytest.raises(VerdictConfigError):
@@ -1245,14 +1228,13 @@ def test_verdict_starting_balance_no_positivo_lanza(
             candidates,
             0.0,
             firm_profile_fixture,
-            risk_profile_fixture,
             load_prop_economics_profile(),
             _FAST_ENSEMBLE_CONFIG,
         )
 
 
 def test_verdict_determinismo(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     candidates = {"A": _go_quality_bundle("A", seed=3), "B": _go_quality_bundle("B", seed=4)}
 
@@ -1260,7 +1242,6 @@ def test_verdict_determinismo(
         candidates,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1268,7 +1249,6 @@ def test_verdict_determinismo(
         candidates,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1286,7 +1266,7 @@ def test_verdict_determinismo(
 def test_verdict_order_invariance(
     order: tuple,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    house_rule_fixture: HouseRule,
 ) -> None:
     """R94/R95bis: permutar el orden de `candidates` no cambia `verdict`/`winning_candidate_id`."""
     base_candidates = {
@@ -1300,7 +1280,6 @@ def test_verdict_order_invariance(
         reordered,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
@@ -1310,11 +1289,11 @@ def test_verdict_order_invariance(
 
 
 def test_verdict_monotonia_degradar_dsr_nunca_mejora_passes_g_c_p(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
     """R111: bajar `dsr` de un candidato pasante nunca mejora su `passes_g_c_p` (solo empeora)."""
     bundle = _go_quality_bundle("A", seed=3)
-    summary_before = build_candidate_gate_summary(bundle, risk_profile_fixture, _STARTING_BALANCE)
+    summary_before = build_candidate_gate_summary(bundle, house_rule_fixture)
     assert summary_before.passes_g_c_p is True
 
     degraded_bundle = _bundle(
@@ -1322,9 +1301,7 @@ def test_verdict_monotonia_degradar_dsr_nunca_mejora_passes_g_c_p(
         wfa_by_symbol=bundle.wfa_results_by_symbol,
         dsr_pbo_by_symbol={"US500": _dsr_pbo_result(dsr=0.1, pbo=0.1)},
     )
-    summary_after = build_candidate_gate_summary(
-        degraded_bundle, risk_profile_fixture, _STARTING_BALANCE
-    )
+    summary_after = build_candidate_gate_summary(degraded_bundle, house_rule_fixture)
 
     assert summary_after.passes_g_c_p is False
 
@@ -1332,32 +1309,32 @@ def test_verdict_monotonia_degradar_dsr_nunca_mejora_passes_g_c_p(
 # --- B5: tearsheet + manifest + escritura (R96-R108) ---
 
 _MANIFEST_KWARGS: dict[str, Any] = {
-    "config_version": "genesis-validation-j/1",
+    "config_version": "genesis-validation-j/2",
     "dataset_hash_by_symbol": {"US500": "hash-us500"},
     "firm_profile_hash": "hash-firm",
-    "risk_profile_hash": "hash-risk",
+    "exit_geometry_hash": "hash-exit-geometry",
+    "house_rule_hash": "hash-house-rule",
     "prop_economics_profile_hash_value": "hash-economics",
     "seeds": {"A": {"mc_seed": 1, "prop_sim_seed": 2}},
     "git_commit": "deadbeef",
 }
 
 
-def _go_result(firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile):
+def _go_result(firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule):
     candidates = {"A": _go_quality_bundle("A", seed=3)}
     return run_verdict(
         candidates,
         _STARTING_BALANCE,
         firm_profile_fixture,
-        risk_profile_fixture,
         load_prop_economics_profile(),
         _FAST_ENSEMBLE_CONFIG,
     )
 
 
 def test_tearsheet_manifest_parity(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
-    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
 
     tearsheet = render_tearsheet(result)
     manifest_raw = verdict_result_to_manifest_json(result, **_MANIFEST_KWARGS)
@@ -1373,23 +1350,23 @@ def test_tearsheet_manifest_parity(
 
 
 def test_manifest_roundtrip(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
-    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
 
     raw = verdict_result_to_manifest_json(result, **_MANIFEST_KWARGS)
     summary = manifest_json_to_verdict_summary(raw)
 
-    assert summary["config_version"] == "genesis-validation-j/1"
+    assert summary["config_version"] == "genesis-validation-j/2"
     assert summary["n_candidatos_torneo"] == result.n_candidatos_torneo
     assert summary["economics_confirmed"] == result.economics_confirmed
     assert summary["git_commit"] == "deadbeef"
 
 
 def test_write_verdict_artifacts_ambos_archivos_deterministas(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile, tmp_path
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule, tmp_path
 ) -> None:
-    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
     output_dir = tmp_path / "artifacts"
 
     manifest_path1, tearsheet_path1 = write_verdict_artifacts(
@@ -1411,9 +1388,9 @@ def test_write_verdict_artifacts_ambos_archivos_deterministas(
 
 
 def test_purged_cv_summary_incluido_cuando_presente(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
-    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
     purged_cv_result = PurgedCvResult(
         candidate_id="A",
         symbol="US500",
@@ -1453,9 +1430,9 @@ def test_purged_cv_summary_incluido_cuando_presente(
 
 
 def test_render_tearsheet_no_hace_io(
-    firm_profile_fixture: FirmProfile, risk_profile_fixture: RiskProfile
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
-    result = _go_result(firm_profile_fixture, risk_profile_fixture)
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
     tearsheet1 = render_tearsheet(result)
     tearsheet2 = render_tearsheet(result)
     assert tearsheet1 == tearsheet2

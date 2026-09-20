@@ -6,7 +6,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -21,7 +21,7 @@ def _run_window0(
     frame: pd.DataFrame,
     *,
     firm_profile: FirmProfile,
-    risk_profile: RiskProfile,
+    risk_profile: ExitGeometry,
     symbol_figure: SymbolFigure,
     funnel_config: InspectorFunnelConfig,
     costs_config: CostsConfig,
@@ -58,7 +58,7 @@ def test_wfa_anti_lookahead(
     mutate_own_oos: bool,
     price_shift: float,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -77,7 +77,7 @@ def test_wfa_anti_lookahead(
     baseline_window0 = _run_window0(
         short_wfa_frame,
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        risk_profile=exit_geometry_fixture,
         symbol_figure=symbol_figure_fixture,
         funnel_config=funnel_config_fixture,
         costs_config=costs_config_fixture,
@@ -101,7 +101,7 @@ def test_wfa_anti_lookahead(
     mutated_window0 = _run_window0(
         mutated_frame,
         firm_profile=firm_profile_fixture,
-        risk_profile=risk_profile_fixture,
+        risk_profile=exit_geometry_fixture,
         symbol_figure=symbol_figure_fixture,
         funnel_config=funnel_config_fixture,
         costs_config=costs_config_fixture,

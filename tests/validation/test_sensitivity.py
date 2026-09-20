@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -77,7 +77,7 @@ def test_relative_drop_baseline_cero_retorna_cero() -> None:
 @pytest.mark.unit
 def test_empty_windows_raises(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -103,7 +103,7 @@ def test_empty_windows_raises(
             i_frame,
             "US500",
             firm_profile_fixture,
-            risk_profile_fixture,
+            exit_geometry_fixture,
             symbol_figure_fixture,
             funnel_config_fixture,
             costs_config_fixture,
@@ -117,7 +117,7 @@ def test_empty_windows_raises(
 def test_outcome_counts(
     wfa_result_fixture: WfaResult,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -130,7 +130,7 @@ def test_outcome_counts(
         i_frame,
         "US500",
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,
@@ -164,7 +164,7 @@ def test_outcome_counts(
 def test_determinism(
     wfa_result_fixture: WfaResult,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -179,7 +179,7 @@ def test_determinism(
             i_frame,
             "US500",
             firm_profile_fixture,
-            risk_profile_fixture,
+            exit_geometry_fixture,
             symbol_figure_fixture,
             funnel_config_fixture,
             costs_config_fixture,

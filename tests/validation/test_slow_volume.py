@@ -12,7 +12,7 @@ import math
 import pytest
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -26,7 +26,7 @@ pytestmark = [pytest.mark.slow, pytest.mark.timeout(180)]
 
 def test_wfa_volumen_realista_grid_completo_y_ventana_por_defecto(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -41,7 +41,7 @@ def test_wfa_volumen_realista_grid_completo_y_ventana_por_defecto(
         "US500",
         frame,
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
-
-from pathlib import Path
 
 from genesis.backtest.exit_geometry import ExitGeometrySource
 from genesis.data.symbols import SymbolFigure
@@ -118,19 +117,22 @@ def test_compile_genome_trial_id_invariance():
 
     dummy_dataset_hash = {"US500": "abcdef123456"}
     firm_hash = "firm_hash_1"
-    risk_hash = "risk_hash_1"
+    exit_geometry_hash = "exit_geometry_hash_1"
+    house_rule_hash = "house_rule_hash_1"
 
     trial_id_1 = compute_trial_id(
         factory1.raw_config,
         dummy_dataset_hash,
         firm_hash,
-        risk_hash,
+        exit_geometry_hash,
+        house_rule_hash,
     )
     trial_id_2 = compute_trial_id(
         factory2.raw_config,
         dummy_dataset_hash,
         firm_hash,
-        risk_hash,
+        exit_geometry_hash,
+        house_rule_hash,
     )
 
     assert trial_id_1 == trial_id_2
@@ -157,4 +159,3 @@ def test_exit_geometry_del_candidato_c1_real_llega_al_motor():
     """Eval C2: el caso real que hoy nunca llega al motor (`design.md` C2)."""
     factory = compile_genome(Path("candidates/specs/candidate_c1_gold_lob.yaml"))
     assert factory.exit_geometry.trailing_atr_mult == 2.5
-

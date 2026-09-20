@@ -75,9 +75,7 @@ def _total_breach_outcome(kind: MaxLossLimitKind) -> tuple[bool, object]:
 
     # Bar 2: cierre de sesión del día 1, retrocede a 104_000 (todavía sobre el inicial).
     bar2_close = datetime(2024, 1, 2, 21, 0, tzinfo=UTC)
-    bar2 = make_annotated_bar(
-        bar2_close, trading_day=_DAY1, session_close_utc=bar2_close
-    )
+    bar2 = make_annotated_bar(bar2_close, trading_day=_DAY1, session_close_utc=bar2_close)
     simulator.account.balance = 104_000.0
     simulator._evaluate_breaches(bar2, [], False)
     if simulator.account.account_exhausted:
@@ -85,9 +83,7 @@ def _total_breach_outcome(kind: MaxLossLimitKind) -> tuple[bool, object]:
 
     # Bar 3: cierre de sesión del día 2, cae a 98_500.
     bar3_close = datetime(2024, 1, 3, 21, 0, tzinfo=UTC)
-    bar3 = make_annotated_bar(
-        bar3_close, trading_day=_DAY2, session_close_utc=bar3_close
-    )
+    bar3 = make_annotated_bar(bar3_close, trading_day=_DAY2, session_close_utc=bar3_close)
     simulator.account.balance = 98_500.0
     simulator._evaluate_breaches(bar3, [], False)
     return simulator.account.account_exhausted, bar3.trading_day

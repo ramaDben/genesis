@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -28,7 +28,7 @@ pytestmark = pytest.mark.integration
 def test_pipeline_completo_purged_cv_dsr_pbo_sensitivity(
     wfa_result_fixture: WfaResult,
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -49,7 +49,7 @@ def test_pipeline_completo_purged_cv_dsr_pbo_sensitivity(
         "US500",
         i_frame,
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,
@@ -74,7 +74,7 @@ def test_pipeline_completo_purged_cv_dsr_pbo_sensitivity(
         i_frame,
         "US500",
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,

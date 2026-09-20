@@ -12,8 +12,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from genesis.backtest.costs import load_costs_config
-from genesis.backtest.ledger import FillRecord, TrailingStopMoved
 from genesis.backtest.exit_geometry import load_exit_geometry
+from genesis.backtest.ledger import FillRecord, TrailingStopMoved
 from genesis.backtest.simulator import (
     OpenPosition,
     RiskLevelsProvider,
@@ -259,6 +259,7 @@ def test_criterio_a7_y_a8_short_position_trailing_stop_fill_y_ledger() -> None:
 
 def test_criterio_a10_determinismo() -> None:
     """Criterio A10: Dos corridas idénticas producen secuencias de movimientos iguales."""
+
     def run_simulation() -> list[TrailingStopMoved]:
         sim = Simulator(
             candidate=_PassiveCandidate(),
@@ -370,5 +371,3 @@ def test_criterio_a11_ningun_consumidor_ve_stop_viejo() -> None:
 
     assert pos_in_account.stop_loss == trailing_state.current_stop
     assert pos_in_account.stop_loss > initial_stop
-
-

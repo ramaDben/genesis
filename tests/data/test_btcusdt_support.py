@@ -82,7 +82,6 @@ def test_btcusdt_metadata_store_recovery() -> None:
     assert figure.value_per_point == 1.0
 
 
-
 def test_iter_bars_in_session_btcusdt() -> None:
     profile = load_firm_profile(Path("src/genesis/data/profiles/binance_futures.json"))
     times = [

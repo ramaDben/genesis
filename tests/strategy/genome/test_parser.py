@@ -111,4 +111,3 @@ def test_parse_canonical_candidate_b1_spec():
     assert genome.universe.symbol == "US500"
     assert genome.alpha.entry_trigger["range_minutes"] == 30
     assert genome.risk_exit.kind == "chandelier_trailing"
-

@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.metrics import (
     max_concurrent_exposure,
     max_drawdown,
@@ -20,7 +21,6 @@ from genesis.backtest.metrics import (
     win_rate,
     worst_daily_floating_excursion,
 )
-from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.simulator import Simulator
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure

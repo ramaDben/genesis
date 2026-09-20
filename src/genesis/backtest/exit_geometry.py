@@ -1,6 +1,7 @@
 """Geometría de salida (`ExitGeometry`), capa 3 (Change #109).
 
-Reemplaza a `RiskProfile`: la mitad "restricción de la casa" migró a
+Reemplaza al contenedor de riesgo previo (`risk_profile.py`, eliminado): la mitad
+"restricción de la casa" migró a
 `genesis.data.house_rule.HouseRule` (capa 1); esto es lo que queda, la parte que
 **el genoma gobierna, sin cotas** (`design.md` §1.4). No tiene valores por defecto:
 un genoma que omita una clave del trailing debe fallar en el compilador (`schema.py`),
@@ -34,7 +35,7 @@ class ExitGeometry:
     """Geometría de salida Chandelier: campos posicionales y obligatorios, sin `= valor`.
 
     `__post_init__` conserva exactamente las dos guardas de estado imposible que
-    tenía `RiskProfile` (`trailing_lookback >= 1`, `trailing_atr_mult > 0.0`) y
+    tenía el contenedor de riesgo previo (`trailing_lookback >= 1`, `trailing_atr_mult > 0.0`) y
     ninguna más: la frontera es *imposible* vs *indeseable*, y lo indeseable lo
     deciden los gates, no este contenedor (R9).
     """

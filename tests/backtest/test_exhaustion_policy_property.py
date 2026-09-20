@@ -42,7 +42,7 @@ def _always_fires(bar: object) -> list[EntryIntent]:
 
 
 def _build_simulator(exhaustion_policy: ExhaustionPolicy) -> Simulator:
-    candidate = FakeRiskCandidate(stop_loss=1.0, take_profit=None, on_bar_fn=_always_fires)
+    candidate = FakeRiskCandidate(stop_loss=1.0, take_profit=1_000_000.0, on_bar_fn=_always_fires)
     return Simulator(
         candidate,
         symbol="US500",

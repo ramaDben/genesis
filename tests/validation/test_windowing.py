@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from genesis.backtest.costs import CostsConfig
-from genesis.backtest.risk_profile import RiskProfile
+from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.symbols import SymbolFigure
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.unit
 
 def test_plan_trading_days_e_iter_is_oos_bounds_reproducen_geometria_de_wfa(
     firm_profile_fixture: FirmProfile,
-    risk_profile_fixture: RiskProfile,
+    exit_geometry_fixture: ExitGeometry,
     symbol_figure_fixture: SymbolFigure,
     funnel_config_fixture: InspectorFunnelConfig,
     costs_config_fixture: CostsConfig,
@@ -37,7 +37,7 @@ def test_plan_trading_days_e_iter_is_oos_bounds_reproducen_geometria_de_wfa(
         "US500",
         short_wfa_frame,
         firm_profile_fixture,
-        risk_profile_fixture,
+        exit_geometry_fixture,
         symbol_figure_fixture,
         funnel_config_fixture,
         costs_config_fixture,
