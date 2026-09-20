@@ -14,6 +14,7 @@ import math
 
 import pytest
 
+from genesis.backtest.errors import BacktestConfigError
 from genesis.backtest.ledger import Ledger
 from genesis.data.profile import FirmProfile
 from genesis.validation import (
@@ -234,7 +235,7 @@ def test_starting_balance_debe_coincidir_con_account_size(
     assert firm_profile_fixture.house_rule is not None
     account_size = firm_profile_fixture.house_rule.account_size  # the5ers: 100_000.0
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(BacktestConfigError) as excinfo:
         run_pipeline._resolve_starting_balance(account_size * 2.0, firm_profile_fixture)
     message = str(excinfo.value)
     assert str(account_size) in message

@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from genesis.backtest.exit_geometry import ExitGeometry, ExitGeometrySource
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.contract import StrategyCandidate
+from genesis.strategy.exit_geometry import ExitGeometry, ExitGeometrySource
 from genesis.strategy.genome.candidate import CompiledGenomeCandidate
 from genesis.strategy.genome.schema import StrategyGenome, parse_genome
 

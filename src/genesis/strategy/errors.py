@@ -50,3 +50,19 @@ class CandidateBStateError(GenesisStrategyError):
     la geometría calculada produce `distancia_stop <= 0` (R67). El mensaje debe
     incluir el contexto explícito (campo/valor) que originó la violación.
     """
+
+
+class ExitGeometryConfigError(GenesisStrategyError):
+    """Estado imposible en `ExitGeometry`: `trailing_lookback < 1` o `trailing_atr_mult <= 0.0`.
+
+    Vive en capa 2 porque `ExitGeometry` vive en capa 2 (Change #109, §1.2): el
+    contenedor no puede lanzar `BacktestConfigError` sin importar capa 3 y recrear
+    la arista inversa que la mudanza vino a eliminar. ADR-G5 prohíbe una raíz
+    compartida entre capas, así que la validación estructural necesita su propio
+    error de dominio aquí.
+
+    Quien carga la geometría desde el recurso empaquetado —`load_exit_geometry`,
+    que se queda en capa 3 junto al fallback `source=CONFIG`— atrapa este error y
+    lo relanza como `BacktestConfigError`: el contrato de la capa 3 no cambia.
+    El mensaje debe incluir el valor recibido (fail-fast con contexto).
+    """

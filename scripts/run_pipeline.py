@@ -46,6 +46,7 @@ from pathlib import Path
 import pandas as pd
 
 from genesis.backtest.costs import load_costs_config
+from genesis.backtest.errors import BacktestConfigError
 from genesis.data.metadata import ArtifactMetadata, current_git_commit
 from genesis.data.mt5_export import Granularity, RawParquetStore, plan_chunks
 from genesis.data.profile import FirmProfile, firm_profile_hash, load_firm_profile
@@ -169,10 +170,15 @@ def _resolve_starting_balance(cli_value: float, firm_profile: FirmProfile) -> fl
     """La ficha gobierna el balance inicial (D3b, Change #109); reconciliación fail-fast.
 
     Con `house_rule` declarado, `--starting-balance` debe coincidir exactamente con
-    `house_rule.account_size` — si difiere, `SystemExit` con los dos números y el
-    nombre de la ficha, nunca una elección silenciosa. Con `house_rule is None`
+    `house_rule.account_size` — si difiere, `BacktestConfigError` con los dos números
+    y el nombre de la ficha, nunca una elección silenciosa. Con `house_rule is None`
     (ficha de exchange) `--starting-balance` gobierna sin reconciliar: no hay
     contrato con el que comparar.
+
+    El error es el que manda la tabla normativa del diseño (§D3b, eval I-5), no el
+    `SystemExit` que usan las otras validaciones de este runner: reconciliar la ficha
+    con la bandera es una incoherencia de configuración del backtest, no un uso
+    inválido del CLI.
     """
     house_rule = firm_profile.house_rule
     if house_rule is None:
@@ -184,7 +190,7 @@ def _resolve_starting_balance(cli_value: float, firm_profile: FirmProfile) -> fl
             f"{firm_profile.name!r} (D3b). La ficha gobierna: pasar "
             f"--starting-balance {house_rule.account_size!r} o una ficha distinta."
         )
-        raise SystemExit(message)
+        raise BacktestConfigError(message)
     return cli_value
 
 

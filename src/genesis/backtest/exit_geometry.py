@@ -1,58 +1,42 @@
-"""Geometría de salida (`ExitGeometry`), capa 3 (Change #109).
+"""Carga de `ExitGeometry` desde configuración empaquetada, capa 3 (Change #109).
 
-Reemplaza al contenedor de riesgo previo (`risk_profile.py`, eliminado): la mitad
-"restricción de la casa" migró a
-`genesis.data.house_rule.HouseRule` (capa 1); esto es lo que queda, la parte que
-**el genoma gobierna, sin cotas** (`design.md` §1.4). No tiene valores por defecto:
-un genoma que omita una clave del trailing debe fallar en el compilador (`schema.py`),
-no heredar un número en silencio por la puerta de este contenedor.
+El value object vive en capa 2 (`genesis.strategy.exit_geometry`): la geometría de
+salida es un parámetro de la estrategia, y tenerlo acá obligaba a `genome/compiler.py`
+a importar capa 3 en runtime, cerrando un ciclo real entre paquetes (§1.2).
+
+Lo que se queda en capa 3 es el **mecanismo de carga**: leer el recurso empaquetado
+`exit_geometry.json`, exigir su `config_version` y producir una geometría con
+`source=CONFIG`. Ese fallback es del simulador, no del motor de estrategia.
+
+`ExitGeometry`, `ExitGeometrySource` y `exit_geometry_hash` se re-exportan desde acá
+para no romper a ningún consumidor que ya los importaba de `genesis.backtest`
+(`backtest/__init__.py` los lista en `__all__`, R60).
 """
 
-import hashlib
 import json
-from dataclasses import dataclass
-from enum import StrEnum
 from importlib import resources
 from pathlib import Path
 
 from genesis.backtest.errors import BacktestConfigError
+from genesis.strategy.errors import ExitGeometryConfigError
+from genesis.strategy.exit_geometry import (
+    ExitGeometry,
+    ExitGeometrySource,
+    exit_geometry_hash,
+)
+
+__all__ = [
+    "CONFIG_VERSION",
+    "ExitGeometry",
+    "ExitGeometrySource",
+    "exit_geometry_hash",
+    "load_exit_geometry",
+]
 
 CONFIG_VERSION: str = "genesis-backtest-exit-geometry/1"
 
 _CONFIG_PACKAGE = "genesis.backtest"
 _CONFIG_RESOURCE = "exit_geometry.json"
-
-
-class ExitGeometrySource(StrEnum):
-    """Procedencia del valor efectivo de la geometría (no es un parámetro, D8)."""
-
-    GENOME = "genome"
-    CONFIG = "config"
-
-
-@dataclass(frozen=True, slots=True)
-class ExitGeometry:
-    """Geometría de salida Chandelier: campos posicionales y obligatorios, sin `= valor`.
-
-    `__post_init__` conserva exactamente las dos guardas de estado imposible que
-    tenía el contenedor de riesgo previo (`trailing_lookback >= 1`, `trailing_atr_mult > 0.0`) y
-    ninguna más: la frontera es *imposible* vs *indeseable*, y lo indeseable lo
-    deciden los gates, no este contenedor (R9).
-    """
-
-    trailing_lookback: int
-    trailing_atr_mult: float
-    source: ExitGeometrySource
-
-    def __post_init__(self) -> None:
-        if self.trailing_lookback < 1:
-            raise BacktestConfigError(
-                f"trailing_lookback debe ser >= 1, recibido: {self.trailing_lookback!r}"
-            )
-        if self.trailing_atr_mult <= 0.0:
-            raise BacktestConfigError(
-                f"trailing_atr_mult debe ser > 0.0, recibido: {self.trailing_atr_mult!r}"
-            )
 
 
 def _parse_trailing_lookback(raw: object) -> int:
@@ -74,6 +58,11 @@ def load_exit_geometry(path: Path | None = None) -> ExitGeometry:
     `source=CONFIG`. Exige `config_version == "genesis-backtest-exit-geometry/1"`.
     Lanza `BacktestConfigError` con el campo faltante en el mensaje ante
     configuración inválida o incompleta (fail-fast).
+
+    Las guardas de estado imposible del contenedor viven en capa 2 y lanzan
+    `ExitGeometryConfigError`; acá se traducen a `BacktestConfigError` para que el
+    contrato de esta capa no cambie: quien carga una ficha sigue viendo el error de
+    configuración de capa 3, sin enterarse de dónde vive el dataclass.
     """
     if path is not None:
         raw_text = path.read_text(encoding="utf-8")
@@ -99,21 +88,13 @@ def load_exit_geometry(path: Path | None = None) -> ExitGeometry:
         )
     except BacktestConfigError:
         raise
-    except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (
+        AttributeError,
+        ExitGeometryConfigError,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         message = f"Geometría de salida inválida/incompleta en '{source}': {exc}"
         raise BacktestConfigError(message) from exc
-
-
-def exit_geometry_hash(geometry: ExitGeometry) -> str:
-    """Hash `sha256` canónico de la geometría sobre JSON ordenado (R4, R14).
-
-    `source` es procedencia, no parámetro, y **no** entra en el hash: dos
-    geometrías con el mismo `trailing_lookback`/`trailing_atr_mult` producen el
-    mismo hash sin importar si vinieron del genoma o de la config.
-    """
-    canonical = {
-        "trailing_atr_mult": geometry.trailing_atr_mult,
-        "trailing_lookback": geometry.trailing_lookback,
-    }
-    raw = json.dumps(canonical, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()

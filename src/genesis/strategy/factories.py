@@ -16,20 +16,13 @@ uniforme**, que es lo que permite inyectar un candidato que nadie escribió a ma
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_b.candidate import CandidateB
 from genesis.strategy.contract import StrategyCandidate
 from genesis.strategy.errors import CandidateFactoryError
-
-if TYPE_CHECKING:
-    # Solo para chequeo de tipos: capa 2 no debe depender de capa 3 en tiempo de
-    # ejecución (backtest ya depende de strategy, ADR-G2; la arista inversa en
-    # runtime crearía un ciclo real entre paquetes). `from __future__ import
-    # annotations` vuelve la anotación de abajo un string perezoso, así que este
-    # import nunca se ejecuta fuera de `ty`/mypy.
-    from genesis.backtest.exit_geometry import ExitGeometry
+from genesis.strategy.exit_geometry import ExitGeometry
 
 
 @runtime_checkable

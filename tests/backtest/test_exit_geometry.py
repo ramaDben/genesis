@@ -19,6 +19,7 @@ from genesis.backtest.exit_geometry import (
     exit_geometry_hash,
     load_exit_geometry,
 )
+from genesis.strategy.errors import ExitGeometryConfigError
 
 pytestmark = pytest.mark.unit
 
@@ -84,14 +85,41 @@ def test_load_exit_geometry_default_empaquetado() -> None:
     assert geometry.source == ExitGeometrySource.CONFIG
 
 
-def test_u6_lookback_cero_lanza_backtest_config_error() -> None:
-    with pytest.raises(BacktestConfigError, match="trailing_lookback"):
+def test_u6_lookback_cero_lanza_exit_geometry_config_error() -> None:
+    """U6, construcción directa: la guarda vive en capa 2 y lanza su error de capa 2.
+
+    El contenedor se mudó a `genesis.strategy.exit_geometry` (§1.2), así que ya no
+    puede lanzar `BacktestConfigError` sin reimportar capa 3. Quien carga desde
+    configuración sí sigue viendo `BacktestConfigError` — ver el test de traducción.
+    """
+    with pytest.raises(ExitGeometryConfigError, match="trailing_lookback"):
         ExitGeometry(trailing_lookback=0, trailing_atr_mult=3.0, source=ExitGeometrySource.CONFIG)
 
 
-def test_u6_mult_cero_lanza_backtest_config_error() -> None:
-    with pytest.raises(BacktestConfigError, match="trailing_atr_mult"):
+def test_u6_mult_cero_lanza_exit_geometry_config_error() -> None:
+    with pytest.raises(ExitGeometryConfigError, match="trailing_atr_mult"):
         ExitGeometry(trailing_lookback=22, trailing_atr_mult=0.0, source=ExitGeometrySource.CONFIG)
+
+
+def test_u6_load_traduce_el_error_de_capa_2_a_backtest_config_error(tmp_path: Path) -> None:
+    """La costura entre capas: `load_exit_geometry` no deja escapar el error de capa 2.
+
+    Es el punto exacto donde la mudanza del contenedor podría romper el contrato de
+    capa 3 sin que ningún otro test se entere.
+    """
+    path = tmp_path / "exit_geometry.json"
+    path.write_text(
+        json.dumps(
+            {
+                "config_version": "genesis-backtest-exit-geometry/1",
+                "trailing_lookback": 0,
+                "trailing_atr_mult": 3.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(BacktestConfigError, match="trailing_lookback"):
+        load_exit_geometry(path)
 
 
 def test_u6_mult_alto_sin_cota_construye_y_conserva_el_valor() -> None:
