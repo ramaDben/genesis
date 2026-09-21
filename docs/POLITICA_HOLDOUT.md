@@ -184,8 +184,8 @@ borde deja de ser un compromiso y pasa a ser una consecuencia.
 | Pendiente | Dónde se decide |
 |---|---|
 | **Tamaño y fecha de corte del holdout** | C.1b — escrito en [`DIMENSIONAMIENTO_HOLDOUT.md`](DIMENSIONAMIENTO_HOLDOUT.md) |
-| **Valor del umbral del holdout** | C.1b — escrito en [`DIMENSIONAMIENTO_HOLDOUT.md`](DIMENSIONAMIENTO_HOLDOUT.md) §3 |
-| **Si se usa la historia larga de NQ (desde 1996) para operar MNQ** | B.1 / C.1b |
+| **Valor del umbral del holdout** | C.1b — escrito en [`DIMENSIONAMIENTO_HOLDOUT.md`](DIMENSIONAMIENTO_HOLDOUT.md) §4 |
+| ~~Si se usa la historia larga de NQ para operar MNQ~~ | **Cerrado el 2026-09-21: MNQ.** Ver [DIMENSIONAMIENTO_HOLDOUT.md](DIMENSIONAMIENTO_HOLDOUT.md) §6 |
 | **Techo de presupuesto de ensayos (D4)** | C.2 / RFC [#57](https://github.com/ramaDben/genesis/issues/57) |
 | **Cuánto descontar por el sesgo de supervivencia de la fuente (I7)** | Abierto, y probablemente no estimable honestamente. El holdout lo mide indirectamente; ese es todo el punto |
 
