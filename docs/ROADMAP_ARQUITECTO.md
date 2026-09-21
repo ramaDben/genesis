@@ -632,6 +632,68 @@ es órdenes de magnitud más pesado. Databento no publica una cifra por dataset 
 CME, así que **el número exacto sólo se conoce cotizando en la consola con el rango cargado** — eso
 es parte del DoD de esta casilla.
 
+#### [rev 2026-09-21] Alternativas relevadas, y por qué la data gratis no sirve para un veredicto
+
+La pregunta se hizo explícitamente: *¿hay forma de obtener la data gratis, de datasets que otros
+hayan subido a Reddit o GitHub?* Se relevó. **Sí hay data gratis; ninguna sirve para emitir un
+veredicto.** Y en GitHub/Reddit **no existe un dataset comunitario serio** de futuros CME
+intradía: lo que hay son recortes de pocos meses o scripts que descargan de las fuentes de abajo.
+
+| Fuente gratis | Qué da | Por qué no alcanza |
+|---|---|---|
+| Kaggle (NQ 1 min) | 2022-12 a 2025-12, ~1,05 M de barras | 3 años; procedencia y empalme desconocidos |
+| Yahoo Finance / Stooq | ES, NQ, CL, GC continuos | **sólo diario**; método de roll no documentado |
+| TurtleTrader | contratos mayores desde los 70 | **sólo diario**, nada intradía |
+| Sitios de CME / ICE | descarga directa | historia superficial, inviable en bulto |
+
+**El problema no es el precio, es el empalme.** Un futuro es una sucesión de contratos
+trimestrales; pegarlos produce un salto artificial en cada unión, y **cómo se corrige ese salto
+cambia todos los resultados**. Es exactamente el defecto que invalida al estudio arXiv:2605.04004
+(concatenación sin ajuste de roll, con ATR de 20 barras encima). Un CSV de procedencia desconocida
+reproduce ese error **sin que podamos detectarlo**: un `no-go` no distinguiría entre estrategia
+mala y dato malo, y un `go` sería peor.
+
+A eso se suma la profundidad. Tres años de historia, contra G1 = 300 operaciones OOS más el
+holdout, no alcanza.
+
+> **Decisión de uso.** La data gratis **sí** se admite como **dataset de desarrollo**: ejercitar la
+> tubería, cazar bugs y verificar mecanismos, igual que los datos sintéticos de la casilla 0.2. Es
+> mejor que lo sintético porque trae los defectos reales (huecos, medios días, feriados). Bajo I5,
+> verificar el mecanismo no es correr un ensayo. **Condición dura: nunca produce un veredicto y
+> nunca escribe en el ledger.**
+
+##### FirstRate Data — alternativa real a Databento
+
+| | Databento | FirstRate Data |
+|---|---|---|
+| Cobertura MNQ | desde 2019 | **2019-05-05 → 2026-09-18** (verificado) |
+| Granularidades | ohlcv 1s/1m/1h/1d | 1m, 5m, 30m, 1h, 1d |
+| Continuos | resuelve el contrato, **precios crudos sin ajustar** | crudo **+ ajustado por diferencia + ajustado por proporción**, y archivos por contrato |
+| Costo de compra | por GB; **$125 de crédito de alta** | **no publicado en el sitio** — sólo visible en el checkout |
+| Actualizaciones | incluidas en el modelo por uso | 1 mes gratis; después **$99,95/año** por ticker de futuros, o **$59,95/mes** por el bundle de 130 |
+| Muestra gratis | — | sí, descargable |
+| Licencia | leer en B.1 | **prohíbe redistribuir el dato crudo**; permite obra derivada y extractos (~2 semanas) **con atribución** |
+
+**Corrección:** una versión previa de esta conversación citó «$99,95» como el precio de compra de
+FirstRate. Es incorrecto: **$99,95 es la suscripción anual de actualizaciones**. El precio de
+compra del histórico no está publicado en las páginas públicas y hay que verlo en el checkout.
+Conocerlo es parte del DoD.
+
+**Cómo se dirime, y por qué el orden importa:**
+
+1. **Cotizar Databento primero** (`scripts/quote_databento.py`). No cuesta nada y no consume
+   crédito. Si MNQ en `ohlcv-1m` entra en los $125, la discusión termina ahí: gana Databento por
+   procedencia —histórico inmutable, re-pedible idéntico dentro de dos años, que es justo lo que
+   exige la reproducibilidad institucional.
+2. Si no entra, FirstRate es una alternativa legítima. **En ese caso se toma la serie SIN AJUSTAR**
+   y el empalme se hace igual en B.3. Su ajuste es una caja negra en medio del dato, y meter una
+   transformación opaca es precisamente lo que este proyecto no hace. **O sea que FirstRate no
+   ahorra trabajo de B.3** — la ventaja de sus series ajustadas es poder contrastar nuestro
+   empalme contra el suyo, que es control de calidad, no atajo.
+3. La cláusula de licencia de FirstRate es **compatible** con publicar veredictos: lo que se
+   publicaría son resultados y extractos, no las barras crudas. Conviene confirmarlo por escrito
+   antes del primer veredicto público, no después.
+
 #### [rev 2026-09-20] Comisiones de MFFU — punto 4 del DoD, **cerrado**
 
 Publicadas en el help center de MFFU (*Futures Instrument List*), contra lo que este documento
@@ -667,6 +729,9 @@ Tres consecuencias:
 4. ~~Comisión por contrato de MFFU, obtenida de su soporte, no inferida.~~ **Cerrado**, ver arriba.
 5. Licencia leída en lo que toca a **redistribución y retención**: el proyecto tiene que poder
    re-descargar el mismo dataset dentro de dos años para recomputar el hash.
+6. **[rev]** Si la cotización de Databento no entra en el crédito: **precio de compra de FirstRate
+   visto en el checkout** y escrito en el issue, más la confirmación de que su licencia admite
+   publicar veredictos con atribución.
 
 **Por qué `ohlcv-1m` y no tick.** La ventana de frecuencia de §9.3 (1–4 operaciones diarias) no
 necesita tick, y el filtro F-retardo sólo exige poder desplazar la entrada una barra o quince
@@ -679,9 +744,23 @@ contrato de forma natural, así que la abstracción del #55 aguanta futuros **si
 Lo que falta es una fuente de fichas por venue, no un fallback calculado: la heurística
 `tick_size = 10^-digits` **falla 25× en ES/NQ** (tick real 0,25 con 2 dígitos). Ver el #114.
 
+**[rev 2026-09-21] El dataset de desarrollo es una sub-tarea de esta casilla, y se puede hacer ya.**
+Bajar la muestra gratis de FirstRate (o el CSV de Kaggle) y dejarla en el store como dataset de
+desarrollo permite ejercitar la tubería con barras reales de MNQ **sin esperar la decisión de
+compra y sin tocar el ledger**. Requisito: que su `dataset_hash` quede marcado como no-veredicto,
+del mismo modo que el sintético de la casilla 0.2.
+
 ### ☐ B.3 — Exportador, empalme de continuos y sesiones CME
 
 El más caro, y el primero que mira una barra real — o sea, **el punto de no retorno de C.1b**.
+
+**[rev 2026-09-21] El empalme no se puede tercerizar: confirmado en las dos fuentes.** Databento
+resuelve *qué* contrato corresponde en cada fecha según la regla de roll elegida (`.v.0` por
+volumen, `.n.0` por interés abierto, `.c.0` por calendario) pero **entrega precios crudos, sin
+ajustar**, con una posición declarada: los ajustes son opacos, pueden introducir errores del
+proveedor y desvirtúan el cálculo de ciertas señales. FirstRate sí ofrece series ajustadas, pero
+su método es una caja negra, así que de esa fuente también se tomaría la serie cruda. **En los dos
+caminos el ajuste de roll queda de nuestro lado, y el alcance de B.3 no se achica.**
 
 **[rev] Corrección de un error del documento original.** Decía que con estrategia intradía nunca se
 sostiene una posición a través de un roll, así que la convención de empalme no altera resultados.
