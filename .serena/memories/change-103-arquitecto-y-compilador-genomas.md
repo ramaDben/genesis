@@ -28,7 +28,8 @@ El Director (Benjamín) y el Arquitecto (Agente) acordaron el protocolo de inter
 
 1. **Jerarquía de Errores de Dominio (`src/genesis/strategy/genome/errors.py`)**:
    - `GenomeValidationError`: base de errores de validación sintáctica o de tipos.
-   - `MissingAcademicProvenanceError`: levantado inmediatamente si falta `paper_ref` o si `fidelity` no es canónico (criterio D1).
+   - `MissingAcademicProvenanceError`: levantado inmediatamente si falta `paper_ref` o si falta `fidelity` (criterio D1).
+     **CORREGIDO el 2026-09-20:** esta línea decía «o si `fidelity` **no es canónico**». Es falso, verificado contra el árbol: `schema.py:129-138` construye `GenomeFidelity(fidelity_raw)` y sólo levanta si el valor **no pertenece al enum** — los cuatro (`canonical`, `interpreted`, `optimized`, `combined`) se aceptan. Lo que sí es obligatorio y no vacío es `paper_ref` (`schema.py:123-127`), y **eso** es lo que hay que liberar para admitir fuentes no académicas. Ver `mem:decision-arquitecto-adjudicador-2026-09-20`.
    - `CompiledCandidateStateError`: violaciones de invariantes en ejecución de estrategia compilada.
 
 2. **Esquema Inmutable y Parser Fail-Fast (`src/genesis/strategy/genome/schema.py`)**:
