@@ -604,8 +604,9 @@ Rithmic/Tradovate, IQFeed o Norgate — con precios, licencias y granularidades 
 requisito de reproducibilidad institucional exige que la fuente sea **estable y re-descargable**,
 porque el hash de dataset tiene que poder recomputarse dentro de dos años.
 
-Y las comisiones por contrato de MFFU **no están publicadas** en su help center; dependen de la
-plataforma. Hacen falta para `costs.py`.
+~~Y las comisiones por contrato de MFFU **no están publicadas** en su help center; dependen de la
+plataforma.~~ **[rev 2026-09-20] Esto era falso.** Sí están publicadas, en la *Futures Instrument
+List* del help center. Ver la tabla más abajo.
 
 **[rev] Entrega además el insumo de C.1b**: el catálogo real de fechas y la profundidad histórica
 efectiva por contrato, que es lo que permite dimensionar el holdout. Sin eso, C.1b se decide a
@@ -631,6 +632,31 @@ es órdenes de magnitud más pesado. Databento no publica una cifra por dataset 
 CME, así que **el número exacto sólo se conoce cotizando en la consola con el rango cargado** — eso
 es parte del DoD de esta casilla.
 
+#### [rev 2026-09-20] Comisiones de MFFU — punto 4 del DoD, **cerrado**
+
+Publicadas en el help center de MFFU (*Futures Instrument List*), contra lo que este documento
+afirmaba antes:
+
+| Instrumento | Costo total ida y vuelta | Tick | Valor del tick | Punto | Fricción en puntos |
+|---|---|---|---|---|---|
+| **MNQ** | **$1,90** | 0,25 | $0,50 | $2,00 | **0,95 pts** |
+| **NQ** | **$4,68** | 0,25 | $5,00 | $20,00 | **0,234 pts** |
+
+Tres consecuencias:
+
+1. **El número del CLAIM-001 no se contradice, se descompone.** El estudio de MNQ usa 2,0 pts =
+   $4,00 de fricción, aritmética consistente con $2,00 por punto. La comisión de MFFU es $1,90, o
+   sea **la mitad** de esa cifra. El resto es spread y slippage. **No es motivo para bajar el piso
+   de fricción**: para ejecución manual el slippage es peor que el supuesto de un backtest, no
+   mejor. Lo que se gana es que ahora el término de comisión es un dato medido y no un supuesto.
+2. **En puntos, NQ tiene 4× menos fricción que MNQ.** MFFU permite 3 minis o 30 micros, así que la
+   elección mini/micro no es sólo de tamaño: cambia el piso de rentabilidad por operación. Queda
+   como pregunta abierta para C.1b, junto con la de usar la historia larga del NQ.
+3. `costs.py` puede parametrizarse con cifras reales para MNQ y NQ.
+
+> Pendiente: confirmar si $1,90 es uniforme entre plataformas (Tradovate, Rithmic, NinjaTrader) o
+> si varía. La tabla de MFFU no lo desagrega.
+
 #### DoD actualizado
 
 1. Cuenta creada, crédito confirmado y **fecha de expiración anotada** (el crédito vence; el reloj
@@ -638,7 +664,7 @@ es parte del DoD de esta casilla.
 2. Cotización real en consola del rango objetivo: **MNQ, `ohlcv-1m` (agregable a 5m/15m), 2019 →
    hoy**, con el costo en GB y en dólares escrito en el issue.
 3. Catálogo de contratos con sus fechas efectivas — insumo de C.1b y de B.2.
-4. Comisión por contrato de MFFU, obtenida de su soporte, no inferida.
+4. ~~Comisión por contrato de MFFU, obtenida de su soporte, no inferida.~~ **Cerrado**, ver arriba.
 5. Licencia leída en lo que toca a **redistribución y retención**: el proyecto tiene que poder
    re-descargar el mismo dataset dentro de dos años para recomputar el hash.
 
