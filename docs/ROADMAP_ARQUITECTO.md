@@ -143,14 +143,20 @@ pasó por un filtro de selección invisible antes de llegar acá.
 | **B. Datos CME** | falsación previa, fuente, fichas, exportador, sesiones | **el primer ensayo real** |
 | **C. Decisiones** | política, holdout, semántica de ensayos, pre-registro | **la interpretación de cualquier resultado**, y A.6 |
 
-A y B avanzan en paralelo sin tocarse. C no bloquea construir —salvo A.6, que necesita D1— pero sí
-bloquea que lo construido signifique algo.
+**[rev 2026-09-20] B va primero, no en paralelo.** La versión original decía que A y B avanzaban en
+paralelo sin tocarse. Es cierto que no se tocan, y eso ocultó lo que importa: **B es el único carril
+en el camino crítico hacia el primer veredicto.** El carril A construye la máquina de proponer; sin
+B no hay nada que responda. Ver §9.1 para el razonamiento completo y §9.4 para el orden vigente.
+
+C no bloquea construir —salvo A.6, que necesita D1— pero sí bloquea que lo construido signifique
+algo. Dos de sus casillas (C.1a y C.1b) se volvieron **urgentes** al adelantarse B: el holdout hay
+que declararlo antes de mirar la primera vela, y B.3 es el punto de no retorno.
 
 ---
 
 ## 4. Casilla cero: lo que va antes que todo
 
-### ☐ 0.1 — Leer el estudio de falsación de señales OHLCV en MNQ
+### ☑ 0.1 — Leer el estudio de falsación de señales OHLCV en MNQ *(cerrada 2026-09-20, PR #122)*
 
 **Qué es.** El [#107](https://github.com/ramaDben/genesis/issues/107) deja anotada una pista sin
 leer: un trabajo en arXiv titulado *«Structural Limits of OHLCV-Based Intraday Signals in MNQ
@@ -171,7 +177,15 @@ literatura relacionada.
 **Hecho cuando.** Está leído, entrado al corpus con su procedencia y su predicción falsable, y la
 conclusión —sirva o no— está escrita con su porqué.
 
-### ☐ 0.2 — Demostrar que el ledger registra
+**Resultado.** Leído en la fuente primaria: arXiv:2605.04004 v3 (Mesfin 2026), PDF de 17 páginas.
+**No reordena el roadmap** —preprint de autor único, sin revisión de pares, denominador de ensayos
+autodeclarado como desconocido, controles positivos que son sobrevivientes de su propia búsqueda,
+pliegue OOS contaminado admitido, sin ajuste de roll: bajo los gates de genesis no pasaría G4— pero
+**sí mueve el prior**, y fuerte sobre la familia ORB, que es el candidato prioritario del torneo:
+T = 0,88 sobre 447 operaciones OOS. Corpus sembrado en `docs/corpus/` con seis claims y la
+evaluación de la fuente *como fuente*. Ver `docs/corpus/0.1-conclusion.md`.
+
+### ☑ 0.2 — Demostrar que el ledger registra *(cerrada 2026-09-20, PR #123)*
 
 **Qué es.** Correr el pipeline de punta a punta sobre datos sintéticos y verificar que
 `ledger/trials.jsonl` queda con un registro.
@@ -190,6 +204,23 @@ idéntica **no** duplica el registro (idempotencia del `trial_id`). El `dataset_
 deja distinguible de cualquier ensayo real.
 
 **Vía.** Rápida — es un script y una medición, no toca `src/`.
+
+**Resultado: PASA.** `scripts/prove_ledger.py`, dos corridas idénticas sobre datos sintéticos
+deterministas: 1 registro tras la primera, **1 tras la segunda**, 0 duplicados,
+`trial_id=dba20c3d…`. Tres hallazgos de paso:
+
+1. Escribe en un ledger **temporal**, no en el del repo: `verdict.py` suma `ledger_extra_trials` sin
+   filtrar por símbolo ni clase de activo, así que un registro sintético inflaría el `n_trials` de
+   toda corrida real futura. Defecto del punto 4 del #114, ahora confirmado en la práctica.
+2. `--candidate B` está **roto** desde el #109 (`BacktestConfigError: Sin ExitGeometry`): la fábrica
+   por letra no implementa `ExitGeometryProvider`. Hay que pasar `--genome`. **D2 se está
+   resolviendo por atrición**, no por decisión — ver C.3.
+3. En la segunda corrida el pipeline imprime `ledger: +1 registrado(s)` **aunque no escribió nada**:
+   cuenta los `trial_id` que devuelve `record_trial_completions`, no las filas que `append_trial`
+   agregó. El archivo queda correcto; la salida miente al operador.
+
+Verificado además: `ledger/trials.jsonl` está en 0 bytes y `ledger/archive/trials_pre_109.jsonl` en
+0 líneas. El contador arranca genuinamente en cero y nunca se archivó nada.
 
 ---
 
@@ -260,13 +291,14 @@ política citable.
 **[rev] Esta casilla se movió de lugar: bloquea a A.6.** El documento original la ponía al final y
 al mismo tiempo declaraba en A.6 que A.6 la necesitaba. Contradicción interna, corregida.
 
-Cuatro de sus siete decisiones abiertas dejan de ser teóricas:
+Cinco de sus siete decisiones abiertas dejan de ser teóricas:
 
 | Decisión | Qué cambia con el arquitecto |
 |---|---|
 | **D1** — qué cuenta como ensayo | Pregunta nueva y **bloqueante de A.6**: ¿cada interpretación de un claim subespecificado es un ensayo propio, o la familia cuenta como uno? Y: ¿el venue entra como **exigencia** o como **selección**? De eso depende si el ledger debe particionar (ver §1, D-C) |
 | **D2** — destino del `CANDIDATE_REGISTRY` | Sigue resuelta **por elusión**: `strategy/contract.py:63` sigue indexado por letra y los genomas compilados nunca entran ahí. Conviene declararla al formalizar la gramática, no seguir eludiéndola |
 | **D4** — techo de presupuesto de ensayos | Con un arquitecto pasa de teórico a operativo. Es la cláusula que C.2 tiene que escribir |
+| **D5** — límites de complejidad del genoma | **[rev] Omisión del documento original, corregida.** A.1 propone una gramática cerrada y A.2 un catálogo cerrado de mecanismos: las dos son respuestas *de facto* a D5, tomadas por construcción y sin declararlas. Es el mismo modo de falla que D2. Un límite de complejidad además no es estético: cada grado de libertad extra del genoma es una dimensión sobre la que el arquitecto puede seleccionar, y por D1 eso son ensayos. **La gramática de A.1 no se cierra hasta que D5 esté escrita** |
 | **D7** — concurrencia del ledger | `append_trial` **no es atómico entre procesos**. Quedó fuera de alcance del #53 explícitamente. Cualquier arquitecto que paralelice corridas lo choca de frente |
 
 **D6** («qué autores y en qué orden») se reformula: con D-A pasa a ser *qué traders y en qué orden*,
@@ -565,7 +597,7 @@ filtros distintos y **no cuenta ninguna**.
 
 ## 7. Carril B — Datos CME
 
-### ☐ B.1 — Fuente de datos y comisiones *(decisión abierta, no resoluble leyendo el repo)*
+### ☐ B.1 — Fuente de datos y comisiones **← PRIMERA CASILLA VIGENTE**
 
 No hay MT5 para futuros. Las opciones reales son Databento, CME DataMine directo, el feed de
 Rithmic/Tradovate, IQFeed o Norgate — con precios, licencias y granularidades muy distintas. El
@@ -578,6 +610,41 @@ plataforma. Hacen falta para `costs.py`.
 **[rev] Entrega además el insumo de C.1b**: el catálogo real de fechas y la profundidad histórica
 efectiva por contrato, que es lo que permite dimensionar el holdout. Sin eso, C.1b se decide a
 ciegas.
+
+#### [rev 2026-09-20] Precio verificado en la fuente primaria
+
+Consultado en `databento.com/pricing` y `databento.com/venues/cme-globex`:
+
+| Hecho | Valor |
+|---|---|
+| Modelo de cobro | **Uso, por GB de datos binarios sin comprimir descargados** — no por dataset |
+| Crédito inicial para cuentas nuevas | **$125, expira 6 meses después del alta** |
+| Planes | Standard $199/mes · Plus $1.750/mes (anual) · Unlimited $4.500/mes (anual) |
+| Cobertura | CME Globex MDP 3.0 |
+| Esquemas incluidos **en todos los planes** | L0: `ohlcv-1s`, `ohlcv-1m`, `ohlcv-1h`, `ohlcv-1d` |
+| Profundidad de MNQ | desde **2019** |
+
+**Consecuencia.** El costo de entrada para barras OHLCV es plausiblemente **cero**: el crédito
+inicial de $125 debería cubrir varios años de barras de 1m de un instrumento, porque el peso está
+en el tick, no en la barra. El `~$42/trimestre` que cita el CLAIM del corpus es para **tick**, que
+es órdenes de magnitud más pesado. Databento no publica una cifra por dataset para el histórico de
+CME, así que **el número exacto sólo se conoce cotizando en la consola con el rango cargado** — eso
+es parte del DoD de esta casilla.
+
+#### DoD actualizado
+
+1. Cuenta creada, crédito confirmado y **fecha de expiración anotada** (el crédito vence; el reloj
+   corre desde el alta, no desde el primer uso).
+2. Cotización real en consola del rango objetivo: **MNQ, `ohlcv-1m` (agregable a 5m/15m), 2019 →
+   hoy**, con el costo en GB y en dólares escrito en el issue.
+3. Catálogo de contratos con sus fechas efectivas — insumo de C.1b y de B.2.
+4. Comisión por contrato de MFFU, obtenida de su soporte, no inferida.
+5. Licencia leída en lo que toca a **redistribución y retención**: el proyecto tiene que poder
+   re-descargar el mismo dataset dentro de dos años para recomputar el hash.
+
+**Por qué `ohlcv-1m` y no tick.** La ventana de frecuencia de §9.3 (1–4 operaciones diarias) no
+necesita tick, y el filtro F-retardo sólo exige poder desplazar la entrada una barra o quince
+minutos. Comprar tick ahora sería pagar por precisión que ninguna estrategia admisible usa.
 
 ### ☐ B.2 — Fichas de contrato por venue
 
@@ -626,41 +693,131 @@ símbolo ni clase de activo) se promueve a insumo de D1 en C.3.
 
 ---
 
-## 9. Orden propuesto
+## 9. Orden de ejecución **[rev 2026-09-20 — reordenado]**
+
+### 9.1 Por qué se reordenó
+
+El orden anterior ponía A y B «en paralelo» y en los hechos arrancaba por A: ocho casillas de
+arquitecto antes de que existiera un solo dato de futuros en el disco. Una revisión adversarial
+externa lo atacó y el ataque es correcto: **sin datos de CME no hay veredicto posible, por más
+arquitecto que haya.** El carril A construye la máquina de proponer; el carril B construye la
+única cosa capaz de responder. Construir la primera antes que la segunda es optimizar la parte
+que no está en el camino crítico.
+
+Tres hechos medidos en esta sesión cierran la discusión:
+
+1. **G1 exige 300 operaciones OOS** (`src/genesis/validation/verdict.py:60`). Es la restricción que
+   gobierna qué frecuencia de estrategia es siquiera admisible, y no se puede razonar sobre ella sin
+   saber cuánta historia hay.
+2. **MNQ tiene datos desde 2019** (~6,4 años). Reservar holdout sobre eso es un presupuesto ajustado,
+   no holgado.
+3. **Databento da $125 de crédito inicial** y cobra por GB descargado; las barras OHLCV de 1m/1h/1d
+   de CME Globex están incluidas en todos los planes. El costo de entrada de B.1 es plausiblemente
+   **cero**, contra las semanas que cuesta el carril A. La relación costo/desbloqueo no admite duda.
+
+### 9.2 La relajación «ejecutable por un humano», bien leída
+
+El dueño relajó el alcance: la estrategia no tiene que ser automatizada si es lo bastante lenta para
+ejecutarla a mano. **Esa relajación no es sobre frecuencia, es sobre tolerancia al retardo.**
+
+Un humano puede tomar dos o tres entradas por día sin problema. Lo que no puede es ejecutar en el
+segundo exacto del cierre de una barra. Y el CLAIM-006 del corpus mide justamente eso: **un retardo
+de una barra invierte el signo de T** (+4,30 → −2,78) en la señal más fuerte del estudio de MNQ. No
+se degrada: cambia de signo. Toda la ventaja vivía dentro de una sola barra.
+
+De ahí sale un filtro barato que se agrega al roadmap:
+
+> **F-retardo.** Todo candidato se corre además con la entrada retardada (bar+1 y ~15 min). Si la
+> ventaja muere o invierte con el retardo, el candidato es **inejecutable por un humano** y queda
+> descartado sin discusión.
+
+Es un filtro de **una sola dirección**: sólo puede rechazar, nunca admitir. Sobrevivir al retardo no
+es evidencia a favor, así que no es una dimensión de selección y **no cuenta como ensayo bajo D1**
+(es una exigencia, no una selección). Eso lo hace gratis en términos de DSR.
+
+### 9.3 La ventana de frecuencia admisible
+
+Las dos restricciones aprietan desde lados opuestos y dejan una ventana estrecha:
+
+| Presión | Empuja hacia | Origen |
+|---|---|---|
+| G1 = 300 operaciones OOS, ~6,4 años de MNQ, menos el holdout | **más frecuencia** | `verdict.py:60` |
+| Fricción MNQ 2,0 pts = $4,00 ida y vuelta; 11 de 14 familias del estudio tenían ventaja bruta de 0,07–1,50 pts | **menos frecuencia** (objetivos más grandes) | CLAIM-001 |
+| Ejecución humana sin retardo fino | **menos frecuencia** | F-retardo |
+| Drawdown TRAILING_EOD de $2.000 y regla de consistencia del 30% | **más operaciones, más chicas** | perfil MFFU |
+
+**Ventana resultante: aproximadamente 1 a 4 operaciones por día.** Alcanza para juntar 300
+operaciones OOS en ~1–1,5 años de historia, es lento para ejecutarlo a mano, y admite objetivos lo
+bastante grandes como para que $4 de fricción no sean el término dominante.
+
+> **Pendiente de verificación con la fuente:** si la regla de consistencia del 30% de MFFU aplica a
+> la fase de evaluación o sólo al retiro. El perfil la codifica con `semantics: terminate`
+> (`data/house_rule.py:136`), pero eso es la implementación, no el reglamento. Afecta directamente
+> cuán vinculante es la fila 4 de la tabla.
+
+### 9.4 El orden
 
 ```
-0.1  Leer la falsación de MNQ ──────────────┐ insumo que puede reordenar (no veto)
-0.2  Demostrar que el ledger registra       │
-                                            │
-C.1a Holdout: régimen (decisiones 2 y 3) ───┤ gratis hoy, no depende del dataset
-C.2  POLITICA.md (cláusula del arquitecto)  │ reactivado por la decisión de hoy
-C.3  RFC #57: D1, D2, D4, D7 ───────────────┤ D1 bloquea a A.6
-                                            │
-A.1  Gramática con despacho ────────────────┤ requisito de viabilidad
-A.2  Gate 0 + taxonomía de mecanismos       │
-A.3  Corpus ────────────────────────────────┤ decide qué primitivas hacen falta
-A.4  Primitivas de ejecución                │  carril A
-A.5  Enmascaramiento y cassette             │  (sin datos de mercado,
-A.6  Registro de subespecificación ←── C.3  │   sin gastar ensayos)
-A.7  Dedup semántico                        │
-A.8  Adaptador de fuente ───────────────────┘
+── HECHO ──────────────────────────────────────────────────────────────
+0.1  Falsación de MNQ leída, corpus sembrado           PR #122
+0.2  Ledger demostrado: registra y es idempotente      PR #123
 
-B.1  Fuente de datos + comisiones ──────────┐ carril B, en paralelo
-C.1b Holdout: tamaño ←── B.1                │ bloquea el primer ensayo,
-B.2  Fichas de contrato por venue           │ no la construcción
-B.3  Exportador, empalme, sesiones ─────────┘ ← punto de no retorno de C.1b
+── AHORA: desbloquear ─────────────────────────────────────────────────
+B.1  Databento: alta, crédito, MNQ barras 5m/15m 2019→hoy   ← acción humana
+C.1a Holdout: régimen               ┐ AMBAS antes de mirar la primera vela.
+C.1b Holdout: tamaño ←── B.1        ┘ Irreversible: una vez visto el dato no
+                                      hay forma honesta de reservarlo.
+B.2  Fichas de contrato CME
+B.3  Exportador, empalme de continuos, sesiones  ← punto de no retorno
 
-C.4  Pre-registro #88 (hipótesis + orden de fuentes) ← antes del primer ensayo
+── DESPUÉS: hacer honesto lo que ya existe ────────────────────────────
+C.3  RFC #57: D1, D2, D4, D5, D7    ← D5 cierra la gramática, D1 bloquea A.6
+A.1  Gramática con ramificación ←── D5
+A.4  Primitivas de ejecución (una o dos, las que pida el corpus)
+C.4  Pre-registro: hipótesis + ORDEN DE FUENTES  ← antes del primer ensayo
+
+── PRIMER VEREDICTO ───────────────────────────────────────────────────
+Dos o tres estrategias escritas A MANO, dentro de la ventana de 9.3,
+corridas con F-retardo. Sin arquitecto automático de por medio.
+
+── SÓLO SI EL MOTOR DEMOSTRÓ QUE SIRVE ────────────────────────────────
+A.2  Gate 0 + taxonomía de mecanismos      ┐
+A.3  Corpus formalizado                    │ CONGELADAS.
+A.5  Enmascaramiento y cassette            │ Resuelven problemas que sólo
+A.6  Registro de subespecificación ←── C.3 │ aparecen con volumen de
+A.7  Dedup semántico                       │ estrategias, y todavía no hay
+A.8  Adaptador de fuente                   ┘ ninguna.
+C.2  POLITICA.md                             ← antes de capital real
 ```
 
-**Dependencias que no se pueden invertir:** C.3 antes de A.6; A.3 antes de A.4; B.1 antes de C.1b;
-C.1b antes de B.3; todo el carril A antes de A.8.
+**Dependencias que no se pueden invertir:** C.1a y C.1b **antes** de B.3; B.1 antes de C.1b; D5
+antes de cerrar A.1; C.3/D1 antes de A.6; C.4 antes del primer ensayo real.
+
+### 9.5 Lo que se rechazó de la revisión externa
+
+- **«Bajar G1 de 300 a 100 operaciones y aflojar los criterios.»** Rechazado. Bajar la vara después
+  de ver que la vara es difícil es selección sobre resultados, que es el mecanismo exacto que este
+  proyecto existe para no ejecutar. Y se contradice con la evidencia que la propia revisión cita:
+  el estudio de MNQ muestra que las familias de alta frecuencia tienen ventaja bruta **por debajo**
+  del costo de operarlas.
+- **«El ledger te salva del lazo de realimentación humano.»** Falso, y peligroso. El ledger cuenta
+  los ensayos que se **corrieron**; nunca cuenta las alternativas que el operador consideró y
+  descartó antes de correr nada. Ese lazo se cierra en la cabeza del operador, aguas arriba de
+  cualquier registro. El único remedio sigue siendo I6: **pre-registrar el orden de las fuentes**
+  (C.4).
+- **«El carril A es un desperdicio»** dicho en el mismo texto que exige ampliar la gramática. Ampliar
+  la gramática **es** A.1. Lo que se congela son A.2 y A.5–A.8, no el carril entero.
 
 ---
 
 ## 10. Lo que este roadmap no resuelve
 
-- **De dónde salen los datos de CME** (B.1). Decisión de compra, con costo real.
+- **De dónde salen los datos de CME** (B.1). Decisión de compra. **[rev]** El precio de lista de
+  Databento ya está verificado y el crédito inicial de $125 hace plausible que el costo de entrada
+  sea cero; lo que falta es la **cotización real del rango** en consola y la lectura de la licencia.
+- **Si la regla de consistencia del 30% de MFFU aplica a la evaluación o sólo al retiro.** El perfil
+  la codifica con `semantics: terminate`, pero eso es la implementación, no el reglamento. Cambia
+  cuán vinculante es la presión hacia más operaciones de §9.3. Se resuelve preguntándole a MFFU.
 - **Las tres decisiones del #81**: régimen (C.1a) y tamaño (C.1b).
 - **El techo de presupuesto de ensayos** (D4). Es un número que sale de política, no de código.
 - **Si el venue es exigencia o selección** bajo D1. Decide si el ledger debe filtrar o agrupar.
