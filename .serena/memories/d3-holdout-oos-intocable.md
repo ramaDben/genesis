@@ -101,3 +101,33 @@ de un GO **sea** el holdout.
 El issue #81 queda **reservado** junto con el resto del trabajo de gobernanza. La decisión sigue sin
 tomarse y sigue sin ser urgente **mientras no haya un candidato cerca de los umbrales** — que es
 justamente la condición 3 de arriba. Ver `mem:reserva-de-gobernanza-2026-09`.
+
+---
+
+## D3 quedó decidida el 2026-09-21 — y el título de arriba ya no describe el estado
+
+La decisión que este archivo daba por no tomada **está tomada y ratificada por el dueño del
+proyecto**. Lo que sigue siendo cierto es el hallazgo técnico: en el código **no hay holdout**, y el
+residuo posterior a la última ventana **no es uno**. Lo que cambió es que ahora hay un régimen
+declarado que hay que implementar.
+
+Lo ratificado, en cinco puntos:
+
+1. **Corte por fecha calendaria: 2025-01-01.** Holdout de 21 meses, 9 ventanas de walk-forward
+   (mínimo duro 4). Medido corriendo `wfa._iter_window_bounds`, no estimado. Nunca por proporción:
+   una proporción se mueve sola cuando el dataset crece.
+2. **Una sola mirada por candidato**, sin reintento y sin reset. Mirar cuenta como ensayo y
+   deflaciona el DSR.
+3. **Gate, no informativo.** Falla ahí → se descarta, sin compensación con otros gates.
+4. **Se congela el procedimiento, no los parámetros** — incluida la cadencia de reajuste (252/126/126).
+   Congelar parámetros contradecía el `step=126` del propio walk-forward.
+5. **Aprueba si llega a ser fondeado** al menos una vez y los fondeos son ≥ los quiebres, recorriendo
+   el reglamento de MFFU sobre el camino real. Ver `mem:mffu-rapid-eod-50k-reglas-confirmadas`.
+
+Documentos: `docs/POLITICA_HOLDOUT.md` y `docs/DIMENSIONAMIENTO_HOLDOUT.md` (PR #124). Se ratificaron
+**en bloque y antes de que existiera un solo dato de futuros CME en el disco**, que es la única
+condición bajo la cual un holdout declarado vale algo.
+
+**Lo que falta ahora es implementación, no decisión:** el borde tiene que entrar al manifiesto como
+clave de identidad, y hay que escribir la entrada de `prop_sim` que consuma la secuencia real de días
+en orden en vez de la remuestreada por bootstrap.
