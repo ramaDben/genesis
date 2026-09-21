@@ -278,17 +278,31 @@ confiable la única prueba sin reintento**. 21 meses es el cruce: casi el doble 
 por un costo casi nulo en velocidad mínima, y con 40 días hábiles de margen antes de caer a 8
 ventanas.
 
-**Criterio de aprobación, que estaba abierto: sobrevivir el reglamento de MFFU** —$50k, $2.000 de
-pérdida máxima con arrastre al cierre, consistencia 30%— sobre el **camino realizado**. Propuesto
-por agy. Ningún umbral lo elegimos nosotros, así que no hay parámetro libre que ajustar al ver el
-resultado, y `validation/prop_sim.py:run_prop_sim` ya lo implementa sobre los ledgers OOS reales.
-**Salvedad escrita:** su `p_pass` está declarado en el propio código como **sesgado al alza**
-(evalúa cierre-a-cierre, no equity flotante intradía) y explícitamente **no** como margen de
-seguridad — por eso vincula el camino realizado y no la probabilidad.
+**Criterio de aprobación, que estaba abierto: llegar a ser fondeado.** Se recorre el holdout día
+por día, **en su orden real**, con el reglamento del Rapid EOD 50K —objetivo $3.000, $2.000 de
+pérdida máxima con arrastre al cierre, 4 días mínimos, consistencia 30%—, y al quebrar se reinicia
+el intento al día hábil siguiente. **Aprueba si hay al menos un fondeo y los fondeos son al menos
+tantos como los quiebres.** Ningún umbral lo elegimos nosotros. Días hasta el fondeo e intentos
+consumidos se reportan, pero no vinculan. La idea de anclar el criterio al reglamento en vez de a
+una métrica estadística la propuso agy.
 
-**Sigue abierto:** si se usa la historia larga del **NQ** en vez de MNQ. MFFU permite 3 minis o 30
-micros, así que es viable, cambiaría toda la tabla de arriba, y **tendría que decidirse antes de
-B.3**, no después.
+> **[corregido el 2026-09-21]** La primera redacción preguntaba si la cuenta **sobrevivía** los 21
+> meses. Eso mide algo que el desafío real nunca pide: termina en cuanto se llega al objetivo,
+> normalmente en semanas. Y la consistencia del 30% **no descalifica** —verificado en fuente
+> primaria, sólo obliga a operar más días—, así que no cabe en un criterio binario de supervivencia.
+> La misma redacción afirmaba que `validation/prop_sim.py:run_prop_sim` **ya lo implementaba**:
+> **es falso.** Genera los días con un *moving-block bootstrap* y devuelve una probabilidad; con un
+> límite que arrastra, barajar el orden borra justo lo que decide el quiebre. Falta escribir una
+> entrada que consuma la secuencia real, y es la única pieza de código que el criterio necesita.
+
+**Salvedad que sigue en pie:** `p_pass` está declarado en el propio código como **sesgado al alza**
+(evalúa cierre-a-cierre, nunca equity flotante intradía) y explícitamente **no** como margen de
+seguridad. Por eso se reporta y no vincula.
+
+**Cerrado el 2026-09-21 — MNQ, no NQ.** Con $2.000 de pérdida máxima, el contrato grande mueve $20
+por punto: 100 puntos en la apertura liquidan la cuenta en una sola operación, contra $2 por punto
+del micro. La granularidad pesa más que los años de historia, y la tabla de arriba ya estaba
+calculada sobre MNQ. Deja de ser una dependencia de B.3.
 
 Todo el análisis de costo que el #81 trae escrito —perder una ventana, dejar G1 con 8% de margen
 sobre 405 trades— estaba calculado contra el dataset US500 de CFD, que **murió con D-C**. Queda
@@ -653,7 +667,7 @@ la primera sesión utilizable del MNQ, y está verificado en fuente primaria con
 proveedores: **2019-05-05** en FirstRate, y Databento declara el MNQ desde 2019. Con eso alcanzó
 para dimensionar, así que **C.1b ya está escrita** y no bloquea. Lo que B.1 todavía tiene que
 confirmar es el catálogo de contratos con sus fechas efectivas, que es insumo de B.2 y de la
-pregunta abierta del NQ.
+elección de contrato, ya cerrada a favor de MNQ el 2026-09-21.
 
 #### [rev 2026-09-20] Precio verificado en la fuente primaria
 
@@ -755,8 +769,12 @@ Tres consecuencias:
    de fricción**: para ejecución manual el slippage es peor que el supuesto de un backtest, no
    mejor. Lo que se gana es que ahora el término de comisión es un dato medido y no un supuesto.
 2. **En puntos, NQ tiene 4× menos fricción que MNQ.** MFFU permite 3 minis o 30 micros, así que la
-   elección mini/micro no es sólo de tamaño: cambia el piso de rentabilidad por operación. Queda
-   como pregunta abierta para C.1b, junto con la de usar la historia larga del NQ.
+   elección mini/micro no es sólo de tamaño: cambia el piso de rentabilidad por operación.
+   **[rev 2026-09-21] Cerrado a favor de MNQ**, por granularidad: con $2.000 de pérdida máxima un
+   solo NQ arriesga $20 por punto y no deja dimensionar la posición. **La contrapartida es real y
+   hay que medirla:** a igual riesgo asumido, el micro paga del orden de **10× más comisión** que el
+   mini, porque hacen falta ~10 micros para igualar un mini y la comisión es por contrato. Ese es el
+   precio de la granularidad, y se cuantifica al recalibrar los costos a CME.
 3. `costs.py` puede parametrizarse con cifras reales para MNQ y NQ.
 
 > Pendiente: confirmar si $1,90 es uniforme entre plataformas (Tradovate, Rithmic, NinjaTrader) o
@@ -970,14 +988,12 @@ C.1b necesitaba de B.1 era la primera sesión utilizable del MNQ, verificada en 
 - **De dónde salen los datos de CME** (B.1). Decisión de compra. **[rev]** El precio de lista de
   Databento ya está verificado y el crédito inicial de $125 hace plausible que el costo de entrada
   sea cero; lo que falta es la **cotización real del rango** en consola y la lectura de la licencia.
-- **Si la regla de consistencia del 30% de MFFU aplica a la evaluación o sólo al retiro.** El perfil
-  la codifica con `semantics: terminate`, pero eso es la implementación, no el reglamento. Cambia
-  cuán vinculante es la presión hacia más operaciones de §9.3. Se resuelve preguntándole a MFFU.
+- ~~**Si la regla de consistencia del 30% de MFFU aplica a la evaluación o sólo al retiro.**~~
+  **[rev 2026-09-21] Resuelto en fuente primaria: sólo a la evaluación, y no descalifica** — sólo
+  obliga a operar más días hasta diluir el día grande. El perfil ya la codifica con esa semántica.
 - ~~**Las tres decisiones del #81**: régimen (C.1a) y tamaño (C.1b).~~ **[rev 2026-09-21] Escritas**
   en `POLITICA_HOLDOUT.md` y `DIMENSIONAMIENTO_HOLDOUT.md` (PR #124), como propuesta. Lo que este
-  roadmap sigue sin resolver es la **ratificación**, que es humana, y la pregunta abierta de si se
-  usa la historia larga del NQ en vez de MNQ — que cambiaría el dimensionamiento entero y tiene que
-  decidirse antes de B.3.
+  roadmap sigue sin resolver es la **ratificación**, que es humana.
 - **El techo de presupuesto de ensayos** (D4). Es un número que sale de política, no de código.
 - **Si el venue es exigencia o selección** bajo D1. Decide si el ledger debe filtrar o agrupar.
 - **Cuánto descontar por el sesgo de supervivencia de la fuente.** I7 dice que un «sobrevive»
