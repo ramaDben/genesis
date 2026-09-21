@@ -150,7 +150,8 @@ B no hay nada que responda. Ver §9.1 para el razonamiento completo y §9.4 para
 
 C no bloquea construir —salvo A.6, que necesita D1— pero sí bloquea que lo construido signifique
 algo. Dos de sus casillas (C.1a y C.1b) se volvieron **urgentes** al adelantarse B: el holdout hay
-que declararlo antes de mirar la primera vela, y B.3 es el punto de no retorno.
+que declararlo antes de mirar la primera vela, y B.3 es el punto de no retorno. **[rev 2026-09-21]
+Las dos ya están escritas** (PR #124) y esperan ratificación humana.
 
 ---
 
@@ -226,7 +227,19 @@ Verificado además: `ledger/trials.jsonl` está en 0 bytes y `ledger/archive/tri
 
 ## 5. Carril C — Las decisiones con ventana que se cierra
 
-### ☐ C.1a — Declarar el régimen del holdout ([#81](https://github.com/ramaDben/genesis/issues/81), decisiones 2 y 3)
+### ☑ C.1a — Declarar el régimen del holdout ([#81](https://github.com/ramaDben/genesis/issues/81), decisiones 2 y 3)
+
+> **Escrita** en [`POLITICA_HOLDOUT.md`](POLITICA_HOLDOUT.md) ([PR #124](https://github.com/ramaDben/genesis/pull/124)).
+> Estado: **propuesta, pendiente de ratificación humana.** Resultado: el holdout es **gate, no
+> informativo**; **una mirada por candidato**, sin reintento y sin reset; mirar cuenta como ensayo;
+> el borde entra al manifiesto y se define por **fecha calendaria**, no por proporción.
+>
+> **Corrección posterior (§2.1 de ese documento), detectada por una revisión externa de agy:** lo
+> que se congela antes de mirar el holdout es el **procedimiento** —genoma, grilla, criterio de
+> selección y **cadencia de reajuste**—, **no los parámetros ajustados**. Congelar los parámetros
+> contradecía el `step = 126` del propio walk-forward, que afirma que el ajuste se rehace cada seis
+> meses. Efecto lateral: desactiva la objeción de que un holdout grande deja el entrenamiento ciego
+> a los años recientes.
 
 **[rev] El #81 se parte en dos.** El documento original lo trataba como una sola casilla «gratis
 ahora», y eso es falso para una de sus tres decisiones.
@@ -242,20 +255,44 @@ Estas dos **no dependen del dataset** y son gratis hoy:
 **Hecho cuando.** Las dos están escritas con su porqué, y el borde del holdout está declarado como
 clave de identidad del artefacto junto a los hashes de dataset y perfiles.
 
-### ☐ C.1b — Dimensionar el holdout *(después de B.1, estrictamente antes de B.3)*
+### ☑ C.1b — Dimensionar el holdout *(estrictamente antes de B.3)*
 
-**[rev] Esto no se puede decidir hoy.** El tamaño depende de cuánta historia exista, y eso sale del
-catálogo del proveedor. El MNQ cotiza desde **mayo de 2019** — unos 6,4 años, no quince. Fijar a
-ciegas un holdout de dos años sobre un historial de seis consume un tercio de la muestra y puede
-romper G1, que exige ≥300 trades OOS.
+> **Escrita** en [`DIMENSIONAMIENTO_HOLDOUT.md`](DIMENSIONAMIENTO_HOLDOUT.md)
+> ([PR #124](https://github.com/ramaDben/genesis/pull/124), el mismo que C.1a — **no se pueden
+> ratificar por separado**). Estado: **propuesta, pendiente de ratificación humana.**
 
-Matiz que cambia el cálculo: MFFU permite **3 minis o 30 micros**, así que se puede usar la historia
-larga del **NQ** (desde 1996) y operar **MNQ**. Eso hay que confirmarlo contra el catálogo real del
-proveedor en B.1.
+**Resultado: corte el 2025-01-01, holdout de 21 meses.** Medido corriendo el generador de ventanas
+real (`wfa._iter_window_bounds`), no estimado, sobre MNQ desde 2019-05-05:
+
+| Corte | Holdout | Ventanas | Velocidad mínima que exige G1 | Operaciones en el holdout* |
+|---|---|---|---|---|
+| 2025-10-01 | 12 meses | 10 | 1 cada 4,2 días | 58 |
+| **2025-01-01** | **21 meses** | **9** | **1 cada 3,8 días** | **114** |
+| 2024-10-01 | 24 meses | 8 | 1 cada 3,4 días | 147 |
+
+<sub>\* Para la estrategia más lenta que todavía califica — el caso peor, que es el que decide.</sub>
+
+Las dos últimas columnas tiran para lados opuestos: un holdout grande **achica el universo de
+estrategias admisibles** (G1 pide 300 trades OOS sumados sobre menos ventanas) pero **hace más
+confiable la única prueba sin reintento**. 21 meses es el cruce: casi el doble de evidencia que 12
+por un costo casi nulo en velocidad mínima, y con 40 días hábiles de margen antes de caer a 8
+ventanas.
+
+**Criterio de aprobación, que estaba abierto: sobrevivir el reglamento de MFFU** —$50k, $2.000 de
+pérdida máxima con arrastre al cierre, consistencia 30%— sobre el **camino realizado**. Propuesto
+por agy. Ningún umbral lo elegimos nosotros, así que no hay parámetro libre que ajustar al ver el
+resultado, y `validation/prop_sim.py:run_prop_sim` ya lo implementa sobre los ledgers OOS reales.
+**Salvedad escrita:** su `p_pass` está declarado en el propio código como **sesgado al alza**
+(evalúa cierre-a-cierre, no equity flotante intradía) y explícitamente **no** como margen de
+seguridad — por eso vincula el camino realizado y no la probabilidad.
+
+**Sigue abierto:** si se usa la historia larga del **NQ** en vez de MNQ. MFFU permite 3 minis o 30
+micros, así que es viable, cambiaría toda la tabla de arriba, y **tendría que decidirse antes de
+B.3**, no después.
 
 Todo el análisis de costo que el #81 trae escrito —perder una ventana, dejar G1 con 8% de margen
-sobre 405 trades— está calculado contra el dataset US500 de CFD, que **murió con D-C**. No sirve
-como referencia; hay que rehacerlo contra el dataset de futuros.
+sobre 405 trades— estaba calculado contra el dataset US500 de CFD, que **murió con D-C**. Queda
+reemplazado por la tabla de arriba.
 
 **La ventana de irreversibilidad sigue abierta y se cierra en B.3**, en el instante en que se mire
 la primera barra de CME. Un holdout no se puede declarar sobre datos que ya se miraron.
@@ -609,8 +646,14 @@ plataforma.~~ **[rev 2026-09-20] Esto era falso.** Sí están publicadas, en la 
 List* del help center. Ver la tabla más abajo.
 
 **[rev] Entrega además el insumo de C.1b**: el catálogo real de fechas y la profundidad histórica
-efectiva por contrato, que es lo que permite dimensionar el holdout. Sin eso, C.1b se decide a
-ciegas.
+efectiva por contrato, que es lo que permite dimensionar el holdout.
+
+**[rev 2026-09-21] Esta dependencia se resolvió por adelantado.** El dato que C.1b necesitaba era
+la primera sesión utilizable del MNQ, y está verificado en fuente primaria contra los dos
+proveedores: **2019-05-05** en FirstRate, y Databento declara el MNQ desde 2019. Con eso alcanzó
+para dimensionar, así que **C.1b ya está escrita** y no bloquea. Lo que B.1 todavía tiene que
+confirmar es el catálogo de contratos con sus fechas efectivas, que es insumo de B.2 y de la
+pregunta abierta del NQ.
 
 #### [rev 2026-09-20] Precio verificado en la fuente primaria
 
@@ -867,13 +910,16 @@ bastante grandes como para que $4 de fricción no sean el término dominante.
 0.1  Falsación de MNQ leída, corpus sembrado           PR #122
 0.2  Ledger demostrado: registra y es idempotente      PR #123
 
+── ESCRITO, ESPERANDO RATIFICACIÓN HUMANA ─────────────────────────────
+C.1a Holdout: régimen               ┐ AMBAS antes de mirar la primera vela.
+C.1b Holdout: corte 2025-01-01,     │ Irreversible: una vez visto el dato no
+     21 meses, criterio MFFU        ┘ hay forma honesta de reservarlo.  PR #124
+
 ── AHORA: desbloquear ─────────────────────────────────────────────────
 B.1  Databento: alta, crédito, MNQ barras 5m/15m 2019→hoy   ← acción humana
-C.1a Holdout: régimen               ┐ AMBAS antes de mirar la primera vela.
-C.1b Holdout: tamaño ←── B.1        ┘ Irreversible: una vez visto el dato no
-                                      hay forma honesta de reservarlo.
-B.2  Fichas de contrato CME
+B.2  Fichas de contrato CME       ← se puede empezar con la muestra gratis
 B.3  Exportador, empalme de continuos, sesiones  ← punto de no retorno
+                                    NO se cruza sin C.1a y C.1b ratificadas
 
 ── DESPUÉS: hacer honesto lo que ya existe ────────────────────────────
 C.3  RFC #57: D1, D2, D4, D5, D7    ← D5 cierra la gramática, D1 bloquea A.6
@@ -895,8 +941,12 @@ A.8  Adaptador de fuente                   ┘ ninguna.
 C.2  POLITICA.md                             ← antes de capital real
 ```
 
-**Dependencias que no se pueden invertir:** C.1a y C.1b **antes** de B.3; B.1 antes de C.1b; D5
-antes de cerrar A.1; C.3/D1 antes de A.6; C.4 antes del primer ensayo real.
+**Dependencias que no se pueden invertir:** C.1a y C.1b **antes** de B.3; D5 antes de cerrar A.1;
+C.3/D1 antes de A.6; C.4 antes del primer ensayo real.
+
+**[rev 2026-09-21] Cayó una dependencia:** «B.1 antes de C.1b» ya no aplica. El único dato que
+C.1b necesitaba de B.1 era la primera sesión utilizable del MNQ, verificada en fuente primaria
+(2019-05-05), así que C.1b se pudo escribir sin esperar la compra.
 
 ### 9.5 Lo que se rechazó de la revisión externa
 
@@ -923,7 +973,11 @@ antes de cerrar A.1; C.3/D1 antes de A.6; C.4 antes del primer ensayo real.
 - **Si la regla de consistencia del 30% de MFFU aplica a la evaluación o sólo al retiro.** El perfil
   la codifica con `semantics: terminate`, pero eso es la implementación, no el reglamento. Cambia
   cuán vinculante es la presión hacia más operaciones de §9.3. Se resuelve preguntándole a MFFU.
-- **Las tres decisiones del #81**: régimen (C.1a) y tamaño (C.1b).
+- ~~**Las tres decisiones del #81**: régimen (C.1a) y tamaño (C.1b).~~ **[rev 2026-09-21] Escritas**
+  en `POLITICA_HOLDOUT.md` y `DIMENSIONAMIENTO_HOLDOUT.md` (PR #124), como propuesta. Lo que este
+  roadmap sigue sin resolver es la **ratificación**, que es humana, y la pregunta abierta de si se
+  usa la historia larga del NQ en vez de MNQ — que cambiaría el dimensionamiento entero y tiene que
+  decidirse antes de B.3.
 - **El techo de presupuesto de ensayos** (D4). Es un número que sale de política, no de código.
 - **Si el venue es exigencia o selección** bajo D1. Decide si el ledger debe filtrar o agrupar.
 - **Cuánto descontar por el sesgo de supervivencia de la fuente.** I7 dice que un «sobrevive»
