@@ -151,7 +151,7 @@ B no hay nada que responda. Ver §9.1 para el razonamiento completo y §9.4 para
 C no bloquea construir —salvo A.6, que necesita D1— pero sí bloquea que lo construido signifique
 algo. Dos de sus casillas (C.1a y C.1b) se volvieron **urgentes** al adelantarse B: el holdout hay
 que declararlo antes de mirar la primera vela, y B.3 es el punto de no retorno. **[rev 2026-09-21]
-Las dos ya están escritas** (PR #124) y esperan ratificación humana.
+Las dos ya están escritas** (PR #124) y **ratificadas el 2026-09-21**.
 
 ---
 
@@ -230,7 +230,7 @@ Verificado además: `ledger/trials.jsonl` está en 0 bytes y `ledger/archive/tri
 ### ☑ C.1a — Declarar el régimen del holdout ([#81](https://github.com/ramaDben/genesis/issues/81), decisiones 2 y 3)
 
 > **Escrita** en [`POLITICA_HOLDOUT.md`](POLITICA_HOLDOUT.md) ([PR #124](https://github.com/ramaDben/genesis/pull/124)).
-> Estado: **propuesta, pendiente de ratificación humana.** Resultado: el holdout es **gate, no
+> Estado: **RATIFICADA el 2026-09-21.** Resultado: el holdout es **gate, no
 > informativo**; **una mirada por candidato**, sin reintento y sin reset; mirar cuenta como ensayo;
 > el borde entra al manifiesto y se define por **fecha calendaria**, no por proporción.
 >
@@ -259,7 +259,7 @@ clave de identidad del artefacto junto a los hashes de dataset y perfiles.
 
 > **Escrita** en [`DIMENSIONAMIENTO_HOLDOUT.md`](DIMENSIONAMIENTO_HOLDOUT.md)
 > ([PR #124](https://github.com/ramaDben/genesis/pull/124), el mismo que C.1a — **no se pueden
-> ratificar por separado**). Estado: **propuesta, pendiente de ratificación humana.**
+> ratificar por separado**). Estado: **RATIFICADA el 2026-09-21.**
 
 **Resultado: corte el 2025-01-01, holdout de 21 meses.** Medido corriendo el generador de ventanas
 real (`wfa._iter_window_bounds`), no estimado, sobre MNQ desde 2019-05-05:
@@ -928,16 +928,16 @@ bastante grandes como para que $4 de fricción no sean el término dominante.
 0.1  Falsación de MNQ leída, corpus sembrado           PR #122
 0.2  Ledger demostrado: registra y es idempotente      PR #123
 
-── ESCRITO, ESPERANDO RATIFICACIÓN HUMANA ─────────────────────────────
-C.1a Holdout: régimen               ┐ AMBAS antes de mirar la primera vela.
-C.1b Holdout: corte 2025-01-01,     │ Irreversible: una vez visto el dato no
-     21 meses, criterio MFFU        ┘ hay forma honesta de reservarlo.  PR #124
+── RATIFICADO el 2026-09-21 ───────────────────────────────────────────
+C.1a Holdout: régimen               ┐ Las cinco decisiones, en bloque.
+C.1b Holdout: corte 2025-01-01,     │ Firmadas sin un solo dato de CME
+     21 meses, criterio MFFU        ┘ en el disco.                PR #124
 
 ── AHORA: desbloquear ─────────────────────────────────────────────────
 B.1  Databento: alta, crédito, MNQ barras 5m/15m 2019→hoy   ← acción humana
 B.2  Fichas de contrato CME       ← se puede empezar con la muestra gratis
 B.3  Exportador, empalme de continuos, sesiones  ← punto de no retorno
-                                    NO se cruza sin C.1a y C.1b ratificadas
+                                    C.1a y C.1b ratificadas: vía libre
 
 ── DESPUÉS: hacer honesto lo que ya existe ────────────────────────────
 C.3  RFC #57: D1, D2, D4, D5, D7    ← D5 cierra la gramática, D1 bloquea A.6
@@ -992,8 +992,8 @@ C.1b necesitaba de B.1 era la primera sesión utilizable del MNQ, verificada en 
   **[rev 2026-09-21] Resuelto en fuente primaria: sólo a la evaluación, y no descalifica** — sólo
   obliga a operar más días hasta diluir el día grande. El perfil ya la codifica con esa semántica.
 - ~~**Las tres decisiones del #81**: régimen (C.1a) y tamaño (C.1b).~~ **[rev 2026-09-21] Escritas**
-  en `POLITICA_HOLDOUT.md` y `DIMENSIONAMIENTO_HOLDOUT.md` (PR #124), como propuesta. Lo que este
-  roadmap sigue sin resolver es la **ratificación**, que es humana.
+  en POLITICA_HOLDOUT.md y DIMENSIONAMIENTO_HOLDOUT.md (PR #124) y **ratificadas el 2026-09-21**,
+  las cinco decisiones en bloque. Ya no queda nada pendiente de decisión humana en esta casilla.
 - **El techo de presupuesto de ensayos** (D4). Es un número que sale de política, no de código.
 - **Si el venue es exigencia o selección** bajo D1. Decide si el ledger debe filtrar o agrupar.
 - **Cuánto descontar por el sesgo de supervivencia de la fuente.** I7 dice que un «sobrevive»
