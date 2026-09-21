@@ -144,3 +144,66 @@ O sea: **el ancla EOD que MFFU exige ya existe de facto en `prop_sim`**, y no en
 **Dato que corre al revés:** `profiles/the5ers.json` impone `daily_loss_limit_pct: 5.0` y MFFU **no tiene límite diario**. Ese desvío aprieta el juicio; los otros cuatro lo aflojan.
 
 Todo esto abrió el issue **#109** y el change `109-el-modelo-de-la-firma-no-es-mffu-...`, en fase explore. Ver `mem:arquitecto-estrategias-y-ledger-ensayos`.
+
+---
+
+## Reverificación del 2026-09-21 — consistencia 30%, y dos correcciones al diagnóstico
+
+Fuente primaria releída: [Rapid EOD 50k — A Comprehensive Look](https://help.myfundedfutures.com/en/articles/16158363-rapid-eod-50k-a-comprehensive-look).
+Diez días después de la primera lectura, **sin cambios en el reglamento**. Contrastado en paralelo
+contra una búsqueda web delegada a agy, que coincidió punto por punto (pero no aportó URLs
+utilizables: todas apuntaban al dominio raíz).
+
+**Lo confirmado, textual:**
+
+> *«30% consistency rule **in the evaluation phase** of the Rapid EOD Plan»*
+>
+> *«Consistency Requirement: **None** (you do not need to meet a consistency rule to get paid).»*
+
+O sea, sin ambigüedad: la consistencia del 30% **aplica sólo a la evaluación**, **desaparece** en la
+etapa fondeada, y **no descalifica** — obliga a operar más días hasta diluir el día grande. La
+fórmula es `mejor día ≤ 0,30 × ganancia neta acumulada`, así que un día de $1.500 mueve la meta
+efectiva de $3.000 a $5.000.
+
+Esto ya estaba en este mismo archivo desde el 2026-09-11, pero se había vuelto a listar como
+pendiente en `DIMENSIONAMIENTO_HOLDOUT.md`. **Ya no lo es.**
+
+### Corrección 1 — `consistency_rule_pct` SÍ se lee
+
+El apartado «Verificación contra el código (2026-09-14)» afirma que el campo *«existe, se carga y se
+serializa pero ninguna rama de decisión lo lee»*. **Eso ya no es cierto** (verificado el 2026-09-21):
+
+```
+validation/prop_sim.py:515-522
+    consistency_ok = consistency_rule is None or (
+        max(attempt_daily_profits, default=0.0)
+        <= consistency_rule.pct / 100.0 * profit_since_phase_start
+    )
+    ... and consistency_ok
+```
+
+Gatea la **promoción de fase**, no la descalificación — que es exactamente la semántica del
+reglamento. La rama con semántica `FAIL` está explícitamente no modelada y levanta
+`PropSimConfigError`.
+
+### Corrección 2 — `run_prop_sim` no reproduce el camino real
+
+Dato que faltaba en esta memoria y que condiciona cualquier criterio de aprobación: `run_prop_sim`
+**no recorre la secuencia real de días**. Genera los caminos con un *moving-block bootstrap*
+(`_bootstrap`, `PropSimConfig.block_size`) sobre la canasta diaria, y devuelve una distribución.
+
+Para un MLL **con arrastre**, el orden de los días es lo único que decide el quiebre, así que
+remuestrear destruye la señal que se quiere medir. Evaluar el camino realizado exige una entrada
+nueva que consuma los días en orden; el motor por debajo (`_simulate_one_path`) ya sirve tal cual.
+
+Otros parámetros que importan al conectarlo: `max_attempts=10`, `horizon_months=12` (el holdout son
+21 → hay que subirlo), `path_horizon_trading_days=750`.
+
+### Consecuencia
+
+El criterio de aprobación del holdout se reescribió sobre esta base: **no** «¿sobrevivió?», sino
+«¿llegó a ser fondeado, en cuánto tiempo y a cuántos intentos?». Ver
+`docs/DIMENSIONAMIENTO_HOLDOUT.md` §4 (PR #124).
+
+**Sigue sin verificar:** el precio del Rapid EOD 50K (no publicado), las comisiones por contrato y
+la política de VPS.
