@@ -1,6 +1,8 @@
 # Política del holdout
 
-> **Estado: propuesta, pendiente de ratificación humana.**
+> **Estado: RATIFICADA el 2026-09-21** por el dueño del proyecto.
+> Ratificada **en bloque** con [DIMENSIONAMIENTO_HOLDOUT.md](DIMENSIONAMIENTO_HOLDOUT.md), como
+> exige este mismo documento, y **antes** de que exista un solo dato de futuros CME en el disco.
 > Cierra la casilla **C.1a** del [`ROADMAP_ARQUITECTO.md`](ROADMAP_ARQUITECTO.md) — las decisiones 2
 > y 3 del [#81](https://github.com/ramaDben/genesis/issues/81). El **tamaño** del holdout y su
 > **umbral de aprobación** no están aquí: son C.1b, en
@@ -197,4 +199,5 @@ Esta política **tiene que estar ratificada antes de B.3**, la casilla que mira 
 de CME. Después de eso no se puede declarar un holdout honesto sobre los datos que ya se miraron,
 y ninguna cantidad de disciplina posterior lo repara.
 
-Estado de la ventana al **2026-09-20**: **abierta**. No hay datos de CME en el disco.
+Estado de la ventana al **2026-09-21**: **cerrada del lado correcto.** La política quedó
+ratificada sin que hubiera un solo dato de CME en el disco, que es la única forma en que vale.

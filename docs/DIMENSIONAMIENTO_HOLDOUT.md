@@ -1,6 +1,8 @@
 # Dimensionamiento del holdout
 
-> **Estado: propuesta, pendiente de ratificación humana.**
+> **Estado: RATIFICADA el 2026-09-21** por el dueño del proyecto.
+> Ratificada **en bloque** con [POLITICA_HOLDOUT.md](POLITICA_HOLDOUT.md), como exigen los dos
+> documentos, y **antes** de que exista un solo dato de futuros CME en el disco.
 > Cierra la casilla **C.1b** del [`ROADMAP_ARQUITECTO.md`](ROADMAP_ARQUITECTO.md) — la decisión de
 > tamaño del [#81](https://github.com/ramaDben/genesis/issues/81), más el umbral de aprobación que
 > [`POLITICA_HOLDOUT.md`](POLITICA_HOLDOUT.md) dejó abierto.
@@ -331,4 +333,5 @@ estadística salió de la revisión externa de agy (Gemini, tier pro) del 2026-0
 Igual que [`POLITICA_HOLDOUT.md`](POLITICA_HOLDOUT.md): **esto tiene que estar ratificado antes de
 B.3**, la casilla que mira la primera barra real de CME.
 
-Estado al **2026-09-21**: **abierta**. No hay datos de CME en el disco.
+Estado al **2026-09-21**: **cerrada del lado correcto.** La decisión quedó
+ratificada sin que hubiera un solo dato de CME en el disco, que es la única forma en que vale.
