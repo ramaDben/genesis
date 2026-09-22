@@ -3,6 +3,11 @@
 *Trazado el 2026-09-20. Estado del árbol al escribirlo: `main` en `1389d91`, engine de pulse en
 `explore`, sin change activo.*
 
+*Revisado de nuevo el 2026-09-21: **B.1 ejecutada**, con la cotización real por API y la licencia
+leída en el contrato ([#126](https://github.com/ramaDben/genesis/issues/126)). Segunda revisión
+cruzada con `gemini-3.8-flash-high` sobre el plan de compra — cinco hallazgos, dos falsos, uno
+material (§7.1b). Los cambios llevan **[rev 2026-09-21]**.*
+
 *Revisado el 2026-09-20 contra `gemini-3.8-flash-high` (revisión cruzada adversarial). Nueve
 hallazgos; seis aceptados en sustancia, uno con corrección de precisión, dos rechazados
 parcialmente. Los cambios que produjo están marcados con **[rev]** donde alteran una conclusión.*
@@ -648,12 +653,19 @@ filtros distintos y **no cuenta ninguna**.
 
 ## 7. Carril B — Datos CME
 
-### ☐ B.1 — Fuente de datos y comisiones **← PRIMERA CASILLA VIGENTE**
+### ☑ B.1 — Fuente de datos y comisiones *(DoD cerrado 2026-09-21, [#126](https://github.com/ramaDben/genesis/issues/126))*
+
+> **[rev 2026-09-21] Los seis puntos del DoD están respondidos.** Quedan dos decisiones humanas,
+> no trabajo: aprobar la lista de compra y resolver §7.1c, que toca un invariante. El detalle
+> completo con las cifras y las citas del contrato está en el [#126]; acá va lo que cambia el
+> resto del roadmap. Todo verificado en fuente primaria, ninguna cifra inferida.
 
 No hay MT5 para futuros. Las opciones reales son Databento, CME DataMine directo, el feed de
 Rithmic/Tradovate, IQFeed o Norgate — con precios, licencias y granularidades muy distintas. El
 requisito de reproducibilidad institucional exige que la fuente sea **estable y re-descargable**,
-porque el hash de dataset tiene que poder recomputarse dentro de dos años.
+porque el hash de dataset tiene que poder recomputarse dentro de dos años. **[rev 2026-09-21] Esa
+exigencia no la concede ningún proveedor del rubro** — el contrato de Databento dice lo contrario,
+explícitamente. Ver §7.1c; es la única decisión humana que B.1 deja abierta.
 
 ~~Y las comisiones por contrato de MFFU **no están publicadas** en su help center; dependen de la
 plataforma.~~ **[rev 2026-09-20] Esto era falso.** Sí están publicadas, en la *Futures Instrument
@@ -740,8 +752,14 @@ Conocerlo es parte del DoD.
 
 1. **Cotizar Databento primero** (`scripts/quote_databento.py`). No cuesta nada y no consume
    crédito. Si MNQ en `ohlcv-1m` entra en los $125, la discusión termina ahí: gana Databento por
-   procedencia —histórico inmutable, re-pedible idéntico dentro de dos años, que es justo lo que
-   exige la reproducibilidad institucional.
+   procedencia —~~histórico inmutable, re-pedible idéntico dentro de dos años, que es justo lo que
+   exige la reproducibilidad institucional~~.
+   **[rev 2026-09-21] Cotizado: $14,48, entra sobrando — y el script ya existe, no era una
+   aspiración. Pero la segunda mitad de la frase era un supuesto, y es falso.** El contrato no
+   promete ni inmutabilidad ni re-descarga; §9.3 corta incluso el derecho de uso sobre la copia
+   ya bajada al terminar la cuenta. Databento gana igual, porque ningún proveedor del rubro
+   promete otra cosa — pero gana por precio y por procedencia documentada, no por una garantía
+   que no está escrita. Ver §7.1c.
 2. Si no entra, FirstRate es una alternativa legítima. **En ese caso se toma la serie SIN AJUSTAR**
    y el empalme se hace igual en B.3. Su ajuste es una caja negra en medio del dato, y meter una
    transformación opaca es precisamente lo que este proyecto no hace. **O sea que FirstRate no
@@ -780,23 +798,126 @@ Tres consecuencias:
 > Pendiente: confirmar si $1,90 es uniforme entre plataformas (Tradovate, Rithmic, NinjaTrader) o
 > si varía. La tabla de MFFU no lo desagrega.
 
-#### DoD actualizado
+#### DoD — estado final
 
-1. Cuenta creada, crédito confirmado y **fecha de expiración anotada** (el crédito vence; el reloj
-   corre desde el alta, no desde el primer uso).
-2. Cotización real en consola del rango objetivo: **MNQ, `ohlcv-1m` (agregable a 5m/15m), 2019 →
-   hoy**, con el costo en GB y en dólares escrito en el issue.
-3. Catálogo de contratos con sus fechas efectivas — insumo de C.1b y de B.2.
-4. ~~Comisión por contrato de MFFU, obtenida de su soporte, no inferida.~~ **Cerrado**, ver arriba.
-5. Licencia leída en lo que toca a **redistribución y retención**: el proyecto tiene que poder
-   re-descargar el mismo dataset dentro de dos años para recomputar el hash.
-6. **[rev]** Si la cotización de Databento no entra en el crédito: **precio de compra de FirstRate
-   visto en el checkout** y escrito en el issue, más la confirmación de que su licencia admite
-   publicar veredictos con atribución.
+| Punto | Estado 2026-09-21 |
+|---|---|
+| 1. Cuenta, crédito y fecha de expiración | **cerrado** — $125, vence **2027-03-21**, aplica a `Historical`; tope mensual fijado en $125 |
+| 2. Cotización real del rango objetivo | **cerrado** — ver §7.1a |
+| 3. Catálogo de contratos con fechas efectivas | **cerrado** — es el esquema `definition`, **$0,05** |
+| 4. Comisión por contrato de MFFU | cerrado el 2026-09-20, ver arriba |
+| 5. Licencia (redistribución y retención) | **cerrado — con resultado negativo**, ver §7.1c |
+| 6. Precio de FirstRate en el checkout | **sin objeto**: Databento entra sobrando en el crédito |
 
 **Por qué `ohlcv-1m` y no tick.** La ventana de frecuencia de §9.3 (1–4 operaciones diarias) no
 necesita tick, y el filtro F-retardo sólo exige poder desplazar la entrada una barra o quince
 minutos. Comprar tick ahora sería pagar por precisión que ninguna estrategia admisible usa.
+**[rev 2026-09-21] Ahora eso tiene un número detrás:** el tick (`tbbo`) de MNQ sale **$2.548** y
+las barras de un segundo **$437**, contra **$14,48** del minuto. El argumento ya no descansa sólo
+en el principio.
+
+#### §7.1a [rev 2026-09-21] La cotización, y por qué deja de haber decisión de compra
+
+Obtenida por API con `scripts/quote_databento.py` (endpoints de metadata, gratuitos, no descargan
+ningún byte) — no por la consola web, que no deja registro de qué se pidió. Dataset `GLBX.MDP3`,
+2019-05-05 → 2026-09-21 salvo donde se indique:
+
+| Símbolo | Esquema | GB | USD |
+|---|---|---|---|
+| `MNQ.v.0` (continuo) | `ohlcv-1m` | 0,1356 | 9,50 |
+| **`MNQ.FUT` (todos los contratos)** | **`ohlcv-1m`** | **0,2069** | **14,48** |
+| `MNQ.FUT` | `definition` | 0,0298 | 0,05 |
+| `MNQ.FUT` | `bbo-1m` | 0,6370 | 11,47 |
+| `MNQ.FUT` | `ohlcv-1s` | 6,2399 | 436,80 |
+| `MNQ.FUT` | `tbbo` | 90,9874 | 2.547,65 |
+| `NQ.FUT`, **desde 2010-06-06** | `ohlcv-1m` | 0,3816 | 26,71 |
+
+**La serie completa que el proyecto necesita cuesta el 12% del crédito de alta.** El documento
+trataba B.1 como una decisión de compra con proveedores en competencia; a este precio no hay tal
+decisión. FirstRate deja de ser alternativa a evaluar, y §10 pierde su primer pendiente.
+
+**Hallazgo lateral: `GLBX.MDP3` tiene `ohlcv-1m` desde 2010-06-06.** El MNQ no existe antes de
+2019 —es un contrato micro, lanzado ese año— pero el NQ sí. Dieciséis años de historia del mismo
+subyacente salen $26,71. **Comprarla no es admitirla**: los datos anteriores a 2019 se marcan
+no-veredicto, igual que el sintético de la casilla 0.2, y no escriben en el ledger. Su admisión a
+los gates es una decisión separada; ver §7.1b.
+
+#### §7.1b [rev 2026-09-21] El spread, que es el término que la tesis del proyecto pone a prueba
+
+Levantado por la revisión cruzada con Gemini (`agy-delegate --tier pro`, método de
+`mem:revision-cruzada-atrapa-inferencias-que-ningun-test-atrapa`). De cinco hallazgos, **dos eran
+falsos** —la equivalencia entre el NQ de 2012 y los CFDs de D-C, y la idea de que más historia
+in-sample obliga a ampliar el holdout, que contradice `DIMENSIONAMIENTO_HOLDOUT.md:137`— y uno ya
+estaba resuelto en el código (`simulator.py:152`, la rama de fill sin ticks es pesimista por
+diseño). Éste sobrevivió:
+
+`costs.py:33` (`spread_for`) toma la mediana de `ask - bid` de la ventana de ticks **si hay
+cobertura**, y cae a `config.default_spread_points` —una constante de configuración— si no la hay.
+Comprando sólo `ohlcv-1m`, el simulador quedaría en esa constante para siempre. Un proyecto cuya
+tesis es «¿sobrevive a costos reales?» no puede apoyar el término de spread en un supuesto fijo.
+
+**Mitigación cotizada: el esquema `bbo-1m`, $11,47** por todos los contratos de MNQ — bid y ask por
+minuto, spread medido. Las resoluciones mayores (`bbo-1s` $351, `tbbo` $2.548) no entran en el
+crédito.
+
+**Consecuencia de alcance:** `spread_for` espera hoy una ventana de ticks, no una foto por minuto.
+Adaptarlo es trabajo en capa 3 y **pasa por el ciclo SDD completo**. No bloquea la compra, pero es
+una casilla que antes no estaba en el mapa.
+
+#### §7.1c [rev 2026-09-21] La licencia dice que no, y eso toca un invariante **[DECISIÓN HUMANA]**
+
+El [Databento User Agreement](https://databento.com/legal/databento-user-agreement) (efectivo
+2024-01-31) **no contiene ninguna cláusula de retención, inmutabilidad ni disponibilidad** del
+archivo histórico. Al contrario:
+
+> §1.1 — «...license, to access and use... **for so long as Customer has a Customer Account... in
+> good standing with Databento**.»
+>
+> §9.3 — «Upon termination for any reason: ...**Customer may no longer download, access, or use any
+> Third-Party Data**.»
+
+La segunda no dice «no podés bajar más»: cesa el derecho de uso sobre **lo ya descargado**.
+
+Este documento escribía el requisito como «la fuente tiene que ser estable y **re-descargable**,
+porque el hash de dataset tiene que poder recomputarse dentro de dos años». Eso pide una garantía
+que Databento no concede — y que, por cómo se licencia la data de bolsa, no concede ningún
+proveedor del rubro. **El invariante está apoyado en una promesa que no existe.**
+
+**Propuesta, no decisión tomada.** Mover el punto de apoyo a lo que el proyecto controla:
+
+- El hash se calcula sobre la **copia local cruda**, y esa copia **es** la evidencia del artefacto.
+- Se exige **respaldo** de los bytes crudos, no capacidad de re-pedirlos.
+- La re-descarga pasa a ser verificación deseable contra corrupción local, **no** la garantía.
+
+No relaja ningún gate: cambia dónde se apoya la misma exigencia. Pero toca un invariante de diseño
+y por eso queda marcado como decisión del dueño del proyecto, no como hecho consumado.
+
+**Y una consecuencia para §10.** La redistribución está definida en §1.5(e) del contrato como
+entregar a terceros los datos «**or other information derived from the same**». Un veredicto
+publicado es información derivada. §1.6 exige atribución («Data Provided by Databento») y, de
+paso, autoriza a Databento a usar el nombre y logo del cliente en su marketing. No bloquea nada
+hoy; hay que resolverlo por escrito antes del primer veredicto público. Lo que **sí** quedó
+descartado como problema: las condiciones de «no profesional» de CME aplican a tiempo real con
+plan Standard, y la Exchange Data Policy §1.2 dice que pasadas 8 horas el dato «is considered
+historical and **no longer subject to these restrictions**».
+
+#### §7.1d [rev 2026-09-21] La lista de compra propuesta
+
+| Qué | Para qué | USD |
+|---|---|---|
+| `MNQ.FUT` `ohlcv-1m` 2019→hoy | la serie de precios | 14,48 |
+| `MNQ.FUT` `definition` | catálogo de contratos, insumo de B.2 | 0,05 |
+| `MNQ.FUT` `bbo-1m` | spread medido en vez de supuesto (§7.1b) | 11,47 |
+| `NQ.FUT` `ohlcv-1m` **2010**→hoy | historia larga, marcada no-veredicto (§7.1a) | 26,71 |
+| `NQ.FUT` `definition` | catálogo | 0,06 |
+| | **Total** | **52,77** |
+
+De $125, y dentro del tope mensual. **No** se compra el `bbo-1m` del NQ ($23,27): si la historia
+larga llega a usarse sería como precios, no para ejecutar, y el costo de ejecución sale de MNQ y
+del contrato de MFFU. El spread del NQ de 2012 no se paga nunca.
+
+**Ojo con el calendario de facturación.** El tope de gasto es mensual y se reinicia; el crédito es
+único y no. Una descarga partida en dos meses calendario deja el segundo tramo sin cobertura.
 
 ### ☐ B.2 — Fichas de contrato por venue
 
@@ -805,11 +926,16 @@ contrato de forma natural, así que la abstracción del #55 aguanta futuros **si
 Lo que falta es una fuente de fichas por venue, no un fallback calculado: la heurística
 `tick_size = 10^-digits` **falla 25× en ES/NQ** (tick real 0,25 con 2 dígitos). Ver el #114.
 
-**[rev 2026-09-21] El dataset de desarrollo es una sub-tarea de esta casilla, y se puede hacer ya.**
-Bajar la muestra gratis de FirstRate (o el CSV de Kaggle) y dejarla en el store como dataset de
-desarrollo permite ejercitar la tubería con barras reales de MNQ **sin esperar la decisión de
-compra y sin tocar el ledger**. Requisito: que su `dataset_hash` quede marcado como no-veredicto,
-del mismo modo que el sintético de la casilla 0.2.
+~~**[rev 2026-09-21] El dataset de desarrollo es una sub-tarea de esta casilla, y se puede hacer
+ya.** Bajar la muestra gratis de FirstRate (o el CSV de Kaggle) y dejarla en el store como dataset
+de desarrollo permite ejercitar la tubería con barras reales de MNQ **sin esperar la decisión de
+compra y sin tocar el ledger**.~~ **[rev 2026-09-21, más tarde el mismo día] Caduco.** La muestra
+gratis existía para no depender de una compra que se creía cara; la compra resultó costar $14,48 y
+el catálogo de contratos que esta casilla necesita es el esquema `definition`, **$0,05**. Bajar un
+CSV de procedencia desconocida para ejercitar la tubería dejó de tener sentido cuando el dato bueno
+cuesta menos que el rodeo. Se mantiene el requisito general: todo dataset que no vaya a producir
+veredicto lleva su `dataset_hash` marcado como no-veredicto, igual que el sintético de la casilla
+0.2 — y eso ahora aplica a la historia de NQ anterior a 2019 (§7.1a).
 
 ### ☐ B.3 — Exportador, empalme de continuos y sesiones CME
 
@@ -933,11 +1059,18 @@ C.1a Holdout: régimen               ┐ Las cinco decisiones, en bloque.
 C.1b Holdout: corte 2025-01-01,     │ Firmadas sin un solo dato de CME
      21 meses, criterio MFFU        ┘ en el disco.                PR #124
 
+── DoD CERRADO el 2026-09-21 ──────────────────────────────────────────
+B.1  Databento: alta, crédito, cotización y licencia          #126
+     MNQ 1m todos los contratos 2019→hoy = $14,48 de $125.
+     Falta: aprobar la compra ($52,77) y decidir §7.1c.
+
 ── AHORA: desbloquear ─────────────────────────────────────────────────
-B.1  Databento: alta, crédito, MNQ barras 5m/15m 2019→hoy   ← acción humana
-B.2  Fichas de contrato CME       ← se puede empezar con la muestra gratis
+B.1b Descargar, una vez aprobada la lista   ← acción humana (aprobación)
+B.2  Fichas de contrato CME       ← el `definition` de B.1 es su insumo
 B.3  Exportador, empalme de continuos, sesiones  ← punto de no retorno
                                     C.1a y C.1b ratificadas: vía libre
+B.4  Adaptar `spread_for` a `bbo-1m`  ← casilla NUEVA (§7.1b), capa 3,
+                                         pasa por el ciclo SDD completo
 
 ── DESPUÉS: hacer honesto lo que ya existe ────────────────────────────
 C.3  RFC #57: D1, D2, D4, D5, D7    ← D5 cierra la gramática, D1 bloquea A.6
@@ -985,9 +1118,11 @@ C.1b necesitaba de B.1 era la primera sesión utilizable del MNQ, verificada en 
 
 ## 10. Lo que este roadmap no resuelve
 
-- **De dónde salen los datos de CME** (B.1). Decisión de compra. **[rev]** El precio de lista de
-  Databento ya está verificado y el crédito inicial de $125 hace plausible que el costo de entrada
-  sea cero; lo que falta es la **cotización real del rango** en consola y la lectura de la licencia.
+- ~~**De dónde salen los datos de CME** (B.1). Decisión de compra.~~ **[rev 2026-09-21] Resuelto,
+  y dejó de ser una decisión de compra:** la cotización real dio **$14,48** para la serie completa
+  de MNQ contra un crédito de $125 ([#126](https://github.com/ramaDben/genesis/issues/126)). A ese
+  precio no hay proveedores que comparar. Lo que la lectura de la licencia **sí** dejó abierto es
+  otra cosa, y más grave: la garantía de re-descarga no existe (§7.1c).
 - ~~**Si la regla de consistencia del 30% de MFFU aplica a la evaluación o sólo al retiro.**~~
   **[rev 2026-09-21] Resuelto en fuente primaria: sólo a la evaluación, y no descalifica** — sólo
   obliga a operar más días hasta diluir el día grande. El perfil ya la codifica con esa semántica.
@@ -1004,4 +1139,8 @@ C.1b necesitaba de B.1 era la primera sesión utilizable del MNQ, verificada en 
 - **Qué se publica y con qué nombre.** Un veredicto que dice «la estrategia de Fulano no sobrevive a
   costos» nombra a una persona real y a su negocio. Con el objetivo del RPSF de la CMF de fondo, esa
   es una clase de riesgo distinta a la de un backtest interno, y conviene decidirla antes del primer
-  veredicto incómodo, no después.
+  veredicto incómodo, no después. **[rev 2026-09-21] Y ahora tiene además una dimensión
+  contractual**, que no es la misma pregunta: el contrato de Databento define la redistribución
+  como entregar a terceros los datos «or other information derived from the same» (§1.5e), y un
+  veredicto publicado es información derivada. Exige atribución y autoriza a Databento a usar
+  nuestro nombre en su marketing (§1.6). Ver §7.1c.
