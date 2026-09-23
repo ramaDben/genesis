@@ -37,6 +37,41 @@ una política: es una separación física entre dos almacenes.
 **D-C. Ningún ensayo se corre sobre datos de CFD.** Las estrategias se prueban sobre futuros CME.
 Los datos de MT5 no se usan ni como paso previo.
 
+**D-D [2026-09-22]. El universo se compra por clase de activo, no por índice.** Un líder por clase
+—MNQ, MGC, M6E, MBT, MCL— de los que MFFU fondea, $84,85. Cierra la disyuntiva de §7.1e a favor de
+(b): el proyecto dejó de ser un torneo de índices y pasó a ser un **validador multi-mercado**, y una
+estrategia que sobrevive en cinco regímenes distintos demuestra algo que cuatro índices
+correlacionados al 0,947 no pueden. **Es cambio de spec y se asume.** Su consecuencia —que comprar y
+declarar son actos distintos, y que el Candidato B se queda sin universo declarable hasta que B.7
+verifique una segunda ancla— está en §7.1e y en la casilla B.7.
+
+**D-E [2026-09-22]. La unidad es el par (estrategia, activo), y genesis juzga, no elige.** Ni la
+estrategia ni el activo van primero: lo único que se mide es **si esta estrategia gana o pierde en
+este activo**. Es una grilla —estrategias en un eje, activos en el otro— y genesis es la máquina que
+llena celdas. Propuesta del arquitecto, contrastada con Gemini 3.8 Flash (High) contra el árbol
+(§9.7), aprobada por el dueño. Cinco puntos:
+
+1. **Un veredicto por estrategia, sin ganador.** Se elimina `_select_winning_candidate`
+   (`validation/verdict.py:433`); si pasan dos, pasan dos. Casilla **B.8**.
+2. **El castigo por pruebas múltiples se mantiene y deja de depender del lote.** Hoy T1 suma
+   `n_candidatos_torneo - 1` (`verdict.py:505`): la misma estrategia con los mismos datos sale
+   distinta según cuántas corrieron al lado. Todas las estrategias de una corrida se registran en el
+   ledger **antes** de juzgar ninguna, y el término de torneo desaparece. **T1 se queda**: mide la
+   canasta diaria de la estrategia entera, que G4 no mide. Casilla **B.8**.
+3. **Cuatro niveles de pregunta.** *Celda* —¿gana en este activo? (G1–G9)—; *fila* —¿gana en su
+   universo? (C1, C2)—; *canasta* —¿aguanta operando todo a la vez? (C3)—; *cuenta* —¿sobrevive una
+   cuenta fondeada? (P1–P6, T1). Combinar **varias** estrategias en una cuenta (T2) se difiere hasta
+   que pasen dos.
+4. **«No aplica» es estado de ejecución, no descuento.** Evita simular lo que no está definido (un ORB
+   sobre Bitcoin), pero **nunca achica el denominador de C1**: el activo se excluye **no
+   declarándolo**, antes de ver datos. La grilla sugiere qué declarar; lo declarado se congela en el
+   pre-registro (C.4). §2.x del spec queda intacto. Casilla **B.6**.
+5. **Las carpetas `strategy/candidate_a/` y `strategy/candidate_b/` desaparecen; la palabra
+   «candidate» adentro del código se queda.** En validación, «candidato» es el término técnico de lo
+   que está bajo prueba; el problema nunca fue la palabra sino el ganador. La clave
+   `candidate_config` del hash de ensayos (`trial_ledger.py:133`) **no se renombra**: cambiaría todos
+   los `trial_id` y el ledger contaría dos veces lo ya contado. Casilla **A.1**.
+
 ### Por qué D-B importa, y hasta dónde llega
 
 El modo de falla de un arquitecto automatizado no es proponer mal: es **proponer, medir y volver a
@@ -145,13 +180,20 @@ pasó por un filtro de selección invisible antes de llegar acá.
 | Carril | Contenido | Qué bloquea |
 |---|---|---|
 | **A. Arquitecto** | gramática, Gate 0, corpus, primitivas, enmascaramiento, subespecificación, dedup, adaptador | nada del resto |
-| **B. Datos CME** | falsación previa, fuente, fichas, exportador, sesiones | **el primer ensayo real** |
+| **B. Datos CME y motor honesto** | falsación previa, fuente, fichas, exportador, sesiones, costos por instrumento, F-retardo, guarda de universo | **el primer ensayo real**, y que su resultado signifique algo |
 | **C. Decisiones** | política, holdout, semántica de ensayos, pre-registro | **la interpretación de cualquier resultado**, y A.6 |
 
 **[rev 2026-09-20] B va primero, no en paralelo.** La versión original decía que A y B avanzaban en
 paralelo sin tocarse. Es cierto que no se tocan, y eso ocultó lo que importa: **B es el único carril
 en el camino crítico hacia el primer veredicto.** El carril A construye la máquina de proponer; sin
 B no hay nada que responda. Ver §9.1 para el razonamiento completo y §9.4 para el orden vigente.
+
+**[rev 2026-09-22] Y B creció, porque «tener los datos» no alcanza.** Se le sumaron tres casillas que
+no son de datos sino del motor que los consume: **B.4** (los costos son globales y cuatro veces
+mayores que los reales), **B.5** (F-retardo estaba declarado y sin dueño) y **B.6** (el denominador
+de C1 es «lo que le pases»). Las tres comparten el mismo defecto: el motor **responde igual** tenga
+razón o no, sin avisar. Un carril que entrega datos a un motor que miente no desbloquea el primer
+veredicto — lo vuelve peligroso.
 
 C no bloquea construir —salvo A.6, que necesita D1— pero sí bloquea que lo construido signifique
 algo. Dos de sus casillas (C.1a y C.1b) se volvieron **urgentes** al adelantarse B: el holdout hay
@@ -412,6 +454,20 @@ demuestra que el despacho **es** un despacho, y otro que fija que `entry_trigger
 B.1 sigue verde — este change no puede cambiar ningún resultado de backtest.
 
 **Vía.** Ciclo SDD completo. Toca contrato público de capa 2.
+
+**[rev 2026-09-22, D-E punto 5] Lo que esta casilla habilita después: retirar las carpetas por
+candidato.** Hoy el ORB está implementado **dos veces**: `strategy/candidate_b/candidate.py` (a
+mano, lo que `factories.py` corre como `"B"`) y `strategy/genome/candidate.py` (compilado del YAML).
+La equivalencia ya está probada (`tests/strategy/genome/test_b1_equivalence.py`, 5.000 barras
+sintéticas), así que cuando la gramática ramifique se borra la versión a mano y la estrategia pasa a
+ser **sólo un dato**. `strategy/candidate_a/smc/` no es una estrategia sino un motor de estructura de
+mercado (ADR-D8): sale de `candidate_a/` y pasa a **librería de primitivas** junto a `common/`, con
+cuyos `atr.py` y `timeframe.py` hoy se duplica. `strategy/` queda con tres cosas: contrato,
+compilador y primitivas. Dos restos a limpiar en el mismo movimiento: el genoma declara
+`symbol: "US500"` —ticker CFD, prohibido por D-C— en un campo que **ningún código de producción lee**,
+y `_candidate_family` (`trial_ledger.py:150`) toma el primer carácter del id, así que todo genoma
+`CANDIDATE-…` cae en la familia «C» del TSMOM. Sólo afecta reportes; se reemplaza por un campo
+explícito de familia en el genoma.
 
 ### ☐ A.2 — Gate 0 mecánico, reformulado ([#105](https://github.com/ramaDben/genesis/issues/105) + [#107](https://github.com/ramaDben/genesis/issues/107), fundidos)
 
@@ -901,7 +957,7 @@ descartado como problema: las condiciones de «no profesional» de CME aplican a
 plan Standard, y la Exchange Data Policy §1.2 dice que pasadas 8 horas el dato «is considered
 historical and **no longer subject to these restrictions**».
 
-#### §7.1d [rev 2026-09-21] La lista de compra propuesta
+#### §7.1d [rev 2026-09-21] La lista de compra propuesta ***(superada — ver §7.1e)***
 
 | Qué | Para qué | USD |
 |---|---|---|
@@ -918,6 +974,184 @@ del contrato de MFFU. El spread del NQ de 2012 no se paga nunca.
 
 **Ojo con el calendario de facturación.** El tope de gasto es mensual y se reinicia; el crédito es
 único y no. Una descarga partida en dos meses calendario deja el segundo tramo sin cobertura.
+
+#### §7.1e [rev 2026-09-22] El tamaño del universo, que es lo que la lista anterior ignoraba
+
+La lista de §7.1d compra **un solo instrumento**. El spec lo prohíbe, y no en el changelog sino en el
+cuerpo normativo (§2.x, líneas 600-602):
+
+> Ninguna campaña sobre un universo de **un solo instrumento** puede emitir veredicto GO, GO-PARCIAL
+> ni GO-ACOTADO. **C1 sólo tiene contenido con `|U| ≥ 2`**, y ese es el mínimo normativo. No es una
+> constante elegida: es el punto exacto en que C1 deja de ser vacío.
+
+Con MNQ solo, C1 da **1 de 1 = 100%** y pasa sin decir nada: el gate no falla, **se vacía**. B.1 se
+escribió como una decisión de proveedor, y nadie cruzó la lista contra el tamaño mínimo de universo.
+Es un agujero de la casilla, no un error de precio.
+
+##### Y para el Candidato B tal como está declarado hoy, es peor
+
+El universo declarado de B son **cuatro** instrumentos: MES, MNQ, MYM, MGC (§510). Ese es el
+denominador de C1 **siempre**, y no se contrae. Con la lista vieja quedaría **un evaluable y tres no
+evaluables**, que cuentan como **no superados**: techo de **1/4 = 25% < 60%**. C1 no se vacía —
+**reprueba de entrada**, y ningún veredicto favorable es alcanzable.
+
+Y si se compraran los cuatro, MGC sigue sin ancla (§2.3), así que arranca fallado: haría falta
+**3 de 4**, o sea **acertar en los tres índices restantes, al 100%**.
+
+> **De acá salía la decisión que había que tomar ANTES de descargar.** Se planteó como dos caminos
+> excluyentes:
+>
+> | | Qué implica | Costo |
+> |---|---|---|
+> | **(a)** Comprar también MES y MYM y evaluar a B sobre su universo declarado | +$31,98 → $116,83 de $125 | Mantiene cuatro índices con correlación de retornos de **0,947** entre MES y MNQ (§1128): C1 mide casi lo mismo cuatro veces |
+> | **(b)** Redeclarar el universo de B a líderes por clase | $84,85 | Es **cambio de spec**, y debe quedar escrito antes de que llegue el primer dato |
+>
+> **DECIDIDO el 2026-09-22 (humano): (b).** El proyecto dejó de ser un torneo de índices y pasó a ser
+> un validador multi-mercado; la compra es la de arriba, **$84,85**, y se asume el cambio de spec.
+
+##### Pero (a) y (b) no eran excluyentes, y eso obliga a separar dos actos
+
+**Corrección de esta misma sección.** La tabla presentó *comprar* y *declarar* como si fueran la
+misma decisión. No lo son, y es justamente lo que §«Comprar no es declarar» dice más abajo. Al
+escribir (b) aparece la consecuencia que la tabla escondía:
+
+> El Candidato B ancla su rango de apertura en la **apertura de contado del subyacente**. El spec es
+> normativo y explícito (§2.3, nota obligatoria): los tres micro-índices la tienen, **MGC no**, y el
+> ancla de MGC queda **pendiente** contra página oficial de CME (PA-106-A).
+
+`M6E`, `MBT` y `MCL` **no aparecen ni una vez en el spec**: entraron al proyecto como lista de compra,
+nunca como universo de un candidato. Ninguno tiene ancla verificada, y **MBT no puede tenerla** —
+Bitcoin no abre, cotiza continuo.
+
+Así que declarar los cinco líderes como universo de B daría **un evaluable de cinco = 20%**, peor que
+el 25% que (b) venía a arreglar. **La compra (b) es correcta; la declaración literal de (b) sería
+peor que el problema.**
+
+##### Lo que sí se declara, y de qué depende
+
+**La compra y la declaración se resuelven por separado:**
+
+| Acto | Qué se decide | Estado |
+|---|---|---|
+| **Compra** (el disco) | Cinco líderes, un por clase, $84,85 | **DECIDIDO** — no gasta ensayos (D1) |
+| **Universo declarado de B** (el denominador de C1) | Sólo instrumentos con **ancla verificada** | **BLOQUEADO** por las anclas |
+
+Un ORB sobre un instrumento sin apertura de contado no es «un dato que falta»: es una estrategia que
+**no está definida** ahí. No lo arregla comprar datos.
+
+Entre los cinco comprados, **B tiene hoy un solo instrumento declarable: MNQ** — y `|U| = 1` está
+prohibido. Para que B pueda emitir cualquier veredicto necesita **una segunda ancla verificada**.
+
+> **PA-106-A se generaliza.** Deja de ser «el ancla del oro» y pasa a ser **el ancla por clase**:
+> para cada líder comprado, resolver contra **página de producto oficial de CME** si existe una
+> apertura de contado que sirva de ancla, y cuál es. Es **investigación en fuente primaria, no
+> dinero**, y no gasta ensayos. «No tiene apertura» es un resultado legítimo: ese instrumento queda
+> en el disco, sirve al Candidato C y a la búsqueda futura, y **no se declara para B**.
+
+**(a) no muere: queda en reserva y condicionada.** Si ninguna ancla adicional cierra, la única forma
+de que B emita veredicto es comprar MES y MYM (+$31,98) y volver a un universo de índices. Esa compra
+**se difiere hasta que las anclas respondan**, porque hoy no se sabe si hace falta. Lo que se ganó es
+convertir una decisión de gasto en una pregunta verificable que cuesta cero.
+
+**El orden se mantiene intacto:** las anclas se resuelven **antes** de declarar el universo de B, y el
+universo se declara **antes** de mirar un solo dato. Declararlo después sería elegir el denominador de
+C1 mirando resultados, que es el mecanismo exacto que C.4 existe para impedir.
+
+##### El mínimo no es el óptimo, y el umbral no es monótono
+
+El spec lo declara para `|U| ≤ 4` (§2.x, líneas 604-606); extendido a 5 queda:
+
+| Tamaño | C1 ≥ 60% exige | Exigencia real |
+|---|---|---|
+| 1 | 1 de 1 | **vacío** — prohibido |
+| 2 | 2 de 2 | 100% |
+| 3 | 2 de 3 | 67% |
+| 4 | 3 de 4 | 75% |
+| 5 | 3 de 5 | **60%** |
+
+**Comprar exactamente dos instrumentos es la configuración más dura que existe** después de la
+prohibida. Un universo chico no es un universo indulgente.
+
+> **Trampa de gobernanza, que conviene dejar escrita antes de que aparezca.** Esa tabla invita a
+> elegir el tamaño del universo por lo que afloja C1. Hacerlo sería **selección sobre el gate** — el
+> mismo mecanismo que §9.5 rechaza cuando alguien propone bajar G1 de 300 a 100 después de ver que
+> 300 es difícil. El tamaño y la composición del universo de cada candidato se declaran en **C.4
+> (pre-registro), antes de medir nada**. La tabla está para entender el costo de esa declaración, no
+> para optimizarla.
+
+##### Comprar no es declarar
+
+Bajo D1, el universo sobre el que se **selecciona** cuenta como ensayo, sube el denominador del DSR y
+endurece G4. Pero **tener el dato en el disco no gasta ningún ensayo**: lo que cuesta es declararlo
+en el universo de un candidato. De ahí la regla de compra — **ancho en el disco, angosto en la
+declaración.**
+
+##### La trampa de MGC
+
+MGC está en el universo del torneo (§510) pero **no es evaluable hoy**: le falta el ancla del rango
+de apertura (§2.3). Y el spec es explícito (§2.x, líneas 586-588):
+
+> [el universo efectivo] **no altera el denominador de C1**: un instrumento no evaluable cuenta como
+> **no superado**.
+
+O sea que **declarar MGC hoy mete un fracaso automático dentro del denominador**. Comprar el dato
+conviene —es insumo de B.3, y el ancla es trabajo, no dinero—; declararlo antes de resolver el ancla
+empeora C1 en vez de ayudarlo.
+
+##### La historia larga de NQ se difiere
+
+§7.1a la justificaba como «no-veredicto, por si acaso», por $26,71 — la mitad de la lista vieja. Se
+difiere por tres razones acumuladas, ninguna de las cuales es que el dato sea malo:
+
+1. **No alimenta ningún gate.** Está marcada no-veredicto por decisión propia (§7.1a, línea 911), así
+   que no entra en C1 ni en G1.
+2. **NQ no es MNQ.** El criterio de admisión al universo exige **contrato micro** para poder
+   dimensionar contra el umbral de la firma (§2.x). El NQ de tamaño completo no califica, así que
+   esta serie no puede ser dato de universo aunque se quisiera.
+3. **Lo específico que desbloquearía, el motor no lo puede correr.** Su uso más valioso sería validar
+   estrategias más lentas —que es lo que baja la velocidad mínima de G1 y lo que vuelve una
+   estrategia portable (B.5)—. Pero el simulador **aplana toda posición al cierre de cada sesión, sin
+   condición** (`backtest/simulator.py:563-568`), y si alguna sobrevive levanta `SessionBoundaryError`.
+   Sin tenencia overnight, la historia profunda no compra la capacidad que la justificaría.
+
+> **Corrección registrada (revisión cruzada, 2026-09-22).** Una versión anterior de este párrafo
+> decía que el cierre forzado de sesión «bloquea» la historia profunda. Es una exageración: el
+> Candidato B es un ORB intradía que va flat al cierre **por diseño**, así que para él el cierre
+> forzado no estorba, y 2010–2019 sí aportaría regímenes de volatilidad que 2019–2026 no tiene. Lo
+> correcto es lo de arriba: la historia profunda no está vetada, está **en la cola**, detrás de cosas
+> que sí alimentan gates. Los $26,71 se reasignan al universo.
+
+##### La lista que reemplaza a §7.1d
+
+Precios medidos por API el **2026-09-22** (endpoints de metadata, gratuitos; ningún byte
+descargado), rango 2019-05-05 → borde del dataset. Precios y catálogo en **todos los contratos**;
+spread en **continuo por volumen**, por §7.1b: el spread que importa es el del contrato que
+efectivamente se opera, y el ajuste de roll es sobre precios, no sobre spreads.
+
+| Instrumento | Clase | `ohlcv-1m` | `definition` | `bbo-1m` cont. | Subtotal |
+|---|---|---:|---:|---:|---:|
+| MNQ | índices | 14,48 | 0,05 | 3,52 | **18,05** |
+| MGC | metales | 20,51 | 0,27 | 3,46 | **24,24** |
+| M6E | divisas | 9,83 | 0,01 | 3,52 | **13,36** |
+| MBT | cripto | 6,84 | 0,15 | 2,60 | **9,59** |
+| MCL | energía | 16,83 | 0,32 | 2,46 | **19,61** |
+| | | 68,49 | 0,80 | 15,56 | **84,85** |
+
+**$84,85 de $125**, con **$40,15** de margen. Los cinco los **fondea MFFU**, verificado en fuente
+primaria el 2026-09-21 (`help.myfundedfutures.com/en/articles/9735811`), que es el límite duro de lo
+monetizable: un validador se mide por lo que puede recibir del mundo, pero sólo cobra por lo que la
+firma fondea.
+
+**Un líder por clase de activo** — la diversificación que importa acá no es de cartera sino de
+**régimen de mercado**: una estrategia que sobrevive en índices, metales, divisas, cripto y energía
+es robusta en un sentido que cuatro índices correlacionados al 0,947 (§1128) no pueden demostrar.
+
+**Ojo con el calendario de facturación.** El tope de gasto es mensual y se reinicia; el crédito es
+único y no. Una descarga partida en dos meses calendario deja el segundo tramo sin cobertura: la
+compra se ejecuta **en un solo mes calendario**.
+
+**Lo que esta lista NO compra:** `bbo-1m` en «todos los contratos» ($83,46 en los cinco, contra
+$15,56 del continuo), las resoluciones finas (`bbo-1s`, `tbbo`), y la historia de NQ anterior a 2019.
 
 ### ☐ B.2 — Fichas de contrato por venue
 
@@ -964,6 +1198,208 @@ identidad.
 declarar si se mide sobre RTH o ETH, y el volumen tampoco. `src/genesis/data/sessions.py` existe
 pero está poblado para índices CFD. La tabla de sesiones CME es parte de esta casilla, no un
 apéndice.
+
+### ☐ B.4 — Costos por instrumento **[rev 2026-09-22 — casilla nueva; absorbe la mención de §7.1b]**
+
+§7.1b la anotó como «adaptar `spread_for` a `bbo-1m`». Con un universo multi-clase eso se queda
+corto, y lo que falta es **más grave que el spread**.
+
+**El modelo de costos es global, no por instrumento.** `backtest/costs.py:29` define
+`commission_per_lot` como campo de una configuración **única**, y `costs.py:59` la aplica sin mirar
+el símbolo: `sizing_hint * config.commission_per_lot * stress`. El archivo que la puebla
+(`backtest/costs_config.json`) trae tres números heredados del régimen CFD:
+
+```json
+{ "default_spread_points": 1.5, "commission_per_lot": 7.0, "slippage_points": 0.2 }
+```
+
+**Contra la realidad medida:** MFFU cobra **$1,90** ida y vuelta en MNQ. El motor cobra $7,00 por
+lote más 1,5 puntos de spread —que en el micro, a $2 por punto, son $3,00—, o sea **≈$10 por
+operación contra ≈$2,40 reales: cuatro veces de más.**
+
+**Por qué importa más de lo que parece.** Un costo inflado no produce un error simétrico: produce
+**falsos negativos**. Génesis rechazaría estrategias viables, y cada rechazo **quema un ensayo en el
+ledger de forma permanente** — el contador de D1/G4 no distingue un rechazo legítimo de uno causado
+por una constante mal puesta. Se paga el ensayo y no se compra información.
+
+**Y la ficha de símbolo está al revés para futuros.** `SymbolFigure` (`data/symbols.py:23-32`) lleva
+`tick_value`, `tick_size`, `swap_long`, `swap_short`, `swap_rollover_day` — **swap, que es
+financiamiento de CFD, y ningún campo de comisión.** Los futuros no tienen swap: tienen comisión por
+contrato. La ficha conserva el vocabulario del régimen del que el proyecto ya salió por D-C.
+
+**Se parte en dos, y la mitad no espera a la compra:**
+
+| | Qué | ¿Espera datos? |
+|---|---|---|
+| **B.4a** | Comisión y spread por instrumento en la ficha; `commission_for` y `spread_for` reciben el símbolo y **lo usan** | **No** — arranca ya |
+| **B.4b** | `spread_for` lee la foto por minuto del `bbo-1m` en vez de una ventana de ticks | Sí — depende de B.1b |
+
+Las dos son **capa 3** y **pasan por el ciclo SDD completo**, con gate humano.
+
+**B.4a cierra PA-106-C.** El spec ya tenía anotado que las comisiones por contrato no estaban
+publicadas y que eso **bloquea G3, G9 y todos los gates P** — «no es sólo economía: sin comisiones
+verificadas los gates de robustez tampoco corren». B.1 consiguió las comisiones en fuente primaria de
+MFFU; B.4a es el tramo que falta para que entren al motor y esos gates dejen de correr sobre un
+número inventado.
+
+**B.4b es más grande de lo que §7.1b sugería.** No alcanza con cambiar `spread_for`: el motor no
+tiene **loader ni esquema de almacenamiento** para cotizaciones BBO muestreadas por minuto —
+`simulator.py` admite ventanas de ticks (`TickRow`) u OHLCV M1, y nada más. El alcance real incluye
+el formato en el store y el modelo de fill contra una foto por minuto, no sólo la función de costo.
+
+**DoD de B.4a.** (1) La ficha de cada instrumento del universo lleva su comisión ida y vuelta citada
+en fuente primaria de MFFU. (2) `commission_for` **falla con contexto** si el símbolo no tiene ficha,
+en vez de caer a una constante — la degradación silenciosa es el modo de falla que ya se pagó en
+`spread_for` (§7.1b). (3) Un golden test fija el costo de una operación de MNQ en $1,90 y una de MGC
+en $2,20. (4) `commission_per_lot` desaparece de `costs_config.json` como valor global.
+
+### ☐ B.5 — F-retardo: está declarado, no planificado **[rev 2026-09-22 — casilla nueva]**
+
+§9.2 lo define y §9.4 lo usa en el hito del primer veredicto, pero **no tiene casilla, ni DoD, ni
+implementación**: «retardo» aparece ocho veces en este roadmap y **cero veces en el código**. Un
+filtro que no es de nadie no se construye.
+
+**Y hace dos trabajos, no uno.** El primero ya estaba: rechazar lo que un humano no puede ejecutar.
+El segundo lo trajo el dueño el 2026-09-22 y el documento no lo había derivado:
+
+> **Portabilidad.** Tres de las seis firmas relevadas prohíben automatizar — Apex, Take Profit
+> Trader y The5ers (`mem:pivote-a-prop-de-futuros-cme-2026-09`). MFFU se eligió justamente por eso.
+> Una estrategia que **sobrevive** a F-retardo es ejecutable a mano y, por lo tanto, **deja de estar
+> atada a MFFU**: puede llevarse a las seis firmas y a una cuenta propia.
+
+§9.2 dice que F-retardo «sólo puede rechazar, nunca admitir». Eso sigue siendo correcto **como
+evidencia estadística**: sobrevivir al retardo no es evidencia de que la estrategia funcione. Pero es
+un **hecho de negocio** sobre dónde se la puede operar, y esa lectura no estaba escrita. Al cuidarse
+de lo primero, el documento no vio lo segundo.
+
+**El límite, que también conviene dejar escrito: son dos ejes, no uno.** F-retardo desbloquea el eje
+de la **automatización**, no el del **hedging**. Apex cierra la cuenta por estar largo en ES y corto
+en YM; The5ers prohíbe varias posiciones simultáneas; MFFU es la única permisiva en los dos ejes a la
+vez. **Una estrategia de un solo instrumento que aguante el retardo es portable; una que opere cinco
+a la vez sigue siendo MFFU o nada, por lenta que sea.**
+
+> **Consecuencia para el candidato B, que conviene decir ahora y no después.** B es un ORB: un
+> quiebre del rango de apertura es crítico en el tiempo por definición. Es exactamente la forma de
+> estrategia que F-retardo está diseñado para matar. Si B sobrevive a los gates pero no al retardo,
+> el resultado no es «malo»: es **válido y no portable**, y queda atado a MFFU.
+
+**DoD.** (1) El runner corre cada candidato en tres variantes —entrada al cierre de barra, bar+1 y
+~15 minutos— con la misma semilla y el mismo `dataset_hash`. (2) El artefacto registra las tres y el
+veredicto cita **la peor**. (3) Queda asentado que no cuenta como ensayo bajo D1, por ser exigencia y
+no selección. (4) El veredicto lleva un campo de **portabilidad**, derivado de si la variante
+retardada sobrevive — es la salida que decide a qué firmas se puede ir.
+
+### ☐ B.6 — C1 no tiene guarda mecánica **[rev 2026-09-22 — casilla nueva; va primera]**
+
+Hallazgo de la revisión cruzada del 2026-09-22, verificado contra el árbol. **Es el único de toda
+esta tanda que puede producir un GO falso, y por eso va antes que el resto.**
+
+El spec declara dos reglas normativas sobre el universo: el denominador de C1 **nunca se contrae**
+(§2.x, líneas 586-588) y **ninguna campaña con `|U| = 1` puede emitir veredicto favorable** (§2.x,
+líneas 600-602). **El código no implementa ninguna de las dos.** En `validation/verdict.py:388-391`:
+
+```python
+n_symbols = len(symbol_gate_outcomes)
+n_passing = sum(1 for outcome in symbol_gate_outcomes.values() if outcome.all_pass)
+c1_fraction_passing = n_passing / n_symbols if n_symbols > 0 else 0.0
+c1_pass = c1_fraction_passing >= _C1_MIN_FRACTION
+```
+
+`n_symbols` es **la cantidad de símbolos que trae el bundle**, no el universo declarado. O sea que el
+denominador **es exactamente lo que se le pase**. Un bundle con un solo símbolo da `1/1 = 100%`, C1
+pasa, y si los demás gates pasan el veredicto sale **GO**. No hay en todo el módulo ninguna
+comprobación de tamaño mínimo ni de correspondencia con el universo declarado: `_C1_MIN_FRACTION`
+(línea 71) es la única constante relacionada, y su otro uso (línea 809) sólo clasifica GO-ACOTADO.
+
+**La asimetría es lo que lo pone primero.** B.4 (costos inflados) produce **falsos negativos**:
+rechaza estrategias buenas y quema ensayos, que es caro. Esto produce **falsos positivos**: deja
+pasar una estrategia que nunca se validó de forma cruzada, y el siguiente paso después de un GO es
+poner dinero real en un challenge. Un gate que no protege es peor que no tener gate, porque se
+confía en él.
+
+**Y no es hipotético: es exactamente el camino que la lista vieja de §7.1d habilitaba.** Comprar sólo
+MNQ y correr el veredicto habría dado C1 = 100% en verde.
+
+**DoD.** (1) El bundle de veredicto transporta el **universo declarado** del candidato, no sólo los
+símbolos evaluados. (2) El denominador de C1 es ese universo declarado; los símbolos ausentes o no
+evaluables cuentan como **no superados**, según §2.x. (3) Un universo declarado de tamaño 1 **aborta
+con excepción de dominio y contexto**, sin emitir veredicto — no devuelve NO-GO, que sería indistinguible
+de una evaluación legítima. (4) Tests: un bundle de un símbolo levanta la excepción; un bundle de
+2 sobre un universo declarado de 4 da C1 = 50% y reprueba, no 100%. (5) **[rev 2026-09-22, D-E
+punto 4]** El resultado por celda admite un tercer estado, **no aplica**, para no simular una
+estrategia donde no está definida; `SymbolGateOutcome.all_pass` es hoy `bool` (`verdict.py:150`) y no
+puede expresarlo. **No aplica cuenta como no superado** si el activo está declarado: la única forma de
+excluirlo es no declararlo, antes del primer dato.
+
+Capa 4, **ciclo SDD completo** con gate humano.
+
+### ☐ B.8 — El veredicto juzga, no elige **[rev 2026-09-22 — casilla nueva; D-E puntos 1-2]**
+
+Hoy `run_verdict` emite **un solo** `VerdictKind` para todo el lote (`verdict.py:954-976`), elige un
+ganador por `payout_p25_12m` (`_select_winning_candidate`, `:433`) y deflacta sólo al ganador con
+`n_trials_signal_total_ganador + (n_candidatos_torneo - 1) + ledger_extra_trials` (`_compute_t1`,
+`:505-517`). Es lógica de torneo funcionando, no vocabulario.
+
+**El agujero que la revisión cruzada encontró en la primera versión de esta casilla.** Proponía sacar
+el término de torneo y dejar que las compañeras de lote entraran por el ledger. Pero `run_verdict`
+**lee** una foto del ledger y la escritura es una función aparte (`record_trial_completions`, `:840`):
+cuando se juzga una estrategia, sus compañeras todavía no están anotadas y habrían pagado **cero**.
+Sacar el término sin pre-registrar **relajaba** T1. Por eso el pre-registro es parte del DoD, no un
+detalle.
+
+**DoD.** (1) Un veredicto por estrategia; desaparece el campo de ganador. (2) Todos los `trial_id`
+del lote se registran en el ledger **antes** de computar cualquier veredicto. (3) T1 se conserva como
+DSR de la canasta diaria de **cada** estrategia, sin `n_candidatos_torneo`. (4) Test de invariancia:
+la misma estrategia con los mismos datos da el mismo veredicto corrida sola, en lote de tres, o en
+cualquier orden. (5) Test de dureza: ningún `n_trials` resulta menor que el del código actual para el
+mismo conjunto de ensayos. (6) El manifest sube de versión (`genesis-validation-j/3`): veredictos
+por estrategia, sin claves de ganador ni `n_candidatos_torneo`.
+
+**Rompe a sabiendas** unos 13 tests de `tests/validation/test_verdict.py` y `test_verdict_ledger.py`
+que asumen ganador único; el inventario está en §9.7.
+
+**Va antes del primer veredicto**, no después: el primer veredicto corre dos o tres estrategias
+juntas (§9.4), que es exactamente el caso donde el torneo cambia el resultado.
+
+Capa 4, **ciclo SDD completo** con gate humano. Comparte archivo con B.6; se pueden fundir en un
+solo change si el diseño lo admite, pero B.6 no espera a B.8.
+
+### ☐ B.7 — Ancla del rango de apertura por clase **[rev 2026-09-22 — casilla nueva]**
+
+La decisión de universo de §7.1e (comprar un líder por clase) la destapó: **de los cinco
+instrumentos que se compran, sólo MNQ tiene ancla de rango de apertura verificada.** Y `|U| = 1`
+está prohibido, así que hoy el Candidato B **no tiene universo declarable**.
+
+No es un problema de datos. El spec lo dice como norma (§2.3, nota obligatoria): B define su rango
+sobre la **apertura de contado del subyacente**. Donde no hay apertura de contado, **la estrategia no
+está definida** — comprar el dato no la define.
+
+**Estado por instrumento, sin rellenar con memoria del modelo:**
+
+| Instrumento | Ancla | Estado |
+|---|---|---|
+| MNQ | 14:30 UTC, apertura de contado del Nasdaq 100 | **verificada** (§2.3) |
+| MGC | — | **pendiente**, PA-106-A |
+| MCL | — | no evaluado nunca: no figura en el spec |
+| M6E | — | ídem |
+| MBT | — | ídem, y **no puede tener**: Bitcoin cotiza continuo, no abre |
+
+**DoD.** (1) Para cada líder comprado, resolver contra **página de producto oficial de CME** si existe
+una apertura de contado utilizable como ancla, y cuál es, en UTC y con su regla de DST. (2) «No tiene
+apertura» es un **resultado válido y se registra como tal** — no se inventa un sustituto ni se usa la
+apertura de Globex, que no es apertura de contado. (3) La tabla de anclaje de §2.3 del spec se
+actualiza con lo verificado. (4) El resultado determina qué instrumentos puede **declarar** el
+Candidato B; los demás quedan en el disco, disponibles para el Candidato C y la búsqueda futura.
+
+**No espera la compra** — es fuente primaria, no dato de mercado — y **no gasta ensayos**: bajo D1 lo
+que cuenta es declarar, no averiguar. Va en paralelo a B.6 y B.4a.
+
+> **Es la casilla más barata del carril y la que más decide.** Si devuelve una segunda ancla, B tiene
+> universo y no hay que gastar un peso más. Si no devuelve ninguna, se reactiva la compra de MES y MYM
+> (+$31,98, §7.1e), que quedó **diferida y no descartada**. En los dos casos la pregunta se responde
+> antes de ver un dato, que es la única forma de que la respuesta valga.
+
+Vía rápida (investigación y `docs/`) hasta que toque `sessions.py`; esa parte, ciclo SDD.
 
 ---
 
@@ -1027,6 +1463,13 @@ Es un filtro de **una sola dirección**: sólo puede rechazar, nunca admitir. So
 es evidencia a favor, así que no es una dimensión de selección y **no cuenta como ensayo bajo D1**
 (es una exigencia, no una selección). Eso lo hace gratis en términos de DSR.
 
+**[rev 2026-09-22] Y además decide a qué firmas se puede ir.** Sobrevivir al retardo no es evidencia
+estadística a favor —eso sigue firme—, pero sí es un hecho de negocio: una estrategia ejecutable a
+mano deja de estar atada a MFFU, que se eligió precisamente porque tres de las seis firmas relevadas
+prohíben automatizar. El desarrollo, el DoD y el límite de esa lectura —son dos ejes, automatización
+y hedging, y esto desbloquea sólo el primero— están en **B.5**, que es además donde el filtro deja de
+ser una declaración sin dueño.
+
 ### 9.3 La ventana de frecuencia admisible
 
 Las dos restricciones aprietan desde lados opuestos y dejan una ventana estrecha:
@@ -1061,20 +1504,59 @@ C.1b Holdout: corte 2025-01-01,     │ Firmadas sin un solo dato de CME
 
 ── DoD CERRADO el 2026-09-21 ──────────────────────────────────────────
 B.1  Databento: alta, crédito, cotización y licencia          #126
-     MNQ 1m todos los contratos 2019→hoy = $14,48 de $125.
-     Falta: aprobar la compra ($52,77) y decidir §7.1c.
+     Falta: aprobar la compra y decidir §7.1c.
+     [rev 2026-09-22] La lista de §7.1d compraba UN instrumento. El spec
+     prohíbe emitir veredicto con |U| = 1; y sobre el universo declarado
+     de B (4 símbolos) el techo sería 1/4 = 25% < 60%. En los dos casos:
+     ningún veredicto favorable es alcanzable. La reemplaza §7.1e — un
+     líder por clase, de los que MFFU fondea:
+     MNQ MGC M6E MBT MCL = $84,85 de $125.
 
 ── AHORA: desbloquear ─────────────────────────────────────────────────
-B.1b Descargar, una vez aprobada la lista   ← acción humana (aprobación)
-B.2  Fichas de contrato CME       ← el `definition` de B.1 es su insumo
+B.6  Guarda de universo en C1  ← PRIMERO. Es el único que puede emitir
+                                 un GO falso: hoy el denominador de C1
+                                 es "lo que le pases". Capa 4, ciclo SDD.
+B.4a Costos por instrumento    ← NO espera la compra. En paralelo a B.6.
+                                 El motor cobra 4× de más, y cada falso
+                                 negativo quema un ensayo del ledger.
+                                 Cierra PA-106-C.
+
+     ↓ DECIDIDO el 2026-09-22 (humano), §7.1e
+     Se compra la lista de cinco líderes, $84,85. NO se compran MES ni
+     MYM. Es cambio de spec y se asume.
+     Lo que la decisión destapó: comprar y declarar son actos distintos.
+     De los cinco, sólo MNQ tiene ancla de rango de apertura verificada,
+     y |U| = 1 está prohibido.
+
+B.7  Ancla del rango de apertura por clase  ← NUEVO. No espera la compra:
+                                 es fuente primaria (CME), no dato de
+                                 mercado. En paralelo a B.6 y B.4a.
+                                 Generaliza PA-106-A. Su resultado es lo
+                                 único que define qué puede declarar B.
+
+     ↓ declaración del universo de B, ANTES de mirar un dato
+     Se declara con lo que B.7 devuelva. Si ninguna ancla adicional
+     cierra, se reactiva la compra de MES + MYM (+$31,98) — diferida,
+     no descartada.
+
+B.1b Descargar la lista de §7.1e  ← acción humana (aprobación)
+B.2  Fichas de contrato CME       ← el `definition` de B.1b es su insumo
 B.3  Exportador, empalme de continuos, sesiones  ← punto de no retorno
                                     C.1a y C.1b ratificadas: vía libre
-B.4  Adaptar `spread_for` a `bbo-1m`  ← casilla NUEVA (§7.1b), capa 3,
-                                         pasa por el ciclo SDD completo
+B.4b `spread_for` lee `bbo-1m`    ← capa 3, ciclo SDD completo. Alcance
+                                    mayor que el spread: hoy no hay
+                                    loader ni esquema para BBO por minuto
+B.5  F-retardo: implementarlo     ← capa 3/4, ciclo SDD completo.
+                                    Decide ejecutabilidad Y portabilidad
 
 ── DESPUÉS: hacer honesto lo que ya existe ────────────────────────────
+B.8  El veredicto juzga, no elige   ← D-E. Un veredicto por estrategia,
+                                      pre-registro del lote en el ledger,
+                                      T1 sin término de torneo. Capa 4.
 C.3  RFC #57: D1, D2, D4, D5, D7    ← D5 cierra la gramática, D1 bloquea A.6
 A.1  Gramática con ramificación ←── D5
+     └─ luego: retirar candidate_b/ a mano (equivalencia ya probada)
+        y mover smc/ a librería de primitivas
 A.4  Primitivas de ejecución (una o dos, las que pida el corpus)
 C.4  Pre-registro: hipótesis + ORDEN DE FUENTES  ← antes del primer ensayo
 
@@ -1095,6 +1577,20 @@ C.2  POLITICA.md                             ← antes de capital real
 **Dependencias que no se pueden invertir:** C.1a y C.1b **antes** de B.3; D5 antes de cerrar A.1;
 C.3/D1 antes de A.6; C.4 antes del primer ensayo real.
 
+**[rev 2026-09-22] Tres dependencias nuevas, todas del mismo tipo — cosas que si se hacen después
+dejan de servir:**
+
+- **La decisión de universo (§7.1e) antes de B.1b.** Redeclarar el universo con datos en el disco es
+  elegir el denominador de C1 mirando resultados. **[rev 2026-09-22] Decidida: (b).** Lo que queda
+  vivo es su consecuencia — **B.7 antes de declarar el universo de B**, y la declaración antes de
+  mirar un dato. Un ORB sin apertura de contado no está definido sobre ese instrumento, y eso no lo
+  arregla ninguna compra.
+- **B.6 antes de cualquier veredicto.** Sin la guarda, un veredicto favorable no prueba lo que dice
+  probar, y el paso siguiente a un GO es dinero real en un challenge.
+- **B.4a antes de G3, G9 y los gates P.** El spec ya lo había anotado como **PA-106-C**: sin
+  comisiones verificadas esos gates no corren de forma significativa. B.1 consiguió las comisiones en
+  fuente primaria; B.4a es lo que falta para que entren al motor.
+
 **[rev 2026-09-21] Cayó una dependencia:** «B.1 antes de C.1b» ya no aplica. El único dato que
 C.1b necesitaba de B.1 era la primera sesión utilizable del MNQ, verificada en fuente primaria
 (2019-05-05), así que C.1b se pudo escribir sin esperar la compra.
@@ -1113,6 +1609,74 @@ C.1b necesitaba de B.1 era la primera sesión utilizable del MNQ, verificada en 
   (C.4).
 - **«El carril A es un desperdicio»** dicho en el mismo texto que exige ampliar la gramática. Ampliar
   la gramática **es** A.1. Lo que se congela son A.2 y A.5–A.8, no el carril entero.
+
+### 9.6 Revisión cruzada del 2026-09-22 (Gemini 3.8 Flash High, `agy-delegate --tier flash`)
+
+Método de `mem:revision-cruzada-atrapa-inferencias-que-ningun-test-atrapa`: cinco afirmaciones
+propias sometidas a verificación adversarial contra el árbol, con exigencia de cita `archivo:línea` y
+de decir «no verificado» antes que inferir.
+
+| Afirmación sometida | Veredicto | Qué pasó |
+|---|---|---|
+| El spec exige `\|U\| ≥ 2` y la lista de §7.1d no puede emitir veredicto | **verificada** | La línea 37 era changelog, pero la regla es normativa en el cuerpo (§2.x:598-602). Agregó el techo de **1/4 = 25%** para el universo declarado de B |
+| La historia larga de NQ la bloquea el motor, no el dato | **parcial** | Corregida en §7.1e. B va flat al cierre por diseño, así que el cierre forzado no lo estorba: la historia profunda está **en la cola**, no vetada |
+| Los costos son globales y no por instrumento | **verificada** | `costs.py:48` — `del symbol, timestamp, figure`. Ni `SymbolFigure` ni los perfiles de firma tienen comisión |
+| F-retardo está declarado pero no planificado | **verificada** | Cero implementación; las únicas ocurrencias de «delay» en el código son reintentos HTTP |
+| Comprar no gasta ensayos, declarar sí; y MGC declarado hoy empeora C1 | **verificada** | Con MGC fallando de entrada, C1 pasa a exigir **100% en los tres índices restantes** |
+
+**El hallazgo que no estaba en el dossier y se volvió la casilla B.6:** el denominador de C1 en
+`verdict.py:388-391` es `len(bundle)`, no el universo declarado. Las dos reglas normativas sobre
+universo son texto sin ejecutor. Es el único defecto de esta tanda capaz de emitir un **GO falso**.
+
+**Lo que se rechazó:** «la serie 2019–2024 de MNQ queda al borde de no alcanzar los 300 trades de
+G1», apoyado en la estimación de ~250 oportunidades/año de **§7.6 del spec**. Esa sección está
+**superada por `docs/DIMENSIONAMIENTO_HOLDOUT.md`**, que midió el problema corriendo el generador de
+ventanas real en vez de estimarlo: con el corte ratificado 2025-01-01 hay 9 ventanas y 1.134 días
+fuera de muestra, y G1 se traduce en **1 operación cada 3,8 días** — holgado dentro de la ventana de
+1 a 4 por día de §9.3. El propio §7.6 se autodeclara «estimaciones heredadas del régimen CFD, a
+confirmar contra datos CME reales». Que una revisión externa haya vuelto a caer en §7.6 es evidencia
+de que la contradicción **hay que resolverla en el SSoT**, y queda anotada en §10.
+
+### 9.7 Revisión cruzada de D-E, 2026-09-22 (dos rondas, Gemini 3.8 Flash High)
+
+**Primera ronda — ¿el modelo de grilla es un cambio de esquema o una refundación?** La revisión dijo
+**refundación**; el arquitecto había dicho **cambio de esquema**. Ninguno tenía razón entera:
+
+| Afirmación | Veredicto | Qué quedó |
+|---|---|---|
+| El genoma ata una estrategia a un símbolo, obligatorio | VERIFICADA | `schema.py`, `GenomeUniverse.symbol` |
+| El campo `session` ya es un requisito | PARCIAL | Es un string que nadie lee; `"US_EQUITY_OPEN"` **no existe** en `SESSIONS` |
+| El desajuste está localizado en la capa 2 | **FALSA** | P1–P6 evalúan una canasta conjunta (`prop_sim.py:258`): la cuenta es compartida y **debe** seguir siéndolo |
+| El catálogo de activos no tiene sesiones | VERIFICADA | `SymbolFigure` y `SESSIONS` viven separados; `SESSIONS` es 100 % era CFD |
+| El resultado por celda no tiene tercer estado | VERIFICADA | `all_pass: bool` |
+
+La reconciliación es D-E punto 3: **la grilla no reemplaza a la cartera, convive con ella** — celda,
+fila, canasta y cuenta son preguntas distintas. **Error del arquitecto corregido en esta ronda:** había
+afirmado que el ledger de ensayos «ya está armado por par». Falso: `compute_trial_id` no incluye el
+símbolo, y un test normativo fija que la misma configuración sobre dos símbolos es **un** ensayo. La
+revisión lo leyó como «sub-conteo masivo»; **es D1 funcionando bien** —el universo entra por
+`dataset_hash_by_symbol`, así que la identidad del ensayo es `(config, universo)`—.
+
+**Segunda ronda — la propuesta de cinco puntos.** Tres correcciones incorporadas:
+
+- **T1 no es redundante con G4.** El arquitecto proponía eliminarlo. G4 mide operaciones de un activo
+  con los ensayos de ese activo; T1 mide la canasta diaria con la suma de los ensayos del universo.
+  Eliminarlo relajaba la exigencia de cartera. (El arquitecto lo detectó en paralelo leyendo
+  `_compute_t1`.)
+- **El ledger se escribe después del veredicto.** Sin pre-registrar el lote, las compañeras pagaban
+  cero: ejemplo de la revisión, un lote de tres con ledger vacío baja de `108 + 2 = 110` a `108`.
+  Origen del DoD (2) de B.8.
+- **«No aplica» fuera del denominador de C1 era una relajación**, prohibida por §2.x. Pasa a ser estado
+  de ejecución; la exclusión sólo por no declarar, antes de los datos.
+
+Y una omisión: la primera versión tenía tres niveles y **se olvidaba de C3**. Quedaron cuatro.
+
+**Lo que se rechazó:** que evaluar P1–P5 celda por celda reprobaría masivamente. Es cierto y no aplica:
+nadie propuso evaluar los gates P por celda. **Lo que queda abierto de la revisión, sin casilla:** C2
+exige PF ≥ 0,8 en el peor activo que falla, así que un universo sugerido por la grilla puede incluir un
+activo aplicable pero ruidoso que hunda la fila entera. El filtro de calidad de activo (liquidez,
+costo contra tick) ya está en el criterio de admisión de §2.x; falta que el catálogo lo lleve como
+dato, que es parte de B.7.
 
 ---
 
@@ -1144,3 +1708,35 @@ C.1b necesitaba de B.1 era la primera sesión utilizable del MNQ, verificada en 
   como entregar a terceros los datos «or other information derived from the same» (§1.5e), y un
   veredicto publicado es información derivada. Exige atribución y autoriza a Databento a usar
   nuestro nombre en su marketing (§1.6). Ver §7.1c.
+
+**[rev 2026-09-22] Deuda declarada en el SSoT, que este roadmap no puede saldar solo.** Son
+contradicciones entre el spec y lo que el proyecto ya decidió; tocarlas es tocar el documento que
+gobierna los gates, y va por su propio camino:
+
+- **§7.6 contradice a `DIMENSIONAMIENTO_HOLDOUT.md` sobre G1.** §7.6 concluye que G1 «no es
+  holgadamente alcanzable» a partir de estimaciones que él mismo declara heredadas del régimen CFD;
+  el dimensionamiento lo **midió** con el generador de ventanas real y da 1 operación cada 3,8 días.
+  Mientras las dos versiones convivan, cualquier lector —humano o revisor externo, como pasó en
+  §9.6— puede citar la equivocada. El documento medido gana; el spec tiene que decirlo.
+- **El vocabulario de «torneo» quedó vestigial.** D-A (2026-09-20) ya decidió que el arquitecto
+  adjudica estrategias de terceros en vez de competir tres candidatos propios, y el dueño lo ratificó
+  el 2026-09-21. A/B/C no son «el torneo»: son las primeras estrategias que llegaron. El SSoT sigue
+  titulado y redactado como torneo, y el nombre aparece en identificadores del veredicto.
+  ~~**Es renombre, no cambio de comportamiento**~~ **[rev 2026-09-22] Falso:** el veredicto elige
+  ganador y ajusta el castigo por cantidad de competidores. El comportamiento lo resuelve **B.8**
+  (D-E); lo que queda acá es sólo la redacción del SSoT, que va por su propio change.
+- **El universo del Candidato B, decidido el 2026-09-22, todavía no está en el spec.** §2.3 línea 510
+  sigue declarando `MES, MNQ, MYM, MGC`, y §7.6 apoya su estimación en «3 micro-índices sobre una
+  sola sesión RTH». La decisión (b) de §7.1e los contradice. **Hasta que el spec cambie, el
+  denominador normativo de C1 para B son cuatro índices** — el roadmap no puede redeclararlo por su
+  cuenta, porque el SSoT es el que gobierna los gates. El cambio no se escribe todavía: espera el
+  resultado de **B.7**, porque escribir un universo sin ancla verificada sería repetir el error que
+  §7.1e acaba de corregir.
+- **PA-106-A quedó chica.** Está redactada como «el ancla del oro»; el problema es **el ancla por
+  clase** (B.7). Al reescribirla hay que conservar lo que ya dice bien —fuente primaria, no se
+  rellena con memoria del modelo— y agregar que «no tiene apertura de contado» es un resultado
+  válido que se registra, no un pendiente perpetuo.
+- **El alcance de asesoría regulada (RPSF/CMF) fue retirado por el dueño el 2026-09-21.** El objetivo
+  declarado es operar con prop firms. La viñeta de arriba sobre qué se publica **sigue vigente por la
+  vía contractual de Databento**, pero su premisa regulatoria ya no aplica, y la memoria que la
+  sostenía hay que corregirla.
