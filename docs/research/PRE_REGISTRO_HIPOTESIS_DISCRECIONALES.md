@@ -4,6 +4,33 @@
 siguen marcadas `[DECISIÓN HUMANA]` no lo están, y hasta que lo estén este documento no habilita
 ninguna corrida. Refs #88.)*
 
+> **Nota de estado, 2026-09-24 — agregada al fusionar, sin tocar el texto de abajo.**
+>
+> Todo lo que sigue es el pre-registro **tal como se escribió el 2026-09-07**. Las hipótesis H1–H3,
+> sus umbrales y lo declarado como «no evidencia» **no se editan**: editarlos después de esta fecha
+> anularía el pre-registro. Esta nota solo registra qué cambió alrededor.
+>
+> - **El universo ya no es el de este documento.** Desde el 2026-09-14 genesis opera solo futuros
+>   CME, y la decisión D-C (2026-09-20) prohíbe correr ensayos sobre CFDs de MT5. XAUUSD, NAS100,
+>   WTI, BRENT y USDCLP como están escritos acá **no se pueden correr**. Cuál contrato CME
+>   corresponde a cada activo del Playbook es una **declaración pendiente**, que se hace antes de
+>   mirar datos y no se elige midiendo.
+> - **Precondición 1 (conteo de ensayos): en parte resuelta.** El ledger está cableado y se
+>   demostró de punta a punta (casilla 0.2, PR #123). Siguen abiertos: `_N_TRIALS_SIGNAL = 9` y
+>   `_N_TRIALS_EXECUTION = 27` siguen siendo constantes literales (`validation/wfa.py:58-59`), y los
+>   **~30 ensayos gastados el 2026-09-07 todavía no están anotados** (`ledger/trials.jsonl` tiene 0
+>   líneas).
+> - **Precondición 2 (trailing en capa 3): resuelta** por el Change #97 (`backtest/exit_policy.py`).
+> - **Precondición 3 (historia suficiente): reemplazada** por la compra de datos CME vía Databento
+>   (casilla B.1, #126).
+> - **Precondición 4 (holdout): la política se ratificó el 2026-09-21**
+>   (`docs/POLITICA_HOLDOUT.md`, corte 2025-01-01), antes de tener datos CME. **Sin implementar en
+>   código.**
+> - **Siguen abiertas las dos `[DECISIÓN HUMANA]`**: el presupuesto de ensayos (D4) y la concurrencia
+>   máxima con riesgo unitario por clima (#96).
+> - **El propósito se precisó el 2026-09-24**: llegar al final del camino como trader retail y no
+>   creer lo que no está validado. Este documento es el primer caso de eso.
+
 ## Por qué este documento va antes de correr
 
 La entrevista de estatutos reencuadró el primer trabajo de genesis, y quedó registrado en
