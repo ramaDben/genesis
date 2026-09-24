@@ -107,19 +107,19 @@ def _synthetic_m1_frame(days: list[dt.date], seed: int) -> pd.DataFrame:
         // 60
     )
 
-    timestamps: list[pd.Timestamp] = []
+    timestamps: list[dt.datetime] = []
     closes: list[float] = []
     volumes: list[int] = []
 
     price = 5000.0
     for day in days:
-        base = pd.Timestamp(dt.datetime.combine(day, _SESSION_START_UTC), tz="UTC")
+        base = dt.datetime.combine(day, _SESSION_START_UTC, tzinfo=dt.UTC)
         drift = rng.normal(0.0, 0.15)
         for minute in range(minutes_per_day):
             # Volatilidad mayor en la primera media hora: da rango de apertura y ruptura.
             sigma = 1.2 if minute < 30 else 0.55
             price += rng.normal(drift * 0.02, sigma)
-            timestamps.append(base + pd.Timedelta(minutes=minute))
+            timestamps.append(base + dt.timedelta(minutes=minute))
             closes.append(price)
             volumes.append(int(rng.integers(400, 1200) * (2 if minute < 30 else 1)))
 
@@ -227,7 +227,9 @@ def _run_pipeline(
         str(starting_balance),
     ]
     print(f"\n{'=' * 78}\n[{label}] {' '.join(command[1:])}\n{'=' * 78}", flush=True)
-    completed = subprocess.run(command, cwd=_REPO_ROOT, check=False)
+    completed = subprocess.run(  # noqa: S603 — argv en lista, sin shell: sys.executable y valores propios
+        command, cwd=_REPO_ROOT, check=False
+    )
     if completed.returncode != 0:
         raise SystemExit(f"[{label}] run_pipeline.py terminó con código {completed.returncode}.")
 
@@ -329,9 +331,7 @@ def main() -> int:
                 f"{summary_2.n_trials_total}: la idempotencia por trial_id (R8) no se cumple"
             )
         if summary_2.n_rows != summary_1.n_rows:
-            failures.append(
-                f"la corrida 2 agregó filas ({summary_1.n_rows} -> {summary_2.n_rows})"
-            )
+            failures.append(f"la corrida 2 agregó filas ({summary_1.n_rows} -> {summary_2.n_rows})")
 
         if failures:
             print("\nRESULTADO: FALLA")
