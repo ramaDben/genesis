@@ -3,16 +3,44 @@
 
 # El propósito real de genesis, y lo que cuesta
 
-Revelado en la entrevista de `docs/ENTREVISTA_POLITICA.md`. **Cambia el marco del proyecto entero**:
-genesis no es un proyecto de trading, es **la base de evidencia de un negocio regulado**.
+## ACTUALIZACIÓN 2026-09-24 — el propósito se redujo, y esta es la versión vigente
 
-> **Objetivo declarado por el usuario**: entrar al **RPSF de la CMF** (Chile) y ofrecer asesoría de
+Declarado por el dueño del proyecto, tras leer una auditoría externa de Gemini sobre el repo
+público:
+
+> «el objetivo ya digerido de genesis es llegar al final del camino como **trader retail**, y
+> **dejar de creer que sé algo que no está validado**.»
+
+**La meta CMF/RPSF + inversionistas queda DESCARTADA** (respuesta explícita: «queda descartada»),
+no diferida. Todo lo de abajo que dependa de «negocio regulado» —la sección *Sin verificar* sobre
+requisitos del RPSF, el rastro de auditoría para terceros— deja de ser requisito.
+
+Lo que queda en pie y sale reforzado:
+
+- **A2 intacta** (no desplegar sin gates, no aflojar gates, no relajar el conteo de ensayos, no
+  afirmar más de lo que el artefacto sustenta). Es exactamente «no creer lo no validado».
+- **B1 era ya este objetivo**: arbitrar las hipótesis discrecionales del propio operador. La
+  actualización lo convierte de hallazgo en propósito declarado.
+- **El repo es público a propósito**, y eso lo vuelve un dispositivo de compromiso: lo
+  pre-registrado ahí queda fechado. Con el objetivo retail, **#88 (pre-registro) sube de prioridad**,
+  porque sin auditor externo el único que puede engañarse es el operador — y la compuerta humana
+  que nunca funcionó (`mem:politica-de-decision-y-compuerta-humana`) pesa más, no menos.
+- Pierde urgencia lo que se justificaba solo por terceros: #86/#87 (adjudicador externo, política
+  formal) siguen útiles pero ya no son la razón del proyecto.
+
+El README se reescribió ese día con este propósito y una tabla de «qué está validado hoy».
+
+## Versión original (2026-09-05) — histórica
+
+Revelado en la entrevista de `docs/ENTREVISTA_POLITICA.md`. ~~genesis no es un proyecto de
+trading, es la base de evidencia de un negocio regulado~~ *(descartado 2026-09-24)*.
+
+> **Objetivo declarado entonces**: entrar al **RPSF de la CMF** (Chile) y ofrecer asesoría de
 > inversión basada en un modelo probado. Y si se logra algo robusto, **buscar inversionistas**, no
 > solo prop firms.
 
-Consecuencia inmediata: los gates dejan de ser gestión de riesgo personal y pasan a ser la
-sustentación de afirmaciones hechas a clientes y a un regulador. La reproducibilidad y la
-procedencia dejan de ser elegancia de ingeniería y pasan a ser rastro de auditoría.
+Consecuencia que se sacó entonces (ya no vigente): los gates pasaban a ser la sustentación de
+afirmaciones hechas a clientes y a un regulador.
 
 ## A1 — el alcance, en la forma que aguanta
 
