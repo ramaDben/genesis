@@ -2,11 +2,22 @@
 
 ## Qué es este proyecto
 
-Pipeline de validación institucional para prop firms: un **torneo de candidatos de estrategia** (A: CT sweep-fade, B: ORB intradía en índices — prioridad, C: TSMOM — diferido) bajo gates mecánicos idénticos (G/C/P/T). **SSoT**: `docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` — todo cambio de alcance se valida contra el spec, los gates nunca se relajan.
+Validador de estrategias intradía sobre **futuros CME** para operar como **trader retail** en una
+prop de futuros (MFFU Rapid EOD 50K), bajo gates mecánicos idénticos (G/C/P/T). **SSoT**:
+`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` — todo cambio de alcance se valida contra
+el spec, los gates nunca se relajan.
+
+**Propósito (2026-09-24):** llegar al final del camino como trader retail y **dejar de creer que se
+sabe algo que no está validado**. La meta CMF/inversionistas está **descartada**, no diferida. El
+repo es público a propósito: lo pre-registrado ahí queda fechado. Ver
+`mem:proposito-real-y-alcance-de-genesis`.
 
 **Visión de largo plazo** (contexto para decidir alcance, no alcance vigente): las 4 capas son
-agnósticas a la estrategia, así que genesis es un **evaluador de caja negra** — el torneo A/B/C es
-el primer caso de uso, no el techo. El destino es una búsqueda automatizada de candidatos.
+agnósticas a la estrategia, así que genesis es un **evaluador de caja negra** que juzga pares
+(estrategia, activo), sin elegir ganador. El **arquitecto adjudica, no busca**: transcribe a genomas
+estrategias publicadas por terceros con nombre, es **feed-forward** (ningún resultado vuelve al que
+propone) y no corre ensayos sobre CFDs (D-A/D-B/D-C, `docs/ROADMAP_ARQUITECTO.md`,
+`mem:decision-arquitecto-adjudicador-2026-09-20`).
 
 Sus dos prerrequisitos **ya están construidos**, y eso cambia el orden de trabajo que este archivo
 declaraba antes:
