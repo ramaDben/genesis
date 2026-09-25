@@ -9,8 +9,8 @@ import pytest
 
 from genesis.backtest.ticks import _day_window
 from genesis.data.metadata import ArtifactMetadata
-from genesis.data.mt5_export import Granularity, RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
+from genesis.data.store import Granularity, RawParquetStore
 from genesis.strategy.candidate_a.config import CandidateAConfig, DiagnosticsConfig, SmcEngineConfig
 from genesis.strategy.candidate_a.diagnostics import ConditionalReturnEvent
 from genesis.strategy.contract import Direction

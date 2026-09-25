@@ -1,16 +1,26 @@
 """Tests unitarios de `genesis.data.store` (lectura normalizada UTC, forward-only)."""
 
 import inspect
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 
 import pandas as pd
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from genesis.data.errors import GenesisDataError
 from genesis.data.profile import load_firm_profile
 from genesis.data.sessions import session_window
-from genesis.data.store import AnnotatedBar, DayBoundaryError, iter_bars
+from genesis.data.store import (
+    AnnotatedBar,
+    ChunkWindow,
+    DayBoundaryError,
+    Granularity,
+    iter_bars,
+    plan_chunks,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -143,3 +153,50 @@ def test_iter_bars_monotonic_trading_day_across_full_day() -> None:
     trading_days = [bar.trading_day for bar in bars]
     assert trading_days == sorted(trading_days)
     assert trading_days[-1] == date(2024, 3, 2)
+
+
+def test_plan_chunks_m1_splits_by_calendar_month() -> None:
+    start = datetime(2024, 1, 15, tzinfo=UTC)
+    end = datetime(2024, 3, 10, tzinfo=UTC)
+    chunks = plan_chunks(start, end, Granularity.M1)
+    assert len(chunks) == 3
+    assert chunks[0].start == start
+    assert chunks[-1].end == end
+
+
+def test_plan_chunks_ticks_splits_by_day() -> None:
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    end = datetime(2024, 1, 4, tzinfo=UTC)
+    chunks = plan_chunks(start, end, Granularity.TICK)
+    assert len(chunks) == 3
+
+
+def test_plan_chunks_covers_range_without_gaps_or_overlaps() -> None:
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    end = datetime(2024, 6, 30, tzinfo=UTC)
+    chunks = plan_chunks(start, end, Granularity.M1)
+    assert chunks[0].start == start
+    assert chunks[-1].end == end
+    for prev, curr in pairwise(chunks):
+        assert prev.end == curr.start
+
+
+@given(
+    start_offset_days=st.integers(min_value=0, max_value=400),
+    span_days=st.integers(min_value=1, max_value=400),
+)
+def test_plan_chunks_property_covers_exact_range(start_offset_days: int, span_days: int) -> None:
+    base = datetime(2023, 1, 1, tzinfo=UTC)
+    start = base + timedelta(days=start_offset_days)
+    end = start + timedelta(days=span_days)
+    chunks = plan_chunks(start, end, Granularity.M1)
+    assert chunks[0].start == start
+    assert chunks[-1].end == end
+    for prev, curr in pairwise(chunks):
+        assert prev.end == curr.start
+
+
+def test_plan_chunks_start_equals_end_returns_single_empty_window() -> None:
+    moment = datetime(2024, 5, 1, tzinfo=UTC)
+    chunks = plan_chunks(moment, moment, Granularity.M1)
+    assert chunks == [ChunkWindow(start=moment, end=moment)]

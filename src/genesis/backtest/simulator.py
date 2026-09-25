@@ -47,10 +47,9 @@ from genesis.backtest.ticks import (
 )
 from genesis.data.calendar import EconomicEvent, news_windows
 from genesis.data.house_rule import house_rule_hash as _house_rule_hash
-from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash
 from genesis.data.sessions import session_window
-from genesis.data.store import AnnotatedBar, iter_bars
+from genesis.data.store import AnnotatedBar, RawParquetStore, iter_bars
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.common.atr import IncrementalAtr
 from genesis.strategy.common.rolling_extreme import RollingExtreme

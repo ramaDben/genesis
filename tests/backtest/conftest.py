@@ -11,8 +11,8 @@ import pytest
 
 from genesis.backtest.costs import CostsConfig, load_costs_config
 from genesis.backtest.exit_geometry import ExitGeometry, load_exit_geometry
-from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
+from genesis.data.store import RawParquetStore
 from genesis.data.symbols import SymbolFigure
 from tests.data.fakes import _default_symbol_figure
 

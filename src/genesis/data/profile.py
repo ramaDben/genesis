@@ -14,7 +14,7 @@ ficha con `house_rule` declarado habilita una evaluación prop (capa 3/4).
 import hashlib
 import importlib.resources
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import time, timedelta
 from pathlib import Path
@@ -41,10 +41,42 @@ _DEFAULT_PROFILE_RESOURCE = "the5ers.json"
 
 @dataclass(frozen=True, slots=True)
 class SymbolAliases:
-    """Símbolo MT5 esperado para un nombre convencional, más sus alias documentados."""
+    """Símbolo esperado para un nombre convencional, más sus alias documentados."""
 
     expected: str
     aliases: tuple[str, ...]
+
+
+def resolve_symbol_alias(
+    conventional_name: str,
+    available_symbols: Sequence[str],
+    expected_table: Mapping[str, SymbolAliases],
+) -> str:
+    """Resuelve el símbolo de mercado real para `conventional_name`.
+
+    Intenta primero el símbolo esperado (`expected_table[conventional_name].expected`);
+    si no está en `available_symbols`, prueba los alias documentados en orden. Si nada
+    coincide, o si `conventional_name` no está documentado en `expected_table`, lanza
+    `GenesisDataError` con contexto (símbolo buscado, candidatos probados, disponibles).
+    """
+    if conventional_name not in expected_table:
+        message = (
+            f"Símbolo convencional '{conventional_name}' no está documentado en la tabla de "
+            f"la ficha de firma. Símbolos documentados: {sorted(expected_table)}."
+        )
+        raise GenesisDataError(message)
+
+    aliases = expected_table[conventional_name]
+    candidates = (aliases.expected, *aliases.aliases)
+    for candidate in candidates:
+        if candidate in available_symbols:
+            return candidate
+
+    message = (
+        f"No se encontró símbolo para '{conventional_name}' entre los candidatos "
+        f"{candidates} ni en los símbolos disponibles del feed: {list(available_symbols)}."
+    )
+    raise GenesisDataError(message)
 
 
 @dataclass(frozen=True, slots=True)

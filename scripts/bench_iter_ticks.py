@@ -40,8 +40,8 @@ from genesis.backtest.ticks import (
     _to_utc,
     iter_ticks,
 )
-from genesis.data.mt5_export import ChunkWindow, Granularity, RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
+from genesis.data.store import ChunkWindow, Granularity, RawParquetStore
 
 _DEFAULT_DATA_ROOT = "data/raw"
 _DEFAULT_SYMBOL = "US500.cash"

@@ -22,7 +22,7 @@ from pathlib import Path
 import pandas as pd
 
 from genesis.data.metadata import ArtifactMetadata, current_git_commit
-from genesis.data.mt5_export import ChunkWindow, Granularity, RawParquetStore
+from genesis.data.store import ChunkWindow, Granularity, RawParquetStore
 
 CONFIG_VERSION: str = "genesis-binance-export/1"
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"

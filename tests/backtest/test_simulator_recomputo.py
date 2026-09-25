@@ -17,9 +17,9 @@ from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.simulator import Simulator
 from genesis.backtest.ticks import _day_window
 from genesis.data.metadata import ArtifactMetadata
-from genesis.data.mt5_export import ChunkWindow, Granularity, RawParquetStore
 from genesis.data.profile import FirmProfile
 from genesis.data.sessions import session_window
+from genesis.data.store import ChunkWindow, Granularity, RawParquetStore
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.inspector import load_inspector_funnel_config
 from tests.backtest.fakes import FakeRiskCandidate

@@ -14,6 +14,7 @@ from genesis.data.profile import (
     SymbolAliases,
     firm_profile_hash,
     load_firm_profile,
+    resolve_symbol_alias,
 )
 
 _PROFILES_DIR = Path("src/genesis/data/profiles")
@@ -251,3 +252,31 @@ def test_u14_ficha_binance_futures_no_es_prop_firm() -> None:
     assert "daily_loss_limit" not in raw
     assert "max_loss_limit" not in raw
     assert "account_size" not in raw
+
+
+def test_resolve_symbol_alias_returns_expected_when_present() -> None:
+    table = {"NAS100": SymbolAliases(expected="US100", aliases=("NAS100", "USTEC"))}
+    resolved = resolve_symbol_alias("NAS100", ["US100", "US500"], table)
+    assert resolved == "US100"
+
+
+def test_resolve_symbol_alias_falls_back_to_documented_alias() -> None:
+    table = {"NAS100": SymbolAliases(expected="US100", aliases=("NAS100", "USTEC"))}
+    resolved = resolve_symbol_alias("NAS100", ["NAS100", "US500"], table)
+    assert resolved == "NAS100"
+
+
+def test_resolve_symbol_alias_fails_noisily_with_context_when_nothing_matches() -> None:
+    table = {"NAS100": SymbolAliases(expected="US100", aliases=("NAS100", "USTEC"))}
+    with pytest.raises(GenesisDataError) as exc_info:
+        resolve_symbol_alias("NAS100", ["EURUSD", "GBPUSD"], table)
+    message = str(exc_info.value)
+    assert "NAS100" in message
+    assert "US100" in message
+
+
+def test_resolve_symbol_alias_unknown_conventional_symbol_fails_noisily() -> None:
+    table = {"NAS100": SymbolAliases(expected="US100", aliases=("NAS100", "USTEC"))}
+    with pytest.raises(GenesisDataError) as exc_info:
+        resolve_symbol_alias("XAUUSD", ["XAUUSD"], table)
+    assert "XAUUSD" in str(exc_info.value)

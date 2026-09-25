@@ -5,8 +5,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import load_firm_profile
+from genesis.data.store import RawParquetStore
 from genesis.strategy.candidate_a.config import CandidateAConfig, DiagnosticsConfig, SmcEngineConfig
 from genesis.validation.signal_diagnostic import (
     render_signal_diagnostic_markdown,

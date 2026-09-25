@@ -27,8 +27,8 @@ from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 
 from genesis.backtest.ticks import _tick_in_bar_window, iter_ticks
-from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import load_firm_profile
+from genesis.data.store import RawParquetStore
 from tests.backtest.fakes import build_server_local_tick_chunk
 
 pytestmark = pytest.mark.unit

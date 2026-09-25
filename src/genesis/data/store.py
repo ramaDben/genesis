@@ -7,21 +7,203 @@ estrategia no se implementa en este Change (PA-4 es de Issue C, fuera de alcance
 spec §11.1).
 """
 
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
+from itertools import pairwise
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from genesis.data.errors import GenesisDataError
+from genesis.data.metadata import ArtifactMetadata, sha256_of
 from genesis.data.profile import FirmProfile
 from genesis.data.sessions import session_window
 
 
 class DayBoundaryError(GenesisDataError):
     """Corte de día inconsistente con `daily_reset_time` de la ficha activa (R30)."""
+
+
+class Granularity(StrEnum):
+    """Granularidad de descarga: M1 (troceado por meses) o ticks (troceado por días)."""
+
+    M1 = "m1"
+    TICK = "tick"
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkWindow:
+    """Sub-rango temporal `[start, end]` planificado por `plan_chunks`."""
+
+    start: datetime
+    end: datetime
+
+
+_CANONICAL_COLUMN_ORDER = (
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "tick_volume",
+    "bid",
+    "ask",
+    "last",
+)
+
+
+def _next_month_boundary(moment: datetime) -> datetime:
+    """Primer instante (00:00) del mes calendario siguiente al de `moment`."""
+    if moment.month == 12:
+        return moment.replace(
+            year=moment.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+    return moment.replace(month=moment.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _one_day_later(moment: datetime) -> datetime:
+    return moment + timedelta(days=1)
+
+
+def plan_chunks(start: datetime, end: datetime, granularity: Granularity) -> list[ChunkWindow]:
+    """Trocea `[start, end]` en sub-rangos ordenados y sin solapes que cubren el rango exacto.
+
+    M1 se trocea por meses calendario; ticks por días (spec §4.1, ADR-4). Función pura,
+    sin I/O: la unión de los `ChunkWindow` retornados cubre exactamente `[start, end]`
+    (R5); property-testeable con `hypothesis` (R53).
+
+    Lanza `GenesisDataError` si `start > end`.
+    """
+    if start > end:
+        message = f"Rango temporal inválido para plan_chunks: start={start!r} > end={end!r}."
+        raise GenesisDataError(message)
+    if start == end:
+        return [ChunkWindow(start=start, end=end)]
+
+    step = _next_month_boundary if granularity is Granularity.M1 else _one_day_later
+
+    boundaries = [start]
+    cursor = step(start)
+    while cursor < end:
+        boundaries.append(cursor)
+        cursor = step(cursor)
+    boundaries.append(end)
+
+    return [
+        ChunkWindow(start=segment_start, end=segment_end)
+        for segment_start, segment_end in pairwise(boundaries)
+    ]
+
+
+def _chunk_filename(window: ChunkWindow, granularity: Granularity) -> str:
+    if granularity is Granularity.M1:
+        return f"{window.start:%Y-%m}.parquet"
+    return f"{window.start:%Y-%m-%d}.parquet"
+
+
+def _normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza un frame crudo a orden de columnas y dtypes canónicos (ADR-2/ADR-3)."""
+    ordered_columns = [column for column in _CANONICAL_COLUMN_ORDER if column in frame.columns]
+    normalized = frame[ordered_columns].copy()
+    normalized["timestamp"] = pd.to_datetime(normalized["timestamp"], utc=True)
+    return normalized.sort_values("timestamp").reset_index(drop=True)
+
+
+class RawParquetStore:
+    """Store cache-first de Parquet crudo (ADR-2): `root/<symbol>/<gran>/<YYYY>/<file>`.
+
+    M1 se persiste un archivo por mes calendario; ticks un archivo por día. Cada chunk
+    lleva un sidecar `<file>.meta.json` (`ArtifactMetadata`) y un índice
+    `root/_manifest.json` (`chunk_hash -> ruta relativa`) para lookup O(1) por hash.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._root.mkdir(parents=True, exist_ok=True)
+
+    def _chunk_path(self, symbol: str, granularity: Granularity, window: ChunkWindow) -> Path:
+        return (
+            self._root
+            / symbol
+            / granularity.value
+            / f"{window.start:%Y}"
+            / _chunk_filename(window, granularity)
+        )
+
+    def chunk_hash(self, frame: pd.DataFrame) -> str:
+        """Hash `sha256` determinista sobre el contenido crudo normalizado de `frame`.
+
+        Se calcula sobre los valores del frame (dtypes/orden de columnas fijos), no sobre
+        los bytes del archivo Parquet (ADR-3): dos frames con el mismo contenido producen
+        siempre el mismo hash, independientemente del orden original de columnas/filas.
+        """
+        normalized = _normalize_frame(frame)
+        canonical_bytes = normalized.to_csv(index=False, lineterminator="\n").encode("utf-8")
+        return sha256_of(canonical_bytes)
+
+    def has_chunk(self, symbol: str, granularity: Granularity, window: ChunkWindow) -> bool:
+        """`True` si el chunk `(symbol, granularity, window)` ya está persistido (R8)."""
+        return self._chunk_path(symbol, granularity, window).exists()
+
+    def read_chunk(
+        self, symbol: str, granularity: Granularity, window: ChunkWindow
+    ) -> pd.DataFrame:
+        """Lee el chunk ya persistido para `(symbol, granularity, window)`."""
+        path = self._chunk_path(symbol, granularity, window)
+        return pd.read_parquet(path)
+
+    def write_chunk(
+        self,
+        frame: pd.DataFrame,
+        symbol: str,
+        granularity: Granularity,
+        window: ChunkWindow,
+        metadata: ArtifactMetadata,
+    ) -> Path:
+        """Persiste `frame` de forma determinista y adjunta `metadata` en un sidecar.
+
+        Escritura Parquet con parámetros fijos (ADR-3): orden de columnas canónico,
+        `preserve_index=False`, timestamps en microsegundos, compresión `zstd` fija y sin
+        metadata de esquema variable (se elimina la metadata `pandas` embebida por
+        pyarrow), de modo que dos escrituras del mismo frame produzcan archivos
+        bit-idénticos.
+        """
+        normalized = _normalize_frame(frame)
+        path = self._chunk_path(symbol, granularity, window)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        table = pa.Table.from_pandas(normalized, preserve_index=False)
+        table = table.replace_schema_metadata({})
+        pq.write_table(
+            table,
+            path,
+            compression="zstd",
+            coerce_timestamps="us",
+            allow_truncated_timestamps=True,
+            use_deprecated_int96_timestamps=False,
+            write_statistics=False,
+        )
+
+        sidecar = path.with_suffix(".meta.json")
+        sidecar.write_text(metadata.to_json(), encoding="utf-8")
+
+        manifest_path = self._root / "_manifest.json"
+        manifest: dict[str, str] = {}
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest[metadata.dataset_hash] = str(path.relative_to(self._root))
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+        )
+
+        return path
 
 
 @dataclass(frozen=True, slots=True)

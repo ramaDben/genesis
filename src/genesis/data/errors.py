@@ -9,3 +9,7 @@ class GenesisDataError(Exception):
     clase, de modo que el código consumidor puede capturarlas de forma agregada cuando
     lo necesite, sin perder el detalle de la causa concreta en el mensaje.
     """
+
+
+class AccountScopeError(GenesisDataError):
+    """Cuenta con permiso de trading real/challenge detectada al conectar."""

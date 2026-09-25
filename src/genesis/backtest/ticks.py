@@ -20,9 +20,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from genesis.backtest.errors import BacktestConfigError
-from genesis.data.mt5_export import ChunkWindow, Granularity, RawParquetStore
 from genesis.data.profile import FirmProfile
-from genesis.data.store import AnnotatedBar
+from genesis.data.store import AnnotatedBar, ChunkWindow, Granularity, RawParquetStore
 
 _REQUIRED_COLUMNS = ("bid", "ask", "last")
 _COVERAGE_WINDOW = timedelta(seconds=60)

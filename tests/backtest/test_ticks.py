@@ -15,8 +15,8 @@ from genesis.backtest.ticks import (
     iter_ticks,
 )
 from genesis.data.metadata import ArtifactMetadata
-from genesis.data.mt5_export import ChunkWindow, Granularity, RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
+from genesis.data.store import ChunkWindow, Granularity, RawParquetStore
 from tests.backtest.fakes import build_server_local_tick_chunk
 from tests.strategy.fakes import make_annotated_bar
 

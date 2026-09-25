@@ -38,8 +38,8 @@ from genesis.backtest.costs import load_costs_config
 from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.ledger import FillRecord
 from genesis.backtest.simulator import Simulator
-from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
+from genesis.data.store import RawParquetStore
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_a.config import load_placeholder_symbol_figures
 from genesis.strategy.candidate_b.candidate import CandidateB
@@ -62,7 +62,7 @@ _STAGES = (
     ("iter_ticks", "ticks.py"),
     ("has_sufficient_tick_coverage", "ticks.py"),
     ("ticks_in_bar_window", "ticks.py"),
-    ("has_chunk", "mt5_export.py"),
+    ("has_chunk", "store.py"),
     ("news_windows", "calendar.py"),
     ("_process_bar", "simulator.py"),
 )

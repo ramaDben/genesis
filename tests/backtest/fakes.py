@@ -13,8 +13,7 @@ import pandas as pd
 
 from genesis.backtest.ticks import TickRow, _day_window
 from genesis.data.metadata import ArtifactMetadata
-from genesis.data.mt5_export import Granularity, RawParquetStore
-from genesis.data.store import AnnotatedBar
+from genesis.data.store import AnnotatedBar, Granularity, RawParquetStore
 from genesis.strategy.contract import CONFIG_VERSION, Direction, EntryIntent
 
 _DEFAULT_ON_BAR: Callable[[AnnotatedBar], list[EntryIntent]] = lambda bar: []  # noqa: E731

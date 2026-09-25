@@ -28,9 +28,8 @@ from genesis.backtest.costs import load_costs_config
 from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.ledger import ExhaustionPolicy, LedgerEntry
 from genesis.backtest.simulator import Simulator
-from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
-from genesis.data.store import AnnotatedBar
+from genesis.data.store import AnnotatedBar, RawParquetStore
 from genesis.strategy.inspector import InspectorFunnelConfig
 from tests.backtest.fakes import FakeRiskCandidate, build_server_local_tick_chunk
 from tests.data.fakes import _default_symbol_figure

@@ -21,10 +21,9 @@ import pandas as pd
 
 from genesis.backtest.ticks import has_sufficient_tick_coverage, iter_ticks, ticks_in_bar_window
 from genesis.data.metadata import ArtifactMetadata, current_git_commit
-from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, firm_profile_hash, load_firm_profile
 from genesis.data.sessions import session_window
-from genesis.data.store import AnnotatedBar, iter_bars
+from genesis.data.store import AnnotatedBar, RawParquetStore, iter_bars
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_a.config import (
     CandidateAConfig,

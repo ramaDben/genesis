@@ -5,8 +5,8 @@ import pytest
 
 from genesis.backtest.costs import CostsConfig
 from genesis.backtest.exit_geometry import ExitGeometry
-from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile
+from genesis.data.store import RawParquetStore
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation._windowing import (

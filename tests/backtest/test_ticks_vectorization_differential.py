@@ -27,8 +27,8 @@ from genesis.backtest.ticks import (
     _to_utc,
     iter_ticks,
 )
-from genesis.data.mt5_export import Granularity, RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
+from genesis.data.store import Granularity, RawParquetStore
 from tests.backtest.fakes import build_server_local_tick_chunk
 
 pytestmark = pytest.mark.unit

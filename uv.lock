@@ -384,7 +384,6 @@ name = "genesis"
 version = "0.5.0"
 source = { editable = "." }
 dependencies = [
-    { name = "metatrader5", marker = "sys_platform == 'win32'" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -412,7 +411,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "metatrader5", marker = "sys_platform == 'win32'", specifier = ">=5.0.5735" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "pandas", specifier = ">=3.0.5" },
     { name = "pyarrow", specifier = ">=24.0.0" },
@@ -533,17 +531,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
-]
-
-[[package]]
-name = "metatrader5"
-version = "5.0.5735"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "numpy" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/51/4a70004f8af537393861c31a3c211f818b8199fea8baf8c0b1f571d67c56/metatrader5-5.0.5735-cp314-cp314-win_amd64.whl", hash = "sha256:b69765be2eece9f884b60b6d008c7608ad77d7bfc5fbfbb8c23e3e3bb8dc88ba", size = 49590, upload-time = "2026-04-04T16:44:12.306Z" },
 ]
 
 [[package]]
@@ -744,7 +731,7 @@ name = "pip-system-certs"
 version = "5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pip" },
+    { name = "pip", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7d/6a/563b05a4f6c9ddc205c98bb413e74221368efb98b8fb9cca96b578b8930c/pip_system_certs-5.3.tar.gz", hash = "sha256:19c8bf9957bcce7d69c4dbc2d0b2ef13de1984d53f50a59012e6dbbad0af67c6", size = 6395, upload-time = "2025-10-16T06:14:55.217Z" }
 wheels = [
