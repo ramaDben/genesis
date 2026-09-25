@@ -24,7 +24,7 @@
 
 ## Contexto del proyecto
 
-<!-- ¿Qué parte del codebase cubre esta regla? ¿Por qué existe en el contexto de Pulse? -->
+<!-- ¿Qué parte del codebase cubre esta regla? ¿Por qué existe en el contexto de genesis? -->
 
 [Explicación de por qué existe la regla y qué problema resuelve]
 

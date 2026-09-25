@@ -30,7 +30,6 @@ ignored_paths:
 - ".venv/**"
 - ".pytest_cache/**"
 - ".ruff_cache/**"
-- ".pulse/state.sqlite*"
 
 # whether the project is in read-only mode
 # If set to true, all editing tools will be disabled and attempts to use them will result in an error
@@ -70,18 +69,15 @@ initial_prompt: "You are working on genesis, a Python 3.14 systematic-trading va
   of the prop firm's budget. Use `uv` for deps (uv sync, uv add, uv run) and `mise`
   as task runner (`mise run ci` = lint(ruff+bandit+vulture+deptry) + ty + test(pytest)).
   Prefer rg/fd/ast-grep over grep/find. Commit format `<type>(<domain>): <subject>`
-  ending with `Refs #<issue>` when closing an issue. The SDD lifecycle is orchestrated
-  by the pulse-engine MCP (8 phases: explore, propose, specify, design, break-to-tasks,
-  apply, review, close) via the /pulse:* plugin skills; the human gate before apply
-  is mandatory: only a human calls approve_design, never auto-approve. Spanish is
-  the working language for docs and docstrings."
+  ending with `Refs #<issue>` when closing an issue. Changes that alter behavior or
+  contract under src/genesis/** go through branch → PR → human review before merging;
+  never merge design decisions a human has not seen. Spanish is the working language
+  for docs and docstrings."
 
 initial_instructions: "Integrate the available MCP toolchain: serena for LSP-backed
-  symbol navigation and integrity, pulse-engine for SDD state machine transitions,
-  memory for persistent knowledge graph context, filesystem for codebase navigation,
-  plus the user-scope github, context7 and sequential-thinking servers. GitHub issues/labels
-  encode the SDD phases (state:1-explore … state:8-close); hydrate context from issues
-  before implementing. Honor docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
+  symbol navigation and integrity, memory for persistent knowledge graph context,
+  filesystem for codebase navigation, plus the user-scope github, context7 and
+  sequential-thinking servers. Hydrate context from GitHub issues before implementing. Honor docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md
   as the single source of truth; gates are never relaxed. Before touching code or
   answering, call list_memories and read the ones whose names look relevant — they
   are the cross-session context channel and are versioned in .serena/memories/. Do
@@ -91,7 +87,7 @@ initial_instructions: "Integrate the available MCP toolchain: serena for LSP-bac
   record them with write_memory, updating an existing memory rather than adding a
   near-duplicate. Memories are dated observations, not live state: verify any file,
   symbol or figure they cite against the current code before asserting it. The development
-  environment is Linux or WSL2, not native Windows."
+  environment is native Linux (or WSL2), not native Windows."
 
 # list of tool names to exclude.
 # This extends the existing exclusions (e.g. from the global configuration)

@@ -75,7 +75,7 @@ Lista el contenido de un directorio. Usa la sintaxis `@directorio/`
 ```markdown
 ## Estructura del proyecto
 
-@src/pulse/
+@src/genesis/
 ```
 
 ### 4. String Substitution - Sustitución de Cadenas

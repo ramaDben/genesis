@@ -5,6 +5,4 @@ ignore:
   - "**/.venv/**"
   - ".pulse/archive/**"
   - ".pulse/changes/**"
-# Configuración específica para el proyecto Pulse
-# Permite búsquedas semánticas estructurales de DDD
-# y validación de reglas de pipeline
+# Reglas estructurales de ast-grep para genesis (ver .agents/rules/ast-grep-rules.md)

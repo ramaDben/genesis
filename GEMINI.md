@@ -15,6 +15,6 @@ Antes de escribir código, scripts, proponer parámetros numéricos o implementa
    - Consultar y cumplir estrictamente con `docs/PROTOCOLO_ADMISION_ESTRATEGIAS.md`.
 
 ## Entorno y Ejecución
-- Entorno host: Windows PowerShell.
-- Comandos en repo: siempre dentro de WSL2 vía `wsl -d Ubuntu -- bash -lc "..."`.
-- Dependencias vía `uv`.
+- Entorno: Linux nativo (o WSL2 con el repo en el filesystem de Linux). Los comandos se
+  ejecutan directo en el shell del repo.
+- Dependencias vía `uv`; tareas vía `mise`.

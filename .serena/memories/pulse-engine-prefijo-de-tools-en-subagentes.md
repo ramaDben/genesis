@@ -1,5 +1,7 @@
 # El MCP de pulse se llama `plugin_pulse_pulse-engine`, no `pulse-engine`
 
+> **OBSOLETA desde 2026-09-25:** pulse se retiró del repo. Ver `mem:pulse-retirado-2026-09-25`.
+
 **Fecha de la observación: 2026-09-14.** Verificado en sesión, no supuesto.
 
 ## El hecho

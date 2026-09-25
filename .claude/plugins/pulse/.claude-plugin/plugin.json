@@ -1,9 +1,0 @@
-{
-  "name": "pulse",
-  "displayName": "Pulse Orchestrator",
-  "version": "0.1.0",
-  "description": "Orchestrates the 8-phase Spec-Driven Development (SDD) lifecycle using FastMCP and an FSM.",
-  "author": {
-    "name": "BenjaLabs"
-  }
-}

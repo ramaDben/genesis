@@ -1,4 +1,4 @@
-"""Shared value objects for Pulse SDD hooks."""
+"""Shared value objects for genesis hooks."""
 
 from __future__ import annotations
 

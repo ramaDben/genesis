@@ -4,14 +4,6 @@
     "memory",
     "serena"
   ],
-  "permissions": {
-    "allow": [
-      "mcp__plugin_pulse_pulse-engine__request_sdd_transition"
-    ]
-  },
-  "enabledPlugins": {
-    "pulse@genesis": true
-  },
   "hooks": {
     "SessionStart": [
       {
@@ -27,31 +19,6 @@
             "type": "mcp_tool",
             "server": "omega-memory",
             "tool": "omega_welcome"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "command": "bash .agents/hooks/run_hook.sh sdd_context_injector.py --client claude",
-            "statusMessage": "Leyendo fase del ciclo SDD"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash|mcp__serena__execute_shell_command|Write|Edit|MultiEdit|NotebookEdit|mcp__serena__(replace_symbol_body|replace_lines|replace_in_files|insert_after_symbol|insert_before_symbol|insert_at_line|delete_lines|rename_symbol|safe_delete_symbol)|mcp__filesystem__(write_file|edit_file)",
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "command": "bash .agents/hooks/run_hook.sh sdd_validate_tool.py --client claude",
-            "statusMessage": "Verificando la fase del ciclo SDD"
           }
         ]
       }

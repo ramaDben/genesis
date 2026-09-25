@@ -1,4 +1,4 @@
-"""I/O helpers shared across all Pulse SDD hooks.
+"""I/O helpers shared across all genesis hooks.
 
 Handles stdin/stdout contract, project-root resolution, and client-dialect
 extraction of tool names / arguments so each hook script stays minimal.
@@ -23,15 +23,13 @@ def project_root() -> Path:
     """Resolve the workspace root using several fallbacks.
 
     Priority:
-      1. ``PULSE_WORKSPACE_ROOT`` env var (Docker / mise)
-      2. ``GEMINI_PROJECT_DIR`` env var (Antigravity CLI)
-      3. ``git rev-parse --show-toplevel``
-      4. Walk-up from this file looking for ``.git/``
+      1. ``GEMINI_PROJECT_DIR`` env var (Antigravity CLI)
+      2. ``git rev-parse --show-toplevel``
+      3. Walk-up from this file looking for ``.git/``
     """
-    for env_key in ("PULSE_WORKSPACE_ROOT", "GEMINI_PROJECT_DIR"):
-        val = os.environ.get(env_key)
-        if val:
-            return Path(val).resolve()
+    val = os.environ.get("GEMINI_PROJECT_DIR")
+    if val:
+        return Path(val).resolve()
 
     git = shutil.which("git")
     if git is not None:
@@ -109,7 +107,7 @@ def tool_name(payload: dict[str, Any], client: str) -> str:
 
     MISMO FALLO, OTRA SUPERFICIE (medido el 2026-09-12): Antigravity CLI envía
     ``toolCall: {name, args}``.  Ninguna de las formas anteriores lo cubría, así
-    que el nombre salía vacío y ``sdd_validate_tool`` respondía "no tool name
+    que el nombre salía vacío y el guardián de escritura de entonces respondía "no tool name
     found, allowing": **agy escribía en `src/genesis/**` sin gate y sin ruido**.
     Por eso ``toolCall`` se inspecciona para TODOS los clientes y no detrás de un
     ``if client == ...``: hacer depender un control de seguridad de que el flag

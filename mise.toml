@@ -1,5 +1,4 @@
 # mise.toml — Configuración del Entorno y Tareas de Genesis
-# Adaptado de Bajmein/pulse para Windows (las run-strings se ejecutan con bash de Git for Windows).
 
 min_version = "2024.1.0"
 
@@ -11,7 +10,6 @@ windows_default_inline_shell_args = "bash -c"
 
 [task_config]
 includes = [
-  "mise-tasks/docker.toml",
   "mise-tasks/mcp.toml",
   "mise-tasks/yq.toml",
   "mise-tasks/omega.toml",
@@ -28,7 +26,6 @@ UV_PROJECT_ENVIRONMENT = "{{config_root}}/.venv"
 _.python.venv = { path = ".venv", create = true }
 _.file = ".env"
 PYTHONPATH = "src"
-PULSE_ENVIRONMENT = "development"
 DISABLE_THOUGHT_LOGGING = "true"
 
 [tools]
@@ -38,7 +35,7 @@ uv = "latest"
 gh = "2.92.0"
 
 # --- LSPs ---
-# (en pulse vienen vía cargo:*; aquí se usan binarios precompilados — no requieren toolchain Rust)
+# (binarios precompilados — no requieren toolchain Rust)
 taplo = "latest"
 "github:Feel-ix-343/markdown-oxide" = "latest"
 "npm:yaml-language-server" = "latest"
@@ -124,8 +121,8 @@ deny_net = true
 alias = "tc"
 description = "Ejecuta ty check"
 sources = ["src/**/*.py", "pyproject.toml"]
-# `--extra-search-path` es obligatorio desde ty 0.0.75: `pulse_hooks_lib` lo aportan los
-# hooks del plugin de pulse desde `.agents/hooks/_lib/` y no es dependencia del proyecto.
+# `--extra-search-path` es obligatorio desde ty 0.0.75: `pulse_hooks_lib` vive en
+# `.agents/hooks/_lib/` (helpers de los hooks) y no es dependencia del proyecto.
 # Hasta la 0.0.64 alcanzaba con listar ese directorio en `environment.root` del pyproject,
 # pero la 0.0.75 dejó de usar `root` como ruta de resolución y los hooks fallan con
 # `unresolved-import`. La clave TOML equivalente (`extra-paths`) no surte efecto acá —

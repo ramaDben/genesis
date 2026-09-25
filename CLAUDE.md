@@ -59,7 +59,6 @@ Invariantes de diseño: estado incremental **forward-only** (anti-lookahead por 
 | `mise run test` / `t` | pytest |
 | `mise run ty` / `tc` | `uv run ty check` |
 | `mise run format` / `f` | ruff fix + format |
-| `mise run docker:pull` | pull de `ghcr.io/bajmein/pulse/mcp-pulse` — **no usar para cerrar changes**: la `:latest` publicada es la v0.13.0 y falla en `promote_delta`. Construir desde `main` (ver README) |
 
 Dependencias siempre vía `uv` (`uv add`, `uv sync`, `uv run`). Python 3.14. Búsquedas con `rg`/`fd`/`ast-grep`, no `grep`/`find`.
 
@@ -67,101 +66,64 @@ Perfilado del diagnóstico (no bloquea CI): `uv run python scripts/bench_diagnos
 
 ## Entorno de desarrollo
 
-**Linux o WSL2, no Windows nativo.** El repo de trabajo vive en el filesystem de Linux
-(`~/genesis`); trabajar desde `/mnt/c/...` cruza la frontera de filesystems y es más lento.
-El engine de pulse requiere POSIX (`$(id -u)`, `$(git rev-parse --show-toplevel)`) y en
-Windows nativo el gate determinista se cuelga.
+**Linux nativo o WSL2, no Windows nativo.** El entorno de trabajo actual es Linux nativo
+(Fedora), con el repo donde se haya clonado — nada en el repo depende de una ruta fija. Bajo
+WSL2, el repo debe vivir en el filesystem de Linux: trabajar desde `/mnt/c/...` cruza la
+frontera de filesystems y es más lento.
 
-Al editar desde una sesión de Claude Code en Windows, el repo de WSL se alcanza por UNC
+Sólo si la sesión de Claude Code corre en Windows: el repo de WSL se alcanza por UNC
 (`\\wsl$\Ubuntu\home\<usuario>\genesis\`) y los comandos se lanzan con
 `wsl -d Ubuntu -- bash -lc "..."` — el login shell es obligatorio para tener `uv` y `mise`
 en el `PATH`.
 
-## Hooks: los controles mecánicos del entorno
+## Hooks
 
-Activos desde el 2026-09-05 en `.claude/settings.json` (versionado). Todos pasan por
-**`.agents/hooks/run_hook.sh`**, que detecta si la sesión corre en Windows y re-ejecuta dentro de
-WSL. Ese rodeo no es opcional: ejecutar los hooks directamente sobre la ruta UNC hace que
-`.pulse/state.sqlite` responda `database is locked`, el hook reporte fase `unknown` y **emita
-contexto vacío sin fallar** — medido, no supuesto (y de paso el rodeo es más rápido: 1.45 s contra
-3.81 s, porque el I/O por UNC cuesta más que arrancar WSL).
+Configurados en `.claude/settings.json` (versionado). Pasan por **`.agents/hooks/run_hook.sh`**,
+que detecta si la sesión corre en Windows y re-ejecuta dentro de WSL.
 
 | Evento | Script | Qué hace |
 |---|---|---|
-| `SessionStart` | `session_context.py` | Inyecta el índice de memorias de Serena, rama y último commit, fase del engine, y los issues abiertos que **no** están reservados |
+| `SessionStart` | `session_context.py` | Inyecta el índice de memorias de Serena, rama y último commit, y los issues abiertos que **no** están reservados |
 | `SessionStart` | `omega_welcome` (`mcp_tool`) | Briefing de OMEGA. Si su server MCP aún no conectó, no dispara — el bloque OMEGA del hook anterior lo avisa |
-| `UserPromptSubmit` | `sdd_context_injector.py` | Recuerda la fase del ciclo en cada turno |
-| `PreToolUse` | `sdd_validate_tool.py` | **Deniega** escrituras fuera de la fase. Cubre `Write`/`Edit`/`MultiEdit` y las herramientas de escritura de serena y filesystem |
 
-El guardián de escritura permite siempre la **vía rápida** (`docs/`, `scripts/`, `.serena/memories/`,
-`.agents/`, `.claude/`, `*.md`) y todo lo que caiga fuera del repo (scratchpad, `/tmp`). Para tocar
-`src/**` o `tests/**` hace falta un change activo en fase `apply`. Si la fase no se puede leer,
-**fail-closed**: sólo pasa la vía rápida.
+No hay guardián de escritura: el control sobre `src/**` es la revisión humana del PR (ver abajo).
+Los tests de la librería de los hooks: `cd .agents/hooks/_lib && uv run pytest`.
 
-Batería de humo: `bash .agents/hooks/smoke_test_guard.sh` (20 casos). Los tests de la librería:
-`cd .agents/hooks/_lib && uv run pytest`.
+## Flujo de cambios
 
-**Debilidad aceptada a sabiendas:** `.agents/**` y `.claude/**` están en la vía rápida, así que un
-agente puede editar los hooks que lo restringen. Se acepta porque bloquearlos haría imposible
-mantenerlos y porque git deja el rastro; es la primera excepción que debería escalar al adjudicador
-externo del [#87](https://github.com/ramaDben/genesis/issues/87).
+**Revisión humana obligatoria** para todo cambio que altere comportamiento o contrato bajo
+`src/genesis/**`: firmas públicas, invariantes, gates, formato de artefactos, jerarquía de
+excepciones, módulos nuevos. Va por rama → PR → revisión humana → merge; nunca directo a `main`.
 
-## Flujo SDD (plugin pulse)
+**Debilidad conocida y aceptada a sabiendas (2026-09-05):** en la práctica se aprobó sin leer,
+porque las decisiones llegan en un vocabulario que no es el del dueño del proyecto. La salida
+diseñada —separar política de adjudicación, con un adjudicador externo y un chequeo mecánico—
+está **reservada** en el hito *Gobernanza y política de decisión* (issues #86, #87). Se asume
+la debilidad mientras no haya capital real ni un candidato cerca de un GO. Ver
+`.serena/memories/reserva-de-gobernanza-2026-09.md`.
 
-El ciclo de vida lo orquesta el MCP `pulse-engine` (Docker, workspace montado en `/work`) con las skills del plugin `pulse`:
+Cadena de issues del spec: A (spec definitivo, bloquea al resto) → B (data) → C (contrato+Inspector) → {D/E paralelos, G} → H → I → J → K.
 
-`/pulse:explore` → `/pulse:propose` → `/pulse:specify` → `/pulse:design` → `/pulse:break-to-tasks` → `/pulse:apply` → `/pulse:review` → `/pulse:close`
+### Qué exige revisión, y qué no
 
-- **Gate humano obligatorio**: solo un humano llama `approve_design` (en design o break-to-tasks). Nunca auto-aprobar.
-  **Debilidad conocida y aceptada a sabiendas (2026-09-05):** en la práctica se aprobó sin leer,
-  porque las decisiones llegan en un vocabulario que no es el del dueño del proyecto. La salida
-  diseñada —separar política de adjudicación, con un adjudicador externo y un chequeo mecánico—
-  está **reservada** en el hito *Gobernanza y política de decisión* (issues #86, #87). Se asume
-  la debilidad mientras no haya capital real ni un candidato cerca de un GO. Ver
-  `.serena/memories/reserva-de-gobernanza-2026-09.md`.
-- Estado del proyecto en GitHub: issues/labels codifican las fases (`state:1-explore` … `state:8-close`).
-- Cadena de issues del spec: A (spec definitivo, bloquea al resto) → B (data) → C (contrato+Inspector) → {D/E paralelos, G} → H → I → J → K.
-
-### Dónde aplica el ciclo, y dónde no
-
-**Obligatorio** para todo cambio que altere comportamiento o contrato bajo `src/genesis/**`:
-firmas públicas, invariantes, gates, formato de artefactos, jerarquía de excepciones, módulos
-nuevos. Ahí el gate humano protege algo real.
-
-**Vía rápida** (rama → PR → merge, sin ciclo) para lo que no toca esa superficie:
+**Vía rápida** (rama → PR → merge, sin revisión de diseño) para lo que no toca esa superficie:
 
 | Vía rápida | Por qué |
 |---|---|
 | `scripts/` (runners, benchmarks) | Componen APIs ya publicadas; precedente de los `bench_*.py` |
 | `docs/`, `.serena/memories/` | No ejecutan |
-| Investigación, diagnóstico, mediciones | Exploratorio por naturaleza; no cabe en ocho fases |
+| Investigación, diagnóstico, mediciones | Exploratorio por naturaleza |
 | Dependencias, CI, formato | Mecánico |
 
-**La zona gris se resuelve a favor del gate.** Si un cambio en `scripts/` obliga a tocar `src/`,
-la parte de `src/` va por el ciclo aunque sea pequeña.
+**La zona gris se resuelve a favor de la revisión.** Si un cambio en `scripts/` obliga a tocar
+`src/`, la parte de `src/` va en un PR con decisión de diseño explícita aunque sea pequeña.
 
-### Cerrar un change: la trampa que costó tres semanas
-
-**`close_change` es lo único que cierra, y exige el change en `review`.** Nunca avanzar a `close`
-con `request_sdd_transition`: esa llamada mueve la fase pero no cierra nada, e inhabilita la única
-tool capaz de hacerlo. El SpecGate no deja retroceder (`close solo puede avanzar a la fase
-siguiente`) y después de `close` no hay fase siguiente — el change queda inservible.
-
-**Un change sin `closed_at` bloquea todos los demás.** La guarda G2 rechaza crear cualquier change
-nuevo mientras exista uno activo sin cerrar. Un cierre a medias no deja un pendiente: para el
-flujo entero.
-
-Así se detuvo el SDD el **2026-08-11**, el día que el #55 quedó en ese estado. Se destrabó el
-2026-08-29 revirtiendo `current_phase` a `review` en `.pulse/changes/<slug>/state.yaml` y en el
-blob de `.pulse/state.sqlite`, y llamando `close_change` (ver #72). Señal de cierre completo:
-`HeuristicsExtracted` en `.pulse/audit.jsonl` y el change movido a `.pulse/changes/archive/`.
-
-**Precedente que originó esta regla (2026-08-29).** Los PR #68 y #69 modificaron `src/` sin pasar
-por el ciclo. #69 añadió `strategy/factories.py`, una excepción nueva a la jerarquía de dominio y
-cambió las firmas públicas de `run_wfa`/`build_signal_trial_matrix`/`run_sensitivity`, resolviendo
-de paso la decisión **D2** del RFC del laboratorio — que ese mismo RFC marcaba como
-**[DECISIÓN HUMANA]**. Una autorización conversacional para hacer el trabajo no sustituye al gate:
-el gate existe para que la decisión de diseño se vea **antes** de estar en `main`, no después.
+**Precedente que originó esta regla (2026-08-29).** Los PR #68 y #69 modificaron `src/` sin
+revisión de diseño. #69 añadió `strategy/factories.py`, una excepción nueva a la jerarquía de
+dominio y cambió las firmas públicas de `run_wfa`/`build_signal_trial_matrix`/`run_sensitivity`,
+resolviendo de paso la decisión **D2** del RFC del laboratorio — que ese mismo RFC marcaba como
+**[DECISIÓN HUMANA]**. Una autorización conversacional para hacer el trabajo no sustituye a la
+revisión: existe para que la decisión de diseño se vea **antes** de estar en `main`, no después.
 
 ## Memoria entre sesiones (Serena MCP)
 

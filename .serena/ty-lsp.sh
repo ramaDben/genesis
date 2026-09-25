@@ -1,2 +1,2 @@
 #!/bin/bash
-cd /c/Users/bbrav/genesis && exec uv run ty server
+cd "$(dirname "$0")/.." && exec uv run ty server

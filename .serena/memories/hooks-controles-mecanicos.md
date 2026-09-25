@@ -1,4 +1,8 @@
 *(2026-09-05 — hooks encendidos por primera vez. Cinco defectos encontrados y corregidos, todos
+
+> **OBSOLETA desde 2026-09-25:** el guardián `PreToolUse` y el `UserPromptSubmit` se
+> eliminaron junto con pulse. Sólo queda `SessionStart`. Ver `mem:pulse-retirado-2026-09-25`.
+
 verificados con payloads reales, no razonados.)*
 
 # Los hooks: de instrucción a control mecánico

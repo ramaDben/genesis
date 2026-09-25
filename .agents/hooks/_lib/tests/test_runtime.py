@@ -80,5 +80,5 @@ def test_tool_args_gemini_no_se_ve_afectado():
 
 
 def test_project_root_env_var(monkeypatch):
-    monkeypatch.setattr("os.environ", {"PULSE_WORKSPACE_ROOT": "/custom/path"})
+    monkeypatch.setattr("os.environ", {"GEMINI_PROJECT_DIR": "/custom/path"})
     assert project_root() == Path("/custom/path").resolve()

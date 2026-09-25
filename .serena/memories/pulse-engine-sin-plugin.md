@@ -1,5 +1,8 @@
 *(2026-08-29)*
 
+> **OBSOLETA desde 2026-09-25:** pulse se retiró del repo (`scripts/pulse_engine.py` ya no
+> existe). Ver `mem:pulse-retirado-2026-09-25`.
+
 # Operar el engine de pulse sin el plugin: JSON-RPC directo al contenedor
 
 ## Cuándo hace falta

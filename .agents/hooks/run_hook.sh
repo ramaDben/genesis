@@ -4,13 +4,12 @@
 # POR QUÉ EXISTE (medido el 2026-09-05, no supuesto)
 #
 # Desde una sesión de Claude Code lanzada en Windows, el repo se alcanza por UNC
-# (//wsl.localhost/Ubuntu/home/<usuario>/genesis). Ejecutar los hooks ahí falla:
-# leer .pulse/state.sqlite por esa ruta devuelve "database is locked", el hook
-# reporta fase "unknown" y emite contexto vacío. NO falla ruidosamente — parece
-# que funcionó. Para un control de seguridad ese es el peor modo de falla posible.
+# (//wsl.localhost/Ubuntu/home/<usuario>/genesis). Ejecutar los hooks ahí es
+# frágil: el I/O por UNC puede fallar sin ruido y el hook emitir contexto vacío
+# como si hubiera funcionado. Despacharlos dentro de WSL lo evita.
 #
-#   Ruta A (Git Bash de Windows sobre UNC): 3.81 s → fase "unknown", contexto {}
-#   Ruta B (despachado por `wsl -d Ubuntu`): 1.45 s → fase "explore", correcto
+#   Ruta A (Git Bash de Windows sobre UNC): 3.81 s
+#   Ruta B (despachado por `wsl -d Ubuntu`): 1.45 s
 #
 # Además la ruta B es MÁS rápida: el I/O por UNC cuesta más que arrancar WSL.
 #

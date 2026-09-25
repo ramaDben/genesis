@@ -1,36 +1,21 @@
 # AGENTS.md — genesis
 
-Guía para agentes LLM trabajando en este repo. Complementa `CLAUDE.md` (comandos y convenciones) y `.agents/AGENTS.md` (arquitectura cognitiva heredada de pulse).
+Guía para agentes LLM trabajando en este repo. Complementa `CLAUDE.md` (comandos y convenciones) y `.agents/AGENTS.md` (arquitectura cognitiva).
 
 ## Fuente de verdad
 
 `docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` es el SSoT. Los umbrales go/no-go (gates G/C/P/T) son normativos: **nunca se relajan**; un NO-GO honesto es un éxito del proceso.
 
-## Ciclo SDD (8 fases, orquestado por pulse-engine)
+## Flujo de cambios
 
-| Fase | Skill | Label GitHub |
-|---|---|---|
-| 1. Explore | `/pulse:explore` | `state:1-explore` |
-| 2. Propose | `/pulse:propose` | `state:2-propose` |
-| 3. Specify | `/pulse:specify` | `state:3-specify` |
-| 4. Design | `/pulse:design` | `state:4-design` |
-| 5. Break-to-tasks | `/pulse:break-to-tasks` | `state:5-break-to-tasks` |
-| 6. Apply | `/pulse:apply` | `state:6-apply` |
-| 7. Review | `/pulse:review` | `state:7-review` |
-| 8. Close | `/pulse:close` | `state:8-close` |
-
-Reglas duras:
-
-- El gate humano antes de apply es obligatorio: solo un humano ejecuta `approve_design`.
-- Cada transición pasa por el FSM del engine (`request_sdd_transition`); no saltarse fases.
-- El estado vive en `.pulse/` (SQLite + audit.jsonl) y en GitHub (issues/labels). Hidratar contexto desde issues antes de implementar.
+- Todo cambio que altere comportamiento o contrato bajo `src/genesis/**` va por rama → PR →
+  revisión humana antes del merge: las decisiones de diseño se ven **antes** de estar en `main`.
+- Vía rápida (`docs/`, `scripts/`, memorias, dependencias, CI): rama → PR → merge. No hay
+  guardián mecánico de escritura; la disciplina es de proceso.
+- Hidratar contexto desde los issues de GitHub antes de implementar.
 
 ## Toolchain MCP
 
-- `pulse-engine` — máquina de estados SDD. Docker con el workspace en `/work`; la imagen se
-  **construye desde el `main` de pulse** (`mcp-pulse:0.13.6`), no se toma de
-  `ghcr.io/bajmein/pulse/mcp-pulse:latest`, que va seis versiones atrás y rompe el cierre.
-  Requiere entorno POSIX: en Windows nativo no arranca.
 - `serena` — navegación simbólica LSP, integridad y memorias de proyecto (`write_memory`).
   Su arranque puede exceder el timeout de 30 s en el health check y reconectar después.
 - `memory` — knowledge graph en `.pulse/memory/knowledge-graph.jsonl`. Está en `.gitignore`:

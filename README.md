@@ -96,14 +96,13 @@ volver a perfilar **después**. Medido con `scripts/bench_diagnose.py`.
 
 ## Requisitos
 
-- **Linux o WSL2** — el entorno soportado. El código es portable, pero el flujo SDD exige POSIX
-  y en Windows nativo el gate determinista del engine se cuelga. Bajo WSL2, el repo debe vivir
-  en el filesystem de Linux (`~/genesis`), no en `/mnt/c/...`.
+- **Linux nativo o WSL2** — el entorno soportado. Bajo WSL2, el repo debe vivir en el
+  filesystem de Linux, no en `/mnt/c/...`.
 - **Python 3.14** (gestionado por `mise`)
 - [`mise`](https://mise.jdx.dev) y [`uv`](https://docs.astral.sh/uv/)
 - **MetaTrader 5** — ya no hace falta. Solo lo usaba el export de la era CFD, que quedó fuera de
   alcance. Los tests usan fixtures sintéticas y el CI corre en Linux sin MT5.
-- Docker y `gh` — solo si vas a usar el flujo SDD interno (ver más abajo). No hacen falta para
+- `gh` — opcional, para el listado de issues del hook de inicio de sesión. No hace falta para
   compilar, testear ni ejecutar el pipeline.
 
 ## Setup
@@ -119,7 +118,7 @@ mise run setup          # uv sync --all-groups
 mise run ci             # lint + ty + test
 ```
 
-Los valores de `.env` son placeholders y solo aplican al flujo SDD; el pipeline de backtest no lee ninguno. Nunca commitees `.env`.
+Los valores de `.env` son placeholders de las integraciones de desarrollo; el pipeline de backtest no lee ninguno. Nunca commitees `.env`.
 
 Si el `.venv` queda inutilizable (`no Python executable was found`), renombralo y reconstruilo: `mv .venv .venv-old && uv sync --all-groups`.
 
@@ -194,7 +193,7 @@ export nuevo antes de comparar resultados entre datasets.
 - Admisión de estrategias (Gate 0): [`docs/PROTOCOLO_ADMISION_ESTRATEGIAS.md`](docs/PROTOCOLO_ADMISION_ESTRATEGIAS.md).
 - Investigación en curso (RFC, **no** normativo): [`docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md`](docs/research/PROPUESTA_LABORATORIO_DE_ESTRATEGIAS.md) — propuesta para convertir el torneo en un laboratorio de estrategias publicadas, con la semántica de conteo de ensayos que el arquitecto necesita.
 - Todo cambio de alcance se valida contra el spec; los gates no se relajan.
-- Convenciones de trabajo: [`CLAUDE.md`](CLAUDE.md) · flujo SDD: [`AGENTS.md`](AGENTS.md) · reglas detalladas en `.agents/rules/`.
+- Convenciones de trabajo: [`CLAUDE.md`](CLAUDE.md) · guía para agentes: [`AGENTS.md`](AGENTS.md) · reglas detalladas en `.agents/rules/`.
 
 ## Testing
 
@@ -204,54 +203,6 @@ Según spec §9: unit + property-based (`hypothesis`), golden tests, integració
 uv run pytest -m unit
 uv run pytest -m statistical
 ```
-
-## Flujo SDD interno (opcional)
-
-El ciclo de vida del desarrollo lo orquesta el plugin `pulse` (versionado en `.claude/plugins/pulse/`) contra un MCP en Docker:
-
-`/pulse:explore → propose → specify → design → break-to-tasks → apply → review → close`
-
-```bash
-claude plugin marketplace add .
-claude plugin install pulse@genesis
-mise run mcp:list       # salud de los MCPs
-```
-
-Gate humano obligatorio: solo una persona llama `approve_design`. Los agentes nunca auto-aprueban. El estado de cada fase se codifica en labels de issues de GitHub.
-
-### Requisitos del engine: Linux o WSL2
-
-El `.mcp.json` del plugin usa `--user "$(id -u):$(id -g)"` y `$(git rev-parse --show-toplevel)`, así que **requiere un entorno POSIX**. En Windows nativo el engine no arranca con esa configuración, y el modo nativo (sin Docker) se cuelga al ejecutar el gate determinista.
-
-Antes del primer `close_change` hacen falta dos pasos que no se pueden expresar en el `.mcp.json`:
-
-**1. Construir la imagen desde el código actual del engine.** La imagen publicada `ghcr.io/bajmein/pulse/mcp-pulse:latest` es la v0.13.0 (2026-06-09), seis versiones atrás del `main` de pulse, y es anterior al hardening que hace `promote_delta` idempotente: un cierre con ella falla con `Delta duplicado` y deja efectos parciales.
-
-```bash
-gh repo clone Bajmein/pulse ~/pulse-src -- --depth 20
-docker build -t mcp-pulse:0.13.6 ~/pulse-src
-```
-
-**2. Preparar los volúmenes con el owner correcto.** Docker crea los volúmenes nuevos como `root:root`; como el contenedor corre con tu UID, `uv` no puede inicializar su caché y los seis checks del gate fallan con `exit_code=2` en menos de un segundo.
-
-```bash
-for v in pulse-venv uv_warm_cache; do
-  docker volume create "$v"
-  docker run --rm --user 0:0 -v "$v:/vol" --entrypoint sh mcp-pulse:0.13.6 \
-    -c "chown -R $(id -u):$(id -g) /vol"
-done
-```
-
-El volumen `pulse-venv` es imprescindible: el `pyvenv.cfg` del `.venv` local apunta al Python gestionado por mise, ruta que no existe dentro del contenedor. Sin ese volumen el gate recrearía el venv con otro intérprete y rompería el entorno del host.
-
-**3. Identidad git local al repo.** El Dockerfile del engine fija `HOME=/tmp`, así que git no ve la configuración global del host y el commit de release falla con `Author identity unknown`:
-
-```bash
-git config --local user.name "tu-nombre"
-git config --local user.email "tu@email"
-```
-
-Configuración sugerida de Claude Code en [`.claude/settings.json.example`](.claude/settings.json.example) — revisala antes de renombrarla a `settings.json`, porque instala hooks que se ejecutan en cada prompt.
 
 ## Licencia
 

@@ -1,5 +1,10 @@
 # Entorno de desarrollo (desde 2026-08-01)
 
+> **Actualización 2026-09-25:** el entorno vigente es **Linux nativo (Fedora 44)**, usuario
+> `kenno`, repo en `/home/kenno/BenjaLabs/genesis`. Lo de WSL/Windows de abajo aplica sólo a
+> ese otro entorno. Las secciones sobre pulse (engine, `close_change`, hooks) son historia: pulse
+> se retiró — ver `mem:pulse-retirado-2026-09-25`.
+
 **WSL2 / Ubuntu 26.04, no Windows nativo.** El repo de trabajo es `~/genesis`
 (usuario Linux `bbenja11`). **Nunca trabajar en `/mnt/c/Users/bbrav/genesis`**: es la copia
 vieja de Windows y el I/O cruza la frontera de filesystems.

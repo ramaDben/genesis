@@ -33,7 +33,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "_lib"))
 
 from pulse_hooks_lib.runtime import emit_response, log, project_root, read_payload
-from pulse_hooks_lib.state import read_active_change, read_phase
 
 # Segundos que se le conceden a un subproceso antes de abandonarlo.  El arranque
 # de la sesión no puede quedar colgado esperando a la red.
@@ -136,26 +135,6 @@ def _bloque_git(root: Path) -> str:
     )
 
 
-def _bloque_ciclo() -> str:
-    fase = read_phase()
-    slug = ""
-    with contextlib.suppress(Exception):
-        activo = read_active_change()
-        slug = (activo or {}).get("slug", "") if isinstance(activo, dict) else ""
-    lineas = ["### Ciclo SDD (pulse)", "", f"- Fase del engine: **{fase}**"]
-    if slug:
-        lineas.append(f"- Change activo: `{slug}`")
-    else:
-        lineas.append("- Change activo: ninguno")
-    if fase == "unknown":
-        lineas.append(
-            "- ⚠️ No se pudo leer `.pulse/state.sqlite`. Si esta sesión corre en"
-            " Windows sobre UNC, el guardián de escritura está en modo fail-closed"
-            " y sólo permitirá la vía rápida."
-        )
-    return "\n".join(lineas)
-
-
 def _bloque_issues(root: Path) -> str:
     """Issues abiertos que NO están reservados. Degrada en silencio sin red."""
     salida = _run(
@@ -229,7 +208,6 @@ def main() -> int:
         b
         for b in (
             _bloque_git(root),
-            _bloque_ciclo(),
             _bloque_issues(root),
             _bloque_memorias(root),
             _bloque_omega(),

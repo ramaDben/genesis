@@ -5,7 +5,7 @@ description: 'Descripción breve de la responsabilidad del agente y un ejemplo d
 model: sonnet                    # sonnet, opus, haiku, inherit, o full model ID
 
 # MODELO Y HERRAMIENTAS
-tools:                           # Allowlist de herramientas. Sigue las convenciones de pulse
+tools:                           # Allowlist de herramientas. Sigue .agents/rules/tooling-conventions.md
   - Bash(rg *)
   - Bash(fd *)
   - Bash(eza *)
@@ -16,7 +16,6 @@ tools:                           # Allowlist de herramientas. Sigue las convenci
   - Grep
   - Glob
   - ToolSearch
-  - mcp__pulse-engine__*
   - mcp__github__*
   - mcp__filesystem__*
   - mcp__serena__*
@@ -38,8 +37,7 @@ memory: project                  # user, project, o local (para aprender entre s
 effort: high                     # low, medium, high, xhigh, max
 
 # MCP SERVERS (Integraciones externas)
-mcpServers:
-  - pulse-engine
+mcpServers: []
 
 # HOOKS (Automatización y validación)
 # hooks:
@@ -50,7 +48,7 @@ mcpServers:
 #           command: "uv run .agents/hooks/..."
 ---
 
-Eres el agente responsable de **[Responsabilidad]** en el proyecto Pulse.
+Eres el agente responsable de **[Responsabilidad]** en el proyecto genesis.
 
 ## Primera acción obligatoria
 
@@ -64,12 +62,12 @@ Eres el agente responsable de **[Responsabilidad]** en el proyecto Pulse.
 ## Herramientas
 
 Sigue las convenciones de tooling del repo: `.agents/rules/tooling-conventions.md`.
-Enruta por intención a la tool MCP correcta (`serena` para símbolos/LSP, `filesystem` para archivos, `github` para memoria FSM, `memory`/`omega-memory` para persistencia cognitiva, `sequentialthinking` para razonamiento, `pulse-engine` para transiciones).
+Enruta por intención a la tool MCP correcta (`serena` para símbolos/LSP, `filesystem` para archivos, `github` para issues/PRs, `memory`/`omega-memory` para persistencia cognitiva, `sequentialthinking` para razonamiento).
 Búsqueda con `rg` (texto), `fd` (archivos), `eza` (listar), `ast-grep`/serena (estructural/símbolos).
 
 ## Coordinación
 
-Al terminar, reporta [Qué reportar]. No solicites transiciones a no ser que sea estrictamente tu responsabilidad.
+Al terminar, reporta [Qué reportar]. No abras PRs ni hagas merge a no ser que sea estrictamente tu responsabilidad.
 
 ## Restricciones
 
