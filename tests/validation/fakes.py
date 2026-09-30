@@ -7,7 +7,7 @@ mismo patrón que las funciones privadas de `tests/validation/test_verdict.py`
 `test_verdict_ledger.py` no duplique el harness.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 import numpy as np
 
@@ -281,13 +281,15 @@ def make_prop_sim_result_fake(
 def make_candidate_validation_bundle(
     *,
     candidate_id: str = "A",
-    symbols: tuple[str, ...] = ("US500",),
+    symbols: tuple[str, ...] = ("US500", "NAS100"),
     candidate_config: Mapping[str, object] | None = None,
     wfa_by_symbol: Mapping[str, WfaResult] | None = None,
     dsr_pbo_by_symbol: Mapping[str, DsrPboResult] | None = None,
     sensitivity_by_symbol: Mapping[str, SensitivityResult] | None = None,
     mc_symbol_by_symbol: Mapping[str, McSymbolResult] | None = None,
     prop_sim_result: PropSimResult | None = None,
+    declared_universe: Iterable[str] | None = None,
+    not_applicable_symbols: Iterable[str] = (),
 ) -> CandidateValidationBundle:
     """`CandidateValidationBundle` determinista con `candidate_config` inyectable (T10, Q5).
 
@@ -308,4 +310,8 @@ def make_candidate_validation_bundle(
             prop_sim_result if prop_sim_result is not None else make_prop_sim_result_fake()
         ),
         candidate_config=candidate_config,
+        declared_universe=(
+            frozenset(symbols) if declared_universe is None else frozenset(declared_universe)
+        ),
+        not_applicable_symbols=frozenset(not_applicable_symbols),
     )

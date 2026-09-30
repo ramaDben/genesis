@@ -54,6 +54,7 @@ _EXPECTED_ALL = {
     "PropSimOutcomeKind",
     "PropSimResult",
     "SymbolGateOutcome",
+    "SymbolGateStatus",
     "VerdictConfigError",
     "VerdictKind",
     "VerdictResult",
@@ -63,6 +64,7 @@ _EXPECTED_ALL = {
     "run_prop_sim",
     "run_verdict",
     "simulate_challenge_paths",
+    "validate_declared_universe",
     "write_verdict_artifacts",
     # Issue D (R119-R122): diagnóstico de señal desnuda (kill-switch del Candidato A).
     "ArchiveOrContinue",
@@ -167,6 +169,7 @@ def test_importa_la_superficie_publica_de_issue_j_sin_error() -> None:
         PropSimOutcomeKind,
         PropSimResult,
         SymbolGateOutcome,
+        SymbolGateStatus,
         VerdictConfigError,
         VerdictKind,
         VerdictResult,
@@ -176,6 +179,7 @@ def test_importa_la_superficie_publica_de_issue_j_sin_error() -> None:
         run_prop_sim,
         run_verdict,
         simulate_challenge_paths,
+        validate_declared_universe,
         write_verdict_artifacts,
     )
 

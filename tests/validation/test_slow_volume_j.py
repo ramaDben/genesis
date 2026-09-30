@@ -189,6 +189,8 @@ def _build_candidate_bundle(
             block_bootstrap=_synthetic_mc_paths_result(),
         ),
         prop_sim_result=prop_sim_result,
+        # NAS100 declarado y no evaluado: ejercita el camino "ausente" con volumen real.
+        declared_universe=frozenset({"US500", "NAS100"}),
     )
 
 

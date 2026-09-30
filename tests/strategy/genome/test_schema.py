@@ -121,3 +121,54 @@ def test_chandelier_sin_lookback_bars_falla() -> None:
     yaml_content = _VALID_GENOME_YAML.replace("    lookback_bars: 22\n", "")
     with pytest.raises(GenomeValidationError, match="lookback_bars"):
         parse_genome(yaml_content)
+
+
+# --- Change #130 (B.6): sección opcional `declared_universe` ---
+
+
+def _yaml_con_universo(valor: str) -> str:
+    return _VALID_GENOME_YAML + f"declared_universe: {valor}\n"
+
+
+def test_parse_genome_lee_declared_universe():
+    """N15 (AC6): la sección opcional se parsea a tupla en el orden declarado."""
+    genome = parse_genome(_yaml_con_universo('["SYM_A", "SYM_B", "SYM_C"]'))
+    assert genome.declared_universe == ("SYM_A", "SYM_B", "SYM_C")
+
+
+def test_genomas_existentes_sin_declared_universe_parsean_a_none():
+    """N16 (AC7): los genomas reales de `candidates/specs/` siguen parseando (universo `None`)."""
+    from pathlib import Path
+
+    specs = sorted(Path(__file__).resolve().parents[3].glob("candidates/specs/*.yaml"))
+    assert len(specs) >= 2
+    for spec in specs:
+        assert parse_genome(spec).declared_universe is None
+
+
+def test_declared_universe_con_duplicados_se_rechaza():
+    """N17 (AC8)."""
+    with pytest.raises(GenomeValidationError, match="SYM_A"):
+        parse_genome(_yaml_con_universo('["SYM_A", "SYM_A"]'))
+
+
+@pytest.mark.parametrize("valor", ['"SYM_A"', "{a: 1}"])
+def test_declared_universe_debe_ser_lista(valor):
+    """N18 (R2): un `str` no se itera carácter por carácter; un mapa tampoco vale."""
+    with pytest.raises(GenomeValidationError, match="declared_universe"):
+        parse_genome(_yaml_con_universo(valor))
+
+
+@pytest.mark.parametrize("valor", ['["SYM_A", ""]', '["SYM_A", 3]'])
+def test_declared_universe_elemento_vacio_o_no_str_se_rechaza(valor):
+    """N19 (R2)."""
+    with pytest.raises(GenomeValidationError, match="declared_universe"):
+        parse_genome(_yaml_con_universo(valor))
+
+
+def test_raw_config_excluye_declared_universe():
+    """N20 (D4, R9): el universo no entra a `raw_config` (que termina hasheado en `trial_id`)."""
+    sin = parse_genome(_VALID_GENOME_YAML)
+    con = parse_genome(_yaml_con_universo('["SYM_A", "SYM_B"]'))
+    assert "declared_universe" not in con.raw_config
+    assert dict(con.raw_config) == dict(sin.raw_config)

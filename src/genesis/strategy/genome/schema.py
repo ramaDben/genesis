@@ -85,6 +85,42 @@ class StrategyGenome:
     alpha: GenomeAlpha
     risk_exit: GenomeRiskExit
     raw_config: Mapping[str, Any]
+    declared_universe: tuple[str, ...] | None = None
+    """Universo declarado contra el que se mide C1 (Change #130); `None` si no se declara."""
+
+
+_NON_IDENTITY_SECTIONS = frozenset({"declared_universe"})
+"""Secciones del YAML que describen contra qué se compara la estrategia, no qué se ejecuta.
+
+No participan de la identidad del ensayo (`trial_id`, R9 del Change #130): se excluyen de
+`raw_config`, que es lo que termina hasheado."""
+
+
+def _parse_declared_universe(raw: Any) -> tuple[str, ...] | None:
+    """Valida la sección opcional `declared_universe` (lista de símbolos sin duplicados).
+
+    No valida el tamaño mínimo: esa regla vive solo en `validation.verdict`.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise GenomeValidationError(
+            f"'declared_universe' debe ser una lista de símbolos, recibido {type(raw).__name__}"
+        )
+    symbols: list[str] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, str) or not item.strip():
+            raise GenomeValidationError(
+                f"'declared_universe[{index}]' debe ser un símbolo (str no vacío), "
+                f"recibido {item!r}"
+            )
+        symbols.append(item.strip())
+    duplicates = sorted({s for s in symbols if symbols.count(s) > 1})
+    if duplicates:
+        raise GenomeValidationError(
+            f"'declared_universe' tiene símbolos duplicados: {duplicates!r}"
+        )
+    return tuple(symbols)
 
 
 def parse_genome(source: Path | str | Mapping[str, Any]) -> StrategyGenome:
@@ -227,10 +263,14 @@ def parse_genome(source: Path | str | Mapping[str, Any]) -> StrategyGenome:
         params=risk_params,
     )
 
+    # 5. Validar declared_universe (opcional, Change #130)
+    declared_universe = _parse_declared_universe(raw_data.get("declared_universe"))
+
     return StrategyGenome(
         metadata=metadata,
         universe=universe,
         alpha=alpha,
         risk_exit=risk_exit,
-        raw_config=dict(raw_data),
+        raw_config={k: v for k, v in raw_data.items() if k not in _NON_IDENTITY_SECTIONS},
+        declared_universe=declared_universe,
     )

@@ -13,7 +13,7 @@ comparación.
 
 import itertools
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -50,11 +50,14 @@ from genesis.validation.sensitivity import SensitivityResult
 from genesis.validation.trial_ledger import TrialLedger, TrialLedgerSummary, TrialOutcomeKind
 from genesis.validation.wfa import WfaResult
 
-CONFIG_VERSION: str = "genesis-validation-j/2"
+CONFIG_VERSION: str = "genesis-validation-j/3"
 """Versión del esquema de configuración de este Change (Issue J, decisión 10 §3).
 
 `/2` desde Change #109: `manifest.json` sustituye `risk_profile_hash` por
-`exit_geometry_hash` + `house_rule_hash`, y agrega el bloque de sesgo del proxy (D7)."""
+`exit_geometry_hash` + `house_rule_hash`, y agrega el bloque de sesgo del proxy (D7).
+`/3` desde Change #130: cada candidato del manifest gana `declared_universe`,
+`symbols_evaluated`, `symbols_not_evaluated` y `status` de 3 valores por símbolo; C1 se mide
+contra el universo declarado."""
 
 # --- Umbrales de gate, constantes de módulo nombradas (ADR-J11, R63/R65) ---
 _G1_MIN_TRADES_OOS = 300
@@ -69,6 +72,10 @@ _G9_MIN_PF_STRESS = 1.15
 _G9_STRESS_MULTIPLIER = 1.5
 
 _C1_MIN_FRACTION = 0.60
+_MIN_DECLARED_UNIVERSE_SIZE = 2
+"""Tamaño mínimo del universo declarado (Change #130, SSoT `:600-603`).
+
+No es una constante elegida: es el punto exacto en que C1 deja de ser vacío."""
 _C2_MIN_PF = 0.8
 
 _P1_MIN_PASS = 0.5
@@ -81,6 +88,74 @@ _T1_MIN_DSR = 0.95
 _T2_MAX_CORRELATION = 0.3
 
 
+class SymbolGateStatus(StrEnum):
+    """Estado de un símbolo declarado frente a los gates G1-G9 (Change #130, R7)."""
+
+    PASS = "PASS"  # noqa: S105  # nosec B105 - estado de gate, no una contraseña
+    FAIL = "FAIL"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+def _check_min_declared_universe_size(candidate_id: str, declared_universe: frozenset[str]) -> None:
+    """R5: `|U| < 2` no admite veredicto (C1 sería vacío). Levanta `VerdictConfigError`."""
+    if len(declared_universe) < _MIN_DECLARED_UNIVERSE_SIZE:
+        message = (
+            f"CandidateValidationBundle(candidate_id={candidate_id!r}): el universo declarado "
+            f"declared_universe={sorted(declared_universe)!r} tiene "
+            f"{len(declared_universe)} símbolo(s); se exigen al menos "
+            f"{_MIN_DECLARED_UNIVERSE_SIZE} para emitir veredicto (disparador (f), Change #130)."
+        )
+        raise VerdictConfigError(message)
+
+
+def _check_symbols_within_declared_universe(
+    candidate_id: str,
+    declared_universe: frozenset[str],
+    evaluated_symbols: Iterable[str],
+    not_applicable_symbols: Iterable[str] = (),
+) -> None:
+    """R1/R6: evaluados y 'no aplica' pertenecen a `U`; ningún símbolo es ambos a la vez."""
+    evaluated = set(evaluated_symbols)
+    not_applicable = set(not_applicable_symbols)
+    prefix = f"CandidateValidationBundle(candidate_id={candidate_id!r}): "
+    suffix = f"declared_universe={sorted(declared_universe)!r} (disparador (f), Change #130)."
+    outside_evaluated = evaluated - declared_universe
+    if outside_evaluated:
+        message = (
+            f"{prefix}símbolos evaluados fuera del universo declarado: "
+            f"{sorted(outside_evaluated)!r}; {suffix}"
+        )
+        raise VerdictConfigError(message)
+    outside_na = not_applicable - declared_universe
+    if outside_na:
+        message = (
+            f"{prefix}símbolos marcados 'no aplica' fuera del universo declarado: "
+            f"{sorted(outside_na)!r}; {suffix}"
+        )
+        raise VerdictConfigError(message)
+    both = evaluated & not_applicable
+    if both:
+        message = (
+            f"{prefix}símbolos a la vez evaluados y marcados 'no aplica': "
+            f"{sorted(both)!r}; {suffix}"
+        )
+        raise VerdictConfigError(message)
+
+
+def validate_declared_universe(
+    candidate_id: str,
+    declared_universe: frozenset[str],
+    evaluated_symbols: Iterable[str],
+) -> None:
+    """Pre-flight público del universo declarado (R5 + R6), misma regla que usa el bundle.
+
+    Lo invoca el runner antes de leer datos de mercado: un universo inválido no debe
+    quemar un ensayo que el ledger no llegue a registrar. Levanta `VerdictConfigError`.
+    """
+    _check_min_declared_universe_size(candidate_id, declared_universe)
+    _check_symbols_within_declared_universe(candidate_id, declared_universe, evaluated_symbols)
+
+
 @dataclass(frozen=True, slots=True)
 class CandidateValidationBundle:
     """Insumos de un candidato ya producidos por H/I/J, sin recalcular nada (R57).
@@ -89,6 +164,10 @@ class CandidateValidationBundle:
     `sensitivity_results_by_symbol`/`mc_symbol_results_by_symbol` deben coincidir
     exactamente (R58); `purged_cv_results_by_symbol` es opcional (solo diagnóstico
     informativo del manifest, R106).
+
+    Change #130: `declared_universe` (sin default) es el denominador de C1; todo símbolo
+    evaluado o marcado en `not_applicable_symbols` debe pertenecerle. El tamaño mínimo
+    (`|U| >= 2`) se exige al emitir veredicto, no al construir el bundle.
     """
 
     candidate_id: str
@@ -98,15 +177,18 @@ class CandidateValidationBundle:
     mc_symbol_results_by_symbol: Mapping[str, McSymbolResult]
     mc_portfolio_result: McPortfolioResult
     prop_sim_result: PropSimResult
+    declared_universe: frozenset[str]
     purged_cv_results_by_symbol: Mapping[str, PurgedCvResult] | None = None
     # Change #53 (Q5): configuración completa del candidato evaluado, identidad de
-    # "lo que se evaluó" para el ledger de ensayos. Opcional al final: ningún llamador
-    # ni test existente se rompe (R21). `__post_init__` no lo valida (un bundle sin
-    # config sigue siendo legítimo cuando no hay ledger).
+    # "lo que se evaluó" para el ledger de ensayos. Opcional: `__post_init__` no lo valida
+    # (un bundle sin config sigue siendo legítimo cuando no hay ledger).
     candidate_config: Mapping[str, object] | None = None
+    # Change #130 (D1): símbolos del universo cuya estrategia no está definida; cuentan
+    # como no superados en C1. Es una declaración, nunca una inferencia de datos vacíos.
+    not_applicable_symbols: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
-        """Valida que los símbolos coincidan exactamente entre los 4 mapas (R58)."""
+        """Valida R58 (símbolos entre los 4 mapas) y luego R1/R6 (universo declarado)."""
         symbol_sets: dict[str, set[str]] = {
             "wfa_results_by_symbol": set(self.wfa_results_by_symbol),
             "dsr_pbo_results_by_symbol": set(self.dsr_pbo_results_by_symbol),
@@ -123,10 +205,32 @@ class CandidateValidationBundle:
                 )
                 raise VerdictConfigError(message)
 
+        for field_name in ("declared_universe", "not_applicable_symbols"):
+            value = getattr(self, field_name)
+            if not isinstance(value, frozenset) or not all(
+                isinstance(item, str) and item.strip() for item in value
+            ):
+                message = (
+                    f"CandidateValidationBundle(candidate_id={self.candidate_id!r}): "
+                    f"{field_name}={value!r} debe ser un frozenset de str no vacíos "
+                    "(disparador (f), Change #130)."
+                )
+                raise VerdictConfigError(message)
+        _check_symbols_within_declared_universe(
+            self.candidate_id,
+            self.declared_universe,
+            reference_symbols,
+            self.not_applicable_symbols,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SymbolGateOutcome:
-    """Valor + booleano de pasa/no-pasa por cada gate G1-G9 de un `(candidate_id, symbol)` (R59)."""
+    """Valor + booleano de pasa/no-pasa por cada gate G1-G9 de un `(candidate_id, symbol)` (R59).
+
+    `status` (Change #130, R7) resume el símbolo: `PASS` (G1-G9 en verde), `FAIL` o
+    `NOT_APPLICABLE` (estrategia no definida para ese activo; cuenta como no superado).
+    """
 
     trades_oos_total: int
     g1_pass: bool
@@ -147,9 +251,10 @@ class SymbolGateOutcome:
     g8_pass: bool
     pf_cost_stress_1_5x: float
     g9_pass: bool
-    all_pass: bool
+    # Change #130 (R7): estado de 3 valores; `all_pass` se deriva (property).
+    status: SymbolGateStatus
     # --- Change #51 (R2/R3): señal de "evidencia de sizing ausente", no un gate. No
-    # participa de `all_pass` ni de ningún `gN_pass` (los gates no se relajan). ---
+    # participa de `status` ni de ningún `gN_pass` (los gates no se relajan). ---
     sizing_evidence_insufficient: bool
     intents_total: int
     intents_authorized: int
@@ -159,6 +264,11 @@ class SymbolGateOutcome:
     dsr_pre_ledger_deflation: float
     n_trials_g4_effective: int
     ledger_extra_trials: int
+
+    @property
+    def all_pass(self) -> bool:
+        """`True` si y solo si `status` es `PASS` (conjunción G1-G9; 'no aplica' no pasa)."""
+        return self.status is SymbolGateStatus.PASS
 
 
 def _is_sizing_evidence_insufficient(counts: IntentAuthorizationCounts) -> bool:
@@ -259,7 +369,7 @@ def _build_symbol_gate_outcome(
     )
     g9_pass = pf_cost_stress_1_5x >= _G9_MIN_PF_STRESS
 
-    all_pass = (
+    gates_all_pass = (
         g1_pass
         and g2_pass
         and g3_pass
@@ -270,6 +380,7 @@ def _build_symbol_gate_outcome(
         and g8_pass
         and g9_pass
     )
+    status = SymbolGateStatus.PASS if gates_all_pass else SymbolGateStatus.FAIL
 
     intent_counts = intent_authorization_counts(wfa_result.oos_ledger_cosido)
     sizing_evidence_insufficient = _is_sizing_evidence_insufficient(intent_counts)
@@ -294,13 +405,47 @@ def _build_symbol_gate_outcome(
         g8_pass=g8_pass,
         pf_cost_stress_1_5x=pf_cost_stress_1_5x,
         g9_pass=g9_pass,
-        all_pass=all_pass,
+        status=status,
         sizing_evidence_insufficient=sizing_evidence_insufficient,
         intents_total=intent_counts.intents_total,
         intents_authorized=intent_counts.intents_authorized,
         rejections_by_reason=intent_counts.rejections_by_reason,
         dsr_pre_ledger_deflation=dsr_pre_ledger_deflation,
         n_trials_g4_effective=n_trials_g4_effective,
+        ledger_extra_trials=ledger_extra_trials,
+    )
+
+
+def _not_applicable_symbol_gate_outcome(*, ledger_extra_trials: int) -> SymbolGateOutcome:
+    """`SymbolGateOutcome` de un símbolo declarado 'no aplica' (D1): sin números que reportar."""
+    nan = float("nan")
+    return SymbolGateOutcome(
+        trades_oos_total=0,
+        g1_pass=False,
+        wfe=nan,
+        g2_pass=False,
+        profit_factor=nan,
+        g3_pass=False,
+        dsr=nan,
+        g4_pass=False,
+        pbo=nan,
+        g5_pass=False,
+        mc_maxdd_p95_pct_of_limit=nan,
+        g6_pass=False,
+        mc_breach_probability_12m=nan,
+        g7_pass=False,
+        sensitivity_has_cliff=False,
+        sensitivity_max_degradation_pct=nan,
+        g8_pass=False,
+        pf_cost_stress_1_5x=nan,
+        g9_pass=False,
+        status=SymbolGateStatus.NOT_APPLICABLE,
+        sizing_evidence_insufficient=False,
+        intents_total=0,
+        intents_authorized=0,
+        rejections_by_reason={},
+        dsr_pre_ledger_deflation=nan,
+        n_trials_g4_effective=0,
         ledger_extra_trials=ledger_extra_trials,
     )
 
@@ -326,6 +471,9 @@ class CandidateGateSummary:
     # Change #51 (R4): símbolos con `sizing_evidence_insufficient=True`, agregados
     # hacia arriba sin colapsar/promediar. No participa de `passes_g_c_p`.
     symbols_with_insufficient_sizing_evidence: frozenset[str]
+    # Change #130: denominador de C1 y declarados que nadie evaluó ni marcó 'no aplica'.
+    declared_universe: frozenset[str]
+    symbols_not_evaluated: frozenset[str]
 
 
 def _evaluate_p1_to_p5(prop_sim_result: PropSimResult) -> tuple[bool, bool, bool, bool, bool]:
@@ -372,6 +520,8 @@ def build_candidate_gate_summary(
     lee `house_rule.max_loss_limit.amount` directo, ya no un porcentaje derivado de
     `starting_balance` — el parámetro `starting_balance` deja de ser necesario acá.
     """
+    _check_min_declared_universe_size(bundle.candidate_id, bundle.declared_universe)
+
     symbol_gate_outcomes = {
         symbol: _build_symbol_gate_outcome(
             symbol,
@@ -384,14 +534,24 @@ def build_candidate_gate_summary(
         )
         for symbol in bundle.wfa_results_by_symbol
     }
+    for symbol in sorted(bundle.not_applicable_symbols):
+        symbol_gate_outcomes[symbol] = _not_applicable_symbol_gate_outcome(
+            ledger_extra_trials=ledger_extra_trials
+        )
 
-    n_symbols = len(symbol_gate_outcomes)
-    n_passing = sum(1 for outcome in symbol_gate_outcomes.values() if outcome.all_pass)
-    c1_fraction_passing = n_passing / n_symbols if n_symbols > 0 else 0.0
+    # R4: el denominador es el universo declarado, no lo que traiga el bundle.
+    n_declared = len(bundle.declared_universe)
+    n_passing = sum(
+        1 for outcome in symbol_gate_outcomes.values() if outcome.status is SymbolGateStatus.PASS
+    )
+    c1_fraction_passing = n_passing / n_declared
     c1_pass = c1_fraction_passing >= _C1_MIN_FRACTION
 
+    # D3: C2 sobre `FAIL` (idéntico a `not all_pass` sin 'no aplica'; `nan` no contamina `min`).
     non_passing_pf = [
-        outcome.profit_factor for outcome in symbol_gate_outcomes.values() if not outcome.all_pass
+        outcome.profit_factor
+        for outcome in symbol_gate_outcomes.values()
+        if outcome.status is SymbolGateStatus.FAIL
     ]
     c2_min_pf_non_passing = min(non_passing_pf) if non_passing_pf else float("inf")
     c2_pass = c2_min_pf_non_passing >= _C2_MIN_PF
@@ -427,6 +587,12 @@ def build_candidate_gate_summary(
         p6_violating_symbols=p6_violating,
         passes_g_c_p=passes_g_c_p,
         symbols_with_insufficient_sizing_evidence=symbols_with_insufficient_sizing_evidence,
+        declared_universe=bundle.declared_universe,
+        symbols_not_evaluated=(
+            bundle.declared_universe
+            - set(bundle.wfa_results_by_symbol)
+            - bundle.not_applicable_symbols
+        ),
     )
 
 
@@ -761,63 +927,6 @@ class VerdictResult:
     ledger_extra_trials: int = 0
 
 
-def _find_go_parcial_candidate(
-    candidates: Mapping[str, CandidateValidationBundle],
-    candidate_summaries: Mapping[str, CandidateGateSummary],
-    *,
-    no_go_iteration_used: bool,
-    ledger_extra_trials: int,
-) -> tuple[str | None, TournamentDeflationOutcome | None]:
-    """Candidato de rama `GO_PARCIAL` (R92c): subconjunto de símbolos válido.
-
-    `0 < c1_fraction_passing < 0.60` (falla C1 pero no trivialmente vacío) con
-    P1-P6 en verde y T1 (calculado sobre ese candidato como si fuera el ganador)
-    también en verde. Orden canónico total (igual criterio que
-    `_select_winning_candidate`, R94): primer candidato elegible en ese orden.
-
-    Nota de alcance (R92c admite dos redacciones alternativas en el spec):
-    `0 < c1_fraction_passing < 0.60` **o** `passes_g_c_p is False solo por
-    C1/C2 mientras P1-P6+T1 mantienen validez`. Esta implementación cubre la
-    primera alternativa (literal, verificable por umbral) para **cualquier**
-    candidato del torneo, no solo para "el candidato ganador" de R72 (que, por
-    definición, requiere `passes_g_c_p=True` y por tanto nunca calificaría para
-    esta rama). La segunda alternativa (C1 **o** C2 como única causa de fallo)
-    queda deliberadamente fuera: es una condición más laxa y menos verificable
-    mecánicamente (exige aislar la causa exacta del fallo de `passes_g_c_p`)
-    que ampliaría la superficie de `GO_PARCIAL` frente a la lectura estricta ya
-    implementada — elección conservadora para no relajar el gate por defecto.
-    """
-
-    def _sort_key(candidate_id: str) -> tuple[float, float, str]:
-        prop_sim_result = candidates[candidate_id].prop_sim_result
-        return (
-            -prop_sim_result.payout_p25_12m,
-            -prop_sim_result.median_funded_survival_months,
-            candidate_id,
-        )
-
-    for candidate_id in sorted(candidates, key=_sort_key):
-        summary = candidate_summaries[candidate_id]
-        p_gates_pass = (
-            summary.p1_pass
-            and summary.p2_pass
-            and summary.p3_pass
-            and summary.p4_pass
-            and summary.p5_pass
-            and summary.p6_pass
-        )
-        if 0.0 < summary.c1_fraction_passing < _C1_MIN_FRACTION and p_gates_pass:
-            t1_candidate = _compute_t1(
-                candidate_id,
-                candidates,
-                no_go_iteration_used=no_go_iteration_used,
-                ledger_extra_trials=ledger_extra_trials,
-            )
-            if t1_candidate.t1_pass:
-                return candidate_id, t1_candidate
-    return None, None
-
-
 def _require_candidate_config(bundle: CandidateValidationBundle) -> Mapping[str, object]:
     """`bundle.candidate_config`, fail-fast si es `None` (Q5, D2: nunca omisión silenciosa)."""
     if bundle.candidate_config is None:
@@ -889,10 +998,10 @@ def run_verdict(
 
     Prioridad estricta (R92): (a) `ensemble is not None and
     ensemble.passes_p_gates` -> `GO_ENSEMBLE`; (b) ganador `passes_g_c_p and
-    t1_pass` -> `GO`; (c) algún candidato con subconjunto de símbolos válido
-    (`0 < c1_fraction_passing < 0.60` con P1-P6+T1 válidos) -> `GO_PARCIAL`; (d)
-    resto -> `NO_GO`. Invariancia al orden (R94/R95bis): el ganador y el candidato
-    de `GO_PARCIAL` se eligen por criterio total ordenado (`payout_p25_12m`,
+    t1_pass` -> `GO`; (c) resto -> `NO_GO`. Un candidato que falla C1 nunca emite
+    `GO_PARCIAL` (Change #130, R12; el miembro del enum se conserva sin emisor hasta
+    B.8). Invariancia al orden (R94/R95bis): el ganador se elige por criterio total
+    ordenado (`payout_p25_12m`,
     desempate `median_funded_survival_months`, desempate final `candidate_id`
     lexicográfico); T2 itera en orden canónico de `candidate_id`. Permutar
     `candidates` no cambia `verdict`/`winning_candidate_id`.
@@ -961,18 +1070,9 @@ def run_verdict(
     ):
         verdict = VerdictKind.GO
     else:
-        partial_candidate_id, partial_t1 = _find_go_parcial_candidate(
-            candidates,
-            candidate_summaries,
-            no_go_iteration_used=no_go_iteration_used,
-            ledger_extra_trials=ledger_extra_trials,
-        )
-        if partial_candidate_id is not None:
-            verdict = VerdictKind.GO_PARCIAL
-            winning_candidate_id = partial_candidate_id
-            t1 = partial_t1
-        else:
-            verdict = VerdictKind.NO_GO
+        # Change #130 (R12): sin GO-PARCIAL por C1 fallido; quien falla C1 es NO-GO
+        # (SSoT `:1217-1220`). `GO_PARCIAL` queda sin emisor hasta B.8.
+        verdict = VerdictKind.NO_GO
 
     return VerdictResult(
         verdict=verdict,
@@ -1076,6 +1176,7 @@ def _candidate_summary_payload(summary: CandidateGateSummary) -> dict:
                 "pf_cost_stress_1_5x": outcome.pf_cost_stress_1_5x,
                 "g9_pass": outcome.g9_pass,
                 "all_pass": outcome.all_pass,
+                "status": outcome.status.value,
                 "sizing_evidence_insufficient": outcome.sizing_evidence_insufficient,
                 "intents_total": outcome.intents_total,
                 "intents_authorized": outcome.intents_authorized,
@@ -1086,6 +1187,13 @@ def _candidate_summary_payload(summary: CandidateGateSummary) -> dict:
         "symbols_with_insufficient_sizing_evidence": sorted(
             summary.symbols_with_insufficient_sizing_evidence
         ),
+        "declared_universe": sorted(summary.declared_universe),
+        "symbols_evaluated": sorted(
+            symbol
+            for symbol, outcome in summary.symbol_gate_outcomes.items()
+            if outcome.status is not SymbolGateStatus.NOT_APPLICABLE
+        ),
+        "symbols_not_evaluated": sorted(summary.symbols_not_evaluated),
     }
 
 
@@ -1121,8 +1229,17 @@ def render_tearsheet(result: VerdictResult) -> str:
         payload = _candidate_summary_payload(summary)
         lines.append(f"### `{candidate_id}`")
         lines.append(f"- `passes_g_c_p`: {payload['passes_g_c_p']}")
+        n_universe = len(payload["declared_universe"])
+        no_evaluados = payload["symbols_not_evaluated"]
         lines.append(
-            f"- C1: {payload['c1_fraction_passing']:.4f} (pass={payload['c1_pass']}); "
+            f"- Universo declarado (|U|={n_universe}): "
+            + ", ".join(payload["declared_universe"])
+            + "; no evaluados (cuentan como no superados): "
+            + (", ".join(no_evaluados) if no_evaluados else "(ninguno)")
+        )
+        lines.append(
+            f"- C1 sobre |U|={n_universe}: "
+            f"{payload['c1_fraction_passing']:.4f} (pass={payload['c1_pass']}); "
             f"C2: {payload['c2_min_pf_non_passing']:.4f} (pass={payload['c2_pass']})"
         )
         lines.append("- P1..P6: " + ", ".join(f"P{i}={payload[f'p{i}_pass']}" for i in range(1, 7)))
@@ -1135,11 +1252,11 @@ def render_tearsheet(result: VerdictResult) -> str:
         lines.append(
             "| symbol | trades | g1 | wfe | g2 | pf | g3 | dsr | g4 | pbo | g5 | "
             "maxdd/lim | g6 | breach% | g7 | cliff | degrad% | g8 | pf_stress | g9 | all | "
-            "sizing_insuf |"
+            "status | sizing_insuf |"
         )
         lines.append(
             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-            "---|"
+            "---|---|"
         )
         for symbol, outcome in payload["symbol_gate_outcomes"].items():
             lines.append(
@@ -1152,7 +1269,8 @@ def render_tearsheet(result: VerdictResult) -> str:
                 f"{outcome['sensitivity_has_cliff']} | "
                 f"{outcome['sensitivity_max_degradation_pct']:.3f} | {outcome['g8_pass']} | "
                 f"{outcome['pf_cost_stress_1_5x']:.3f} | {outcome['g9_pass']} | "
-                f"{outcome['all_pass']} | {outcome['sizing_evidence_insufficient']} |"
+                f"{outcome['all_pass']} | {outcome['status']} | "
+                f"{outcome['sizing_evidence_insufficient']} |"
             )
         lines.append("")
 
@@ -1240,6 +1358,7 @@ def verdict_result_to_manifest_json(
     """
     payload: dict = {
         "config_version": config_version,
+        "verdict_schema_version": CONFIG_VERSION,
         "dataset_hash_by_symbol": dict(dataset_hash_by_symbol),
         "firm_profile_hash": firm_profile_hash,
         "exit_geometry_hash": exit_geometry_hash,

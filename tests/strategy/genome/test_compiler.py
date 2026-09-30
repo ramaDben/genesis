@@ -187,3 +187,27 @@ def test_genoma_con_geometria_imposible_lanza_error_de_capa_2(
     factory = compile_genome(GENOME_YAML_1.replace(target, reemplazo))
     with pytest.raises(ExitGeometryConfigError, match=campo):
         _ = factory.exit_geometry
+
+
+def test_trial_id_no_depende_de_declared_universe():
+    """N21 (AC11, R9): el universo declarado no altera `trial_id`."""
+    variantes = (
+        GENOME_YAML_1,
+        GENOME_YAML_1 + '\ndeclared_universe: ["SYM_A", "SYM_B"]\n',
+        GENOME_YAML_1 + '\ndeclared_universe: ["SYM_A", "SYM_B", "SYM_C"]\n',
+    )
+    factories = [compile_genome(variante) for variante in variantes]
+    assert factories[1].raw_config == factories[0].raw_config
+    assert factories[2].raw_config == factories[0].raw_config
+
+    trial_ids = {
+        compute_trial_id(
+            factory.raw_config,
+            {"US500": "abcdef123456"},
+            "firm_hash_1",
+            "exit_geometry_hash_1",
+            "house_rule_hash_1",
+        )
+        for factory in factories
+    }
+    assert len(trial_ids) == 1

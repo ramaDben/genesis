@@ -1,6 +1,8 @@
 """Tests de `verdict.py`: bundle, gates G/C/P/T1/T2, veredicto, tearsheet/manifest (R57-R113)."""
 
-from collections.abc import Mapping
+import dataclasses
+import json
+from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
@@ -39,7 +41,9 @@ from genesis.validation.prop_sim import (
 from genesis.validation.purged_cv import PurgedCvConfig, PurgedCvResult, PurgedFold
 from genesis.validation.sensitivity import CostStressOutcome, PerturbationOutcome, SensitivityResult
 from genesis.validation.verdict import (
+    CONFIG_VERSION,
     CandidateValidationBundle,
+    SymbolGateStatus,
     VerdictKind,
     _build_symbol_gate_outcome,
     _compute_t1,
@@ -51,6 +55,7 @@ from genesis.validation.verdict import (
     manifest_json_to_verdict_summary,
     render_tearsheet,
     run_verdict,
+    validate_declared_universe,
     verdict_result_to_manifest_json,
     write_verdict_artifacts,
 )
@@ -221,16 +226,20 @@ def _prop_sim_result(
 def _bundle(
     *,
     candidate_id: str = "A",
-    symbols: tuple[str, ...] = ("US500",),
+    symbols: tuple[str, ...] = ("US500", "NAS100"),
     wfa_by_symbol: Mapping[str, WfaResult] | None = None,
     dsr_pbo_by_symbol: Mapping[str, DsrPboResult] | None = None,
     sensitivity_by_symbol: Mapping[str, SensitivityResult] | None = None,
     mc_symbol_by_symbol: Mapping[str, McSymbolResult] | None = None,
     prop_sim_result: PropSimResult | None = None,
+    declared_universe: Iterable[str] | None = None,
+    not_applicable_symbols: Iterable[str] = (),
 ) -> CandidateValidationBundle:
+    """Bundle de test; `declared_universe=None` -> claves del mapa WFA resuelto (Change #130)."""
+    resolved_wfa = wfa_by_symbol or {s: _wfa_result(symbol=s) for s in symbols}
     return CandidateValidationBundle(
         candidate_id=candidate_id,
-        wfa_results_by_symbol=wfa_by_symbol or {s: _wfa_result(symbol=s) for s in symbols},
+        wfa_results_by_symbol=resolved_wfa,
         dsr_pbo_results_by_symbol=dsr_pbo_by_symbol
         or {s: _dsr_pbo_result(symbol=s) for s in symbols},
         sensitivity_results_by_symbol=sensitivity_by_symbol
@@ -239,6 +248,10 @@ def _bundle(
         or {s: _mc_symbol_result(symbol=s) for s in symbols},
         mc_portfolio_result=_mc_portfolio_result(),
         prop_sim_result=prop_sim_result if prop_sim_result is not None else _prop_sim_result(),
+        declared_universe=(
+            frozenset(resolved_wfa) if declared_universe is None else frozenset(declared_universe)
+        ),
+        not_applicable_symbols=frozenset(not_applicable_symbols),
     )
 
 
@@ -255,6 +268,7 @@ def test_symbols_inconsistentes_lanza_verdict_config_error() -> None:
             mc_symbol_results_by_symbol={"US500": _mc_symbol_result(symbol="US500")},
             mc_portfolio_result=_mc_portfolio_result(),
             prop_sim_result=_prop_sim_result(),
+            declared_universe=frozenset({"US500", "NAS100"}),
         )
 
 
@@ -499,6 +513,7 @@ def test_all_pass_es_and_de_g1_g9() -> None:
         ledger_extra_trials=0,
     )
     assert outcome.all_pass is True
+    assert outcome.status is SymbolGateStatus.PASS
 
     outcome_one_fail = _build_symbol_gate_outcome(
         "US500",
@@ -510,6 +525,7 @@ def test_all_pass_es_and_de_g1_g9() -> None:
         ledger_extra_trials=0,
     )
     assert outcome_one_fail.all_pass is False
+    assert outcome_one_fail.status is SymbolGateStatus.FAIL
 
 
 # --- Change #51 (R2/R3/R4): señal de "evidencia de sizing ausente" ---
@@ -641,7 +657,10 @@ def test_señal_sizing_en_tearsheet_y_manifest(
     bundle = _go_quality_bundle("A", seed=3)
     degraded_bundle = _bundle(
         candidate_id="A",
-        wfa_by_symbol={"US500": _wfa_result(ledger=build_ledger_with_rejections(n_lot_size=24))},
+        wfa_by_symbol={
+            **bundle.wfa_results_by_symbol,
+            "US500": _wfa_result(ledger=build_ledger_with_rejections(n_lot_size=24)),
+        },
         dsr_pbo_by_symbol=bundle.dsr_pbo_results_by_symbol,
         sensitivity_by_symbol=bundle.sensitivity_results_by_symbol,
         mc_symbol_by_symbol=bundle.mc_symbol_results_by_symbol,
@@ -690,7 +709,12 @@ def _ledger_with_breach() -> Ledger:
 
 
 def test_p6_breach_marca_p6_pass_false_y_registra_violadores() -> None:
-    bundle = _bundle(wfa_by_symbol={"US500": _wfa_result(ledger=_ledger_with_breach())})
+    bundle = _bundle(
+        wfa_by_symbol={
+            "US500": _wfa_result(ledger=_ledger_with_breach()),
+            "NAS100": _wfa_result(symbol="NAS100"),
+        }
+    )
     summary = build_candidate_gate_summary(bundle, _house_rule())
 
     assert summary.p6_pass is False
@@ -887,11 +911,29 @@ def _daily_ledger(daily_values: list, *, symbol: str = "US500") -> Ledger:
     return ledger
 
 
+def _split_wfa_in_halves(daily_values: list) -> dict[str, WfaResult]:
+    """Reparte la MISMA serie diaria en dos mitades (`value/2`) sobre `US500` y `NAS100`.
+
+    Change #130: todo candidato evalúa >=2 símbolos (universo declarado >=2). Partir la serie
+    en mitades conserva la canasta diaria de T1/T2 (suma por día) y `n_trials_signal_total`
+    total (22 + 23 = 45), y cada símbolo pasa G1-G9 igual que antes (PF y nº de trades no
+    dependen de la escala).
+    """
+    halves = [float(value) / 2 for value in daily_values]
+    return {
+        "US500": _replace_wfa_n_trials(
+            _wfa_result(symbol="US500", ledger=_daily_ledger(halves, symbol="US500")), 22
+        ),
+        "NAS100": _replace_wfa_n_trials(
+            _wfa_result(symbol="NAS100", ledger=_daily_ledger(halves, symbol="NAS100")), 23
+        ),
+    }
+
+
 def _candidate_with_daily_series(
     candidate_id: str, daily_values: list
 ) -> CandidateValidationBundle:
-    ledger = _daily_ledger(daily_values)
-    return _bundle(candidate_id=candidate_id, wfa_by_symbol={"US500": _wfa_result(ledger=ledger)})
+    return _bundle(candidate_id=candidate_id, wfa_by_symbol=_split_wfa_in_halves(daily_values))
 
 
 # Series con PF>=1.3 individualmente (gate G3) y correlación baja entre sí (<0.3, R80);
@@ -1066,16 +1108,22 @@ def _strong_daily_series(seed: int, n: int = 20) -> list:
 
 def _go_quality_bundle(candidate_id: str, seed: int) -> CandidateValidationBundle:
     """Candidato con G/C/P completamente en verde y T1 robusto (DSR alto, R91 rama GO)."""
-    ledger = _daily_ledger(_strong_daily_series(seed))
-    return _bundle(candidate_id=candidate_id, wfa_by_symbol={"US500": _wfa_result(ledger=ledger)})
+    return _bundle(
+        candidate_id=candidate_id, wfa_by_symbol=_split_wfa_in_halves(_strong_daily_series(seed))
+    )
 
 
 def _bad_bundle(candidate_id: str) -> CandidateValidationBundle:
     """Candidato que falla todos los gates G/C/P (R91 rama NO_GO)."""
     return _bundle(
         candidate_id=candidate_id,
-        wfa_by_symbol={"US500": _wfa_result(wfe=0.01, ledger=build_ledger([-1.0] * 400))},
-        dsr_pbo_by_symbol={"US500": _dsr_pbo_result(dsr=0.1, pbo=0.9)},
+        wfa_by_symbol={
+            s: _wfa_result(symbol=s, wfe=0.01, ledger=build_ledger([-1.0] * 400))
+            for s in ("US500", "NAS100")
+        },
+        dsr_pbo_by_symbol={
+            s: _dsr_pbo_result(symbol=s, dsr=0.1, pbo=0.9) for s in ("US500", "NAS100")
+        },
         prop_sim_result=_prop_sim_result(p_pass=0.01, median_funded_survival_months=0.5),
     )
 
@@ -1140,9 +1188,10 @@ def test_verdict_rama_no_go(
     assert result.ensemble is None
 
 
-def test_verdict_rama_go_parcial(
+def test_c1_fallido_nunca_es_go_parcial(
     firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
 ) -> None:
+    """R12/AC15 (Change #130): un candidato que falla C1 es NO-GO, nunca GO-PARCIAL (SSoT)."""
     candidates = {"A": _partial_bundle("A", seed=3)}
 
     result = run_verdict(
@@ -1153,8 +1202,8 @@ def test_verdict_rama_go_parcial(
         _FAST_ENSEMBLE_CONFIG,
     )
 
-    assert result.verdict is VerdictKind.GO_PARCIAL
-    assert result.winning_candidate_id == "A"
+    assert result.verdict is VerdictKind.NO_GO
+    assert result.winning_candidate_id is None
     assert result.candidate_summaries["A"].c1_pass is False
     assert 0.0 < result.candidate_summaries["A"].c1_fraction_passing < 0.60
 
@@ -1299,7 +1348,10 @@ def test_verdict_monotonia_degradar_dsr_nunca_mejora_passes_g_c_p(
     degraded_bundle = _bundle(
         candidate_id="A",
         wfa_by_symbol=bundle.wfa_results_by_symbol,
-        dsr_pbo_by_symbol={"US500": _dsr_pbo_result(dsr=0.1, pbo=0.1)},
+        dsr_pbo_by_symbol={
+            "US500": _dsr_pbo_result(dsr=0.1, pbo=0.1),
+            "NAS100": bundle.dsr_pbo_results_by_symbol["NAS100"],
+        },
     )
     summary_after = build_candidate_gate_summary(degraded_bundle, house_rule_fixture)
 
@@ -1358,6 +1410,7 @@ def test_manifest_roundtrip(
     summary = manifest_json_to_verdict_summary(raw)
 
     assert summary["config_version"] == "genesis-validation-j/2"
+    assert summary["verdict_schema_version"] == "genesis-validation-j/3"
     assert summary["n_candidatos_torneo"] == result.n_candidatos_torneo
     assert summary["economics_confirmed"] == result.economics_confirmed
     assert summary["git_commit"] == "deadbeef"
@@ -1436,3 +1489,231 @@ def test_render_tearsheet_no_hace_io(
     tearsheet1 = render_tearsheet(result)
     tearsheet2 = render_tearsheet(result)
     assert tearsheet1 == tearsheet2
+
+
+# --- Change #130 (B.6): universo declarado como denominador de C1 ---
+
+
+def _sym_bundle(
+    *,
+    universe: Iterable[str],
+    passing: Iterable[str] = (),
+    failing: Iterable[str] = (),
+    not_applicable: Iterable[str] = (),
+    candidate_id: str = "A",
+    failing_ledger: Ledger | None = None,
+) -> CandidateValidationBundle:
+    """Bundle con `SYM_*`: `passing` pasan G1-G9, `failing` fallan G2 (`wfe=0.1`)."""
+    passing_symbols = tuple(passing)
+    failing_symbols = tuple(failing)
+    wfa = {s: _wfa_result(symbol=s) for s in passing_symbols}
+    wfa.update({s: _wfa_result(symbol=s, wfe=0.1, ledger=failing_ledger) for s in failing_symbols})
+    return _bundle(
+        candidate_id=candidate_id,
+        symbols=passing_symbols + failing_symbols,
+        wfa_by_symbol=wfa,
+        declared_universe=universe,
+        not_applicable_symbols=not_applicable,
+    )
+
+
+def test_declared_universe_de_tamano_1_levanta_verdict_config_error() -> None:
+    """N1 (AC1, R5): `|U|=1` construye el bundle pero no emite resumen de gates."""
+    bundle = _sym_bundle(universe={"SYM_A"}, passing=["SYM_A"])
+    with pytest.raises(VerdictConfigError, match=r"candidate_id='A'.*\['SYM_A'\]"):
+        build_candidate_gate_summary(bundle, _house_rule())
+
+
+def test_run_verdict_con_universo_de_1_no_emite_veredicto(
+    firm_profile_fixture: FirmProfile,
+) -> None:
+    """N2 (AC1, R5): `run_verdict` con `|U|=1` levanta; no hay `VerdictResult`."""
+    bundle = _sym_bundle(universe={"SYM_A"}, passing=["SYM_A"])
+    with pytest.raises(VerdictConfigError):
+        run_verdict(
+            {"A": bundle},
+            _STARTING_BALANCE,
+            firm_profile_fixture,
+            load_prop_economics_profile(),
+            _FAST_ENSEMBLE_CONFIG,
+        )
+
+
+def test_c1_denominador_es_universo_declarado_no_evaluado() -> None:
+    """N3 (AC2, R4): 2 de 4 declarados pasan -> C1 = 0.5 y falla; los 2 ausentes no cuentan."""
+    bundle = _sym_bundle(universe={"SYM_A", "SYM_B", "SYM_C", "SYM_D"}, passing=["SYM_A", "SYM_B"])
+    summary = build_candidate_gate_summary(bundle, _house_rule())
+    assert summary.c1_fraction_passing == pytest.approx(0.5)
+    assert summary.c1_pass is False
+    assert summary.symbols_not_evaluated == frozenset({"SYM_C", "SYM_D"})
+    assert summary.declared_universe == frozenset({"SYM_A", "SYM_B", "SYM_C", "SYM_D"})
+
+
+def test_simbolo_evaluado_fuera_de_universo_declarado_levanta_error() -> None:
+    """N4 (AC3, R1/R6): un símbolo evaluado ausente de `U` falla al construir el bundle."""
+    with pytest.raises(VerdictConfigError, match="SYM_C"):
+        _sym_bundle(universe={"SYM_A", "SYM_B"}, passing=["SYM_A", "SYM_C"])
+
+
+def test_not_applicable_cuenta_como_no_superado_en_c1() -> None:
+    """N5 (AC4, R7): A pasa, C falla, B es 'no aplica' -> C1 = 1/3."""
+    bundle = _sym_bundle(
+        universe={"SYM_A", "SYM_B", "SYM_C"},
+        passing=["SYM_A"],
+        failing=["SYM_C"],
+        not_applicable=["SYM_B"],
+    )
+    summary = build_candidate_gate_summary(bundle, _house_rule())
+    assert summary.c1_fraction_passing == pytest.approx(1 / 3)
+    outcomes = summary.symbol_gate_outcomes
+    assert outcomes["SYM_B"].status is SymbolGateStatus.NOT_APPLICABLE
+    assert outcomes["SYM_A"].status is SymbolGateStatus.PASS
+    assert outcomes["SYM_C"].status is SymbolGateStatus.FAIL
+    assert outcomes["SYM_B"].all_pass is False
+    assert summary.symbols_not_evaluated == frozenset()
+
+
+def test_all_pass_deriva_de_status() -> None:
+    """N6 (AC5, R7): `all_pass` es una property `bool` derivada de `status`."""
+    outcome = _build_symbol_gate_outcome(
+        "US500",
+        _wfa_result(),
+        _dsr_pbo_result(),
+        _sensitivity_result(),
+        _mc_symbol_result(),
+        _house_rule(),
+        ledger_extra_trials=0,
+    )
+    expected = {
+        SymbolGateStatus.PASS: True,
+        SymbolGateStatus.FAIL: False,
+        SymbolGateStatus.NOT_APPLICABLE: False,
+    }
+    for status, all_pass in expected.items():
+        replaced = dataclasses.replace(outcome, status=status)
+        assert replaced.all_pass is all_pass
+    assert "all_pass" not in {f.name for f in dataclasses.fields(outcome)}
+
+
+def test_manifest_y_tearsheet_exponen_declared_universe_y_status(
+    firm_profile_fixture: FirmProfile, tmp_path
+) -> None:
+    """N7 (AC12, R8): universo, evaluados, no evaluados y `status` llegan a ambos artefactos."""
+    # SYM_C y SYM_D quedan ausentes (declarados, no evaluados ni 'no aplica').
+    bundle = _sym_bundle(
+        universe={"SYM_D", "SYM_C", "SYM_B", "SYM_A"},
+        passing=["SYM_A"],
+        not_applicable=["SYM_B"],
+    )
+    result = run_verdict(
+        {"A": bundle},
+        _STARTING_BALANCE,
+        firm_profile_fixture,
+        load_prop_economics_profile(),
+        _FAST_ENSEMBLE_CONFIG,
+    )
+    manifest_path, tearsheet_path = write_verdict_artifacts(
+        result, tmp_path / "artifacts", **_MANIFEST_KWARGS
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    tearsheet = tearsheet_path.read_text(encoding="utf-8")
+
+    candidate = manifest["candidates"]["A"]
+    assert candidate["declared_universe"] == ["SYM_A", "SYM_B", "SYM_C", "SYM_D"]
+    assert candidate["symbols_evaluated"] == ["SYM_A"]
+    assert candidate["symbols_not_evaluated"] == ["SYM_C", "SYM_D"]
+    statuses = {
+        symbol: outcome["status"] for symbol, outcome in candidate["symbol_gate_outcomes"].items()
+    }
+    assert statuses == {"SYM_A": "PASS", "SYM_B": "NOT_APPLICABLE"}
+    assert candidate["symbol_gate_outcomes"]["SYM_A"]["all_pass"] is True
+    assert "NOT_APPLICABLE" in tearsheet
+    assert "|U|=4" in tearsheet
+
+
+def test_config_version_es_j3() -> None:
+    """N8 (AC13, R10)."""
+    assert CONFIG_VERSION == "genesis-validation-j/3"
+
+
+def test_not_applicable_fuera_del_universo_levanta() -> None:
+    """N9 (R6/D1): 'no aplica' ajeno al universo declarado."""
+    with pytest.raises(VerdictConfigError, match="SYM_E"):
+        _sym_bundle(universe={"SYM_A", "SYM_B"}, passing=["SYM_A"], not_applicable=["SYM_E"])
+
+
+def test_simbolo_evaluado_y_no_aplica_a_la_vez_levanta() -> None:
+    """N10 (D1): un símbolo no puede estar evaluado y marcado 'no aplica'."""
+    with pytest.raises(VerdictConfigError, match="SYM_A"):
+        _sym_bundle(universe={"SYM_A", "SYM_B"}, passing=["SYM_A"], not_applicable=["SYM_A"])
+
+
+def test_declared_universe_no_frozenset_levanta() -> None:
+    """N11 (R1): el universo debe ser `frozenset` de `str` no vacíos."""
+    base = _bundle(symbols=("SYM_A", "SYM_B"))
+    fields: dict[str, Any] = {f.name: getattr(base, f.name) for f in dataclasses.fields(base)}
+    invalid_universes: list[Any] = [
+        ["SYM_A", "SYM_B"],
+        {"SYM_A", "SYM_B"},
+        "SYM_A",
+        frozenset({"SYM_A", ""}),
+    ]
+    for invalid in invalid_universes:
+        kwargs = {**fields, "declared_universe": invalid}
+        with pytest.raises(VerdictConfigError):
+            CandidateValidationBundle(**kwargs)
+
+
+def test_c2_ignora_not_applicable_y_no_cambia_sin_el() -> None:
+    """N12 (D3): C2 se calcula sobre `FAIL`; 'no aplica' (PF `nan`) no lo contamina."""
+    mixed_ledger = build_ledger([1.0] * 200 + [-1.0] * 200)
+    with_na = _sym_bundle(
+        universe={"SYM_A", "SYM_B", "SYM_C"},
+        passing=["SYM_A"],
+        failing=["SYM_B"],
+        not_applicable=["SYM_C"],
+        failing_ledger=mixed_ledger,
+    )
+    without_na = _sym_bundle(
+        universe={"SYM_A", "SYM_B"},
+        passing=["SYM_A"],
+        failing=["SYM_B"],
+        failing_ledger=mixed_ledger,
+    )
+    summary_na = build_candidate_gate_summary(with_na, _house_rule())
+    summary_plain = build_candidate_gate_summary(without_na, _house_rule())
+
+    fail_pf = summary_plain.symbol_gate_outcomes["SYM_B"].profit_factor
+    assert np.isfinite(fail_pf)
+    assert summary_na.c2_min_pf_non_passing == fail_pf
+    assert summary_plain.c2_min_pf_non_passing == fail_pf
+
+
+def test_validate_declared_universe_publica() -> None:
+    """N13 (D5): la función pública que comparten el runner y el bundle."""
+    with pytest.raises(VerdictConfigError):
+        validate_declared_universe("A", frozenset({"SYM_A"}), ("SYM_A",))
+    with pytest.raises(VerdictConfigError, match="SYM_C"):
+        validate_declared_universe("A", frozenset({"SYM_A", "SYM_B"}), ("SYM_C",))
+    assert validate_declared_universe("A", frozenset({"SYM_A", "SYM_B"}), ("SYM_A",)) is None
+
+
+@given(n_declared=st.integers(min_value=2, max_value=6), data=st.data())
+@settings(max_examples=15, deadline=None)
+def test_property_c1_nunca_supera_evaluados_sobre_declarados(
+    n_declared: int, data: st.DataObject
+) -> None:
+    """N14 (R4): `c1 == p/n` y `c1 <= k/n`; agregar un declarado sin evaluar nunca sube C1."""
+    universe = [f"SYM_{i}" for i in range(n_declared)]
+    k = data.draw(st.integers(min_value=1, max_value=n_declared))
+    p = data.draw(st.integers(min_value=0, max_value=k))
+    bundle = _sym_bundle(universe=universe, passing=universe[:p], failing=universe[p:k])
+    summary = build_candidate_gate_summary(bundle, _house_rule())
+    assert summary.c1_fraction_passing == pytest.approx(p / n_declared)
+    assert summary.c1_fraction_passing <= k / n_declared + 1e-12
+
+    wider = _sym_bundle(
+        universe=[*universe, "SYM_EXTRA"], passing=universe[:p], failing=universe[p:k]
+    )
+    wider_summary = build_candidate_gate_summary(wider, _house_rule())
+    assert wider_summary.c1_fraction_passing <= summary.c1_fraction_passing

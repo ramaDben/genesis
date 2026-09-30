@@ -26,6 +26,7 @@ from genesis.validation import (
     write_verdict_artifacts,
 )
 from genesis.validation.dsr_pbo import CscvResult, DsrPboResult
+from genesis.validation.errors import VerdictConfigError
 from genesis.validation.montecarlo import McPathsResult, McPortfolioResult, McSymbolResult
 from genesis.validation.prop_sim import PropSimConfig, _build_daily_basket
 from genesis.validation.sensitivity import CostStressOutcome, PerturbationOutcome, SensitivityResult
@@ -144,6 +145,7 @@ def _build_candidate_bundle(
             block_bootstrap=_synthetic_mc_paths_result(),
         ),
         prop_sim_result=prop_sim_result,
+        declared_universe=frozenset(oos_ledgers_by_symbol),
     )
 
 
@@ -243,3 +245,145 @@ def test_starting_balance_debe_coincidir_con_account_size(
 
     resolved = run_pipeline._resolve_starting_balance(account_size, firm_profile_fixture)
     assert resolved == account_size
+
+
+# --- Change #130 (B.6): universo declarado en el runner ---
+
+
+def _genome_b1_path():
+    from pathlib import Path
+
+    return Path(__file__).resolve().parents[2] / "candidates" / "specs" / "candidate_b1_orb.yaml"
+
+
+def test_run_pipeline_con_genoma_sin_declared_universe_falla() -> None:
+    """N22 (AC9, R3): un genoma sin la sección `declared_universe` no corre."""
+    run_pipeline = _load_run_pipeline_module()
+    genome_path = _genome_b1_path()
+    with pytest.raises(SystemExit) as excinfo:
+        run_pipeline._resolve_declared_universe(
+            genome_path=genome_path,
+            genome_declared=None,
+            cli_value=None,
+            candidate_id="B1",
+            symbol="SYM_A",
+        )
+    message = str(excinfo.value)
+    assert str(genome_path) in message
+    assert "declared_universe" in message
+
+
+def test_run_pipeline_legado_sin_declared_universe_falla() -> None:
+    """N23 (AC10, R3): sin genoma y sin flag, el universo es obligatorio."""
+    run_pipeline = _load_run_pipeline_module()
+    with pytest.raises(SystemExit) as excinfo:
+        run_pipeline._resolve_declared_universe(
+            genome_path=None,
+            genome_declared=None,
+            cli_value=None,
+            candidate_id="B",
+            symbol="SYM_A",
+        )
+    assert "--declared-universe" in str(excinfo.value)
+
+
+def test_run_pipeline_genoma_y_flag_a_la_vez_falla() -> None:
+    """N24 (D6): con genoma, el flag no puede pisar el universo versionado."""
+    run_pipeline = _load_run_pipeline_module()
+    with pytest.raises(SystemExit) as excinfo:
+        run_pipeline._resolve_declared_universe(
+            genome_path=_genome_b1_path(),
+            genome_declared=("SYM_A", "SYM_B"),
+            cli_value="SYM_A,SYM_B",
+            candidate_id="B1",
+            symbol="SYM_A",
+        )
+    assert "--declared-universe" in str(excinfo.value)
+
+
+def test_parse_declared_universe_csv() -> None:
+    """N25 (D6): CSV con `strip`; rechaza vacíos y duplicados."""
+    run_pipeline = _load_run_pipeline_module()
+    assert run_pipeline._parse_declared_universe(" SYM_A, SYM_B ") == frozenset({"SYM_A", "SYM_B"})
+    for invalid in ("SYM_A,,SYM_B", "SYM_A,SYM_A", ""):
+        with pytest.raises(SystemExit) as excinfo:
+            run_pipeline._parse_declared_universe(invalid)
+        assert "--declared-universe" in str(excinfo.value)
+
+
+def test_run_pipeline_universo_de_1_levanta_verdict_config_error() -> None:
+    """N26 (R5): `|U|=1` aborta antes de tocar datos, con el mismo error del veredicto."""
+    run_pipeline = _load_run_pipeline_module()
+    with pytest.raises(VerdictConfigError, match="SYM_A"):
+        run_pipeline._resolve_declared_universe(
+            genome_path=None,
+            genome_declared=None,
+            cli_value="SYM_A",
+            candidate_id="B",
+            symbol="SYM_A",
+        )
+
+
+def test_run_pipeline_simbolo_fuera_del_universo_falla() -> None:
+    """N27 (R6): `--symbol` ajeno al universo declarado."""
+    run_pipeline = _load_run_pipeline_module()
+    with pytest.raises(VerdictConfigError, match="SYM_C"):
+        run_pipeline._resolve_declared_universe(
+            genome_path=None,
+            genome_declared=None,
+            cli_value="SYM_A,SYM_B",
+            candidate_id="B",
+            symbol="SYM_C",
+        )
+
+
+def test_run_pipeline_resuelve_universo_valido_desde_flag_y_desde_genoma() -> None:
+    """Camino feliz: el flag (legado) y la sección del genoma producen el mismo `frozenset`."""
+    run_pipeline = _load_run_pipeline_module()
+    esperado = frozenset({"SYM_A", "SYM_B"})
+    desde_flag = run_pipeline._resolve_declared_universe(
+        genome_path=None,
+        genome_declared=None,
+        cli_value="SYM_A,SYM_B",
+        candidate_id="B",
+        symbol="SYM_A",
+    )
+    desde_genoma = run_pipeline._resolve_declared_universe(
+        genome_path=_genome_b1_path(),
+        genome_declared=("SYM_A", "SYM_B"),
+        cli_value=None,
+        candidate_id="B1",
+        symbol="SYM_B",
+    )
+    assert desde_flag == desde_genoma == esperado
+
+
+def test_main_falla_antes_de_leer_datos(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """N28 (D5, R9): sin universo, `main` aborta antes de `load_firm_profile`/`_load_frame`."""
+    import inspect
+
+    run_pipeline = _load_run_pipeline_module()
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run_pipeline.py",
+            "--store",
+            str(tmp_path / "no_existe_store"),
+            "--firm-profile",
+            str(tmp_path / "no_existe_ficha.json"),
+            "--symbol",
+            "SYM_A",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-02-01",
+            "--out-dir",
+            str(tmp_path / "out"),
+        ],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        run_pipeline.main()
+    assert "--declared-universe" in str(excinfo.value)
+
+    parametros = inspect.signature(run_pipeline._candidate_config).parameters
+    assert not any("universe" in nombre for nombre in parametros)
