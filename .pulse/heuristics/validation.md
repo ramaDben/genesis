@@ -46,3 +46,11 @@
 **Contexto:** Cierre del Change #109 (dominio validation); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-09-14T20:12:06.538453+00:00; tests_passed_at=2026-09-20T15:54:11.183559+00:00; artefactos: /work/.pulse/changes/109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa/idea.md, /work/.pulse/changes/109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa/proposal.md, /work/.pulse/changes/109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa/design.md, /work/.pulse/changes/109-el-modelo-de-la-firma-no-es-mffu-separar-restriccion-de-la-casa/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de validation.
+### Heurística: cierre Change #130 validation [#130 · validation · 2026-09-30]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 130-b-6-c1-no-tiene-guarda-mec-nica-el-denominador-es-lo-que-traiga
+**Contexto:** Cierre del Change #130 (dominio validation); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-09-30T13:21:15.143334+00:00; tests_passed_at=2026-09-30T13:44:57.026489+00:00; artefactos: /work/.pulse/changes/130-b-6-c1-no-tiene-guarda-mec-nica-el-denominador-es-lo-que-traiga/idea.md, /work/.pulse/changes/130-b-6-c1-no-tiene-guarda-mec-nica-el-denominador-es-lo-que-traiga/proposal.md, /work/.pulse/changes/130-b-6-c1-no-tiene-guarda-mec-nica-el-denominador-es-lo-que-traiga/design.md, /work/.pulse/changes/130-b-6-c1-no-tiene-guarda-mec-nica-el-denominador-es-lo-que-traiga/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de validation.
