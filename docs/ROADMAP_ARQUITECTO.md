@@ -1364,7 +1364,14 @@ juntas (§9.4), que es exactamente el caso donde el torneo cambia el resultado.
 Capa 4, **ciclo SDD completo** con gate humano. Comparte archivo con B.6; se pueden fundir en un
 solo change si el diseño lo admite, pero B.6 no espera a B.8.
 
-### ☐ B.7 — Ancla del rango de apertura por clase **[rev 2026-09-22 — casilla nueva]**
+### ☑ B.7 — Ancla del rango de apertura por clase **[rev 2026-09-22 — casilla nueva]** **[HECHA 2026-10-02]**
+
+> **Resultado: ninguna segunda ancla.** MGC, MCL, M6E y MBT **no tienen** apertura de contado según
+> la ficha oficial de CME. El oro y el petróleo solo tienen ventana de liquidación (un cierre), el
+> euro cotiza en continuo y MBT ahora opera **24/7**. Detalle y citas en la §2.3 del spec. Con la
+> lista de §7.1e, el universo declarable de B es **solo MNQ**, así que **se reactiva la compra de
+> MES + MYM (+$31,98)**. Queda pendiente de aprobación humana y va antes de declarar el universo
+> de B.
 
 La decisión de universo de §7.1e (comprar un líder por clase) la destapó: **de los cinco
 instrumentos que se compran, sólo MNQ tiene ancla de rango de apertura verificada.** Y `|U| = 1`
@@ -1533,6 +1540,12 @@ B.7  Ancla del rango de apertura por clase  ← NUEVO. No espera la compra:
                                  mercado. En paralelo a B.6 y B.4a.
                                  Generaliza PA-106-A. Su resultado es lo
                                  único que define qué puede declarar B.
+                                 HECHA 2026-10-02: ninguna ancla nueva.
+                                 MGC/MCL/M6E/MBT no tienen apertura.
+
+     ↓ DECISIÓN HUMANA PENDIENTE: comprar MES + MYM (+$31,98)
+     B.7 no devolvió segunda ancla, así que la compra diferida se
+     reactiva. Sin ella B no tiene universo declarable.
 
      ↓ declaración del universo de B, ANTES de mirar un dato
      Se declara con lo que B.7 devuelva. Si ninguna ancla adicional
