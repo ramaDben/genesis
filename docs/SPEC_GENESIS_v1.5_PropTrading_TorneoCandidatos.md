@@ -567,10 +567,19 @@ tampoco la ventana de liquidación. La liquidación es el final del día de refe
 usarla sería **inventar otra estrategia** con el nombre de B. Por eso los cuatro quedan como «no
 tiene», que es un resultado válido (DoD de B.7).
 
+**Contracaso evaluado y rechazado: el horario del viejo piso de operaciones.** Algunas plataformas
+siguen marcando como «horario regular» la hora en que abría el piso presencial de COMEX y NYMEX:
+8:20 ET el oro y 9:00 ET el petróleo. **No sirve de ancla.** Es la etiqueta de un piso que ya cerró y
+no la apertura de un mercado de contado. El oro y el petróleo físicos no tienen una subasta de apertura
+a esa hora. Usarla cambiaría el mecanismo de B, que es un ORB sobre la apertura de contado
+(Zarattini & Aziz), por otra estrategia. Lo planteó como contracaso la validación independiente del
+2026-10-02, y queda registrado para que no vuelva a proponerse como si fuera nuevo.
+
 > **Consecuencia:** con la lista comprada en §7.1e, el universo declarable del Candidato B es
-> **solo MNQ**, y `|U| = 1` está prohibido (#130). Para que B tenga universo hace falta un **segundo
-> índice**. Eso reactiva la compra diferida de **MES + MYM** (+$31,98, roadmap §7.1e), que es
-> **decisión humana** porque cuesta dinero. Los cuatro instrumentos sin ancla siguen en el disco y
+> **solo MNQ**, y `|U| = 1` está prohibido (#130). **Decidido el 2026-10-02 (humano): no se compran
+> MES ni MYM.** El camino es habilitar un veredicto propio para `|U| = 1` con controles que
+> reemplacen a C1 (roadmap B.9, #131). Hasta que ese cambio de spec pase por el ciclo SDD, la regla
+> de *Tamaño mínimo del universo* (§2.x) **sigue vigente tal cual**. Los cuatro instrumentos sin ancla siguen en el disco y
 > quedan disponibles para el Candidato C y para la búsqueda futura.
 >
 > **Hallazgo lateral:** MBT ahora cotiza **24/7**, con fin de semana incluido. Cualquier tabla de

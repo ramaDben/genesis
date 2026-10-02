@@ -1053,6 +1053,11 @@ de que B emita veredicto es comprar MES y MYM (+$31,98) y volver a un universo d
 **se difiere hasta que las anclas respondan**, porque hoy no se sabe si hace falta. Lo que se ganó es
 convertir una decisión de gasto en una pregunta verificable que cuesta cero.
 
+> **Cierre (2026-10-02).** Las anclas respondieron que no hay ninguna más (B.7) y el dueño
+> **rechazó (a)**. B queda con universo `{MNQ}`, y su veredicto depende de **B.9** (`|U| = 1`,
+> #131). Además, (a) habría dado una validación cruzada pobre: MES y MNQ tienen una correlación de
+> 0,947, así que C1 habría medido casi lo mismo cuatro veces.
+
 **El orden se mantiene intacto:** las anclas se resuelven **antes** de declarar el universo de B, y el
 universo se declara **antes** de mirar un solo dato. Declararlo después sería elegir el denominador de
 C1 mirando resultados, que es el mecanismo exacto que C.4 existe para impedir.
@@ -1369,9 +1374,13 @@ solo change si el diseño lo admite, pero B.6 no espera a B.8.
 > **Resultado: ninguna segunda ancla.** MGC, MCL, M6E y MBT **no tienen** apertura de contado según
 > la ficha oficial de CME. El oro y el petróleo solo tienen ventana de liquidación (un cierre), el
 > euro cotiza en continuo y MBT ahora opera **24/7**. Detalle y citas en la §2.3 del spec. Con la
-> lista de §7.1e, el universo declarable de B es **solo MNQ**, así que **se reactiva la compra de
-> MES + MYM (+$31,98)**. Queda pendiente de aprobación humana y va antes de declarar el universo
-> de B.
+> lista de §7.1e, el universo declarable de B es **solo MNQ**.
+>
+> **DECIDIDO el 2026-10-02 (humano): no se compran MES ni MYM.** La opción (a) de §7.1e queda
+> **rechazada**, y ya no está en reserva. El dueño la descarta por dos razones: las compras de datos tienen que
+> ser cuidadosas, y el proyecto **va a necesitar igual** estrategias de un solo mercado,
+> sobre todo cuando explore variantes de análisis intermercado. El camino pasa a ser la casilla
+> **B.9**: habilitar el veredicto con `|U| = 1` bajo controles que reemplacen a C1 (#131).
 
 La decisión de universo de §7.1e (comprar un líder por clase) la destapó: **de los cinco
 instrumentos que se compran, sólo MNQ tiene ancla de rango de apertura verificada.** Y `|U| = 1`
@@ -1404,9 +1413,58 @@ que cuenta es declarar, no averiguar. Va en paralelo a B.6 y B.4a.
 > **Es la casilla más barata del carril y la que más decide.** Si devuelve una segunda ancla, B tiene
 > universo y no hay que gastar un peso más. Si no devuelve ninguna, se reactiva la compra de MES y MYM
 > (+$31,98, §7.1e), que quedó **diferida y no descartada**. En los dos casos la pregunta se responde
-> antes de ver un dato, que es la única forma de que la respuesta valga.
+> antes de ver un dato, que es la única forma de que la respuesta valga. *(Superado el 2026-10-02: no
+> hubo segunda ancla, la compra se rechazó y el camino es B.9.)*
 
 Vía rápida (investigación y `docs/`) hasta que toque `sessions.py`; esa parte, ciclo SDD.
+
+### ☐ B.9 — Veredicto sobre un solo mercado (`|U| = 1`) **[rev 2026-10-02 — casilla nueva, #131]**
+
+**Origen.** B.7 dejó a B con un solo instrumento declarable (MNQ) y el dueño rechazó comprar MES y
+MYM (2026-10-02). Además, el análisis intermercado, que es una línea futura declarada por el dueño, produce por
+naturaleza estrategias que **operan un solo mercado** y usan a los demás como señal. Los cuatro
+líderes sin ancla (MGC, MCL, M6E, MBT) encajan justo en ese papel. La regla vigente (§2.x, *Tamaño
+mínimo del universo*) les cierra la puerta a todas.
+
+**Lo que no se puede hacer: leer `1/1 = 100 %` como C1 superado.** Eso sería relajar un gate, y el
+SSoT lo prohíbe. C1 contesta «¿el edge generaliza entre instrumentos?». Con un solo instrumento esa
+pregunta **no tiene respuesta**, y por eso tampoco se puede contestar que sí. La salida es otra:
+cuando `|U| = 1`, C1 se declara **«no aplica»** y otro control ocupa su lugar.
+
+**Por qué esto no es una rebaja.** C1 cubre dos riesgos distintos con `|U| = 1`:
+
+| Riesgo | Qué lo cubre con `|U| = 1` |
+|---|---|
+| **Elegir el mercado donde anduvo** (selección) | El universo se **pre-registra antes del primer dato** (C.4), con fecha en el repo público. Sin resultados a la vista no hay qué elegir. |
+| **Que el edge sea ruido de ese mercado** (falta de generalización) | **Holdout obligatorio y no negociable** (C.1a/C.1b), además de G1–G9, P y T sin cambios. |
+
+**Propuesta del orquestador (se aprueba en design, no está decidida):**
+
+1. **Veredicto con nombre propio: `GO-MONO`.** Nunca se emite GO, GO-PARCIAL ni GO-ACOTADO con
+   `|U| = 1`. El manifiesto registra `universe_size = 1` y C1 = `NOT_APPLICABLE`, y no lleva un 100 %.
+   Así nadie puede leerlo como que el edge generaliza.
+2. **Pre-registro previo al dato.** La declaración `|U| = 1` tiene que estar commiteada antes de que
+   el dato del instrumento exista en el disco. Cómo se comprueba mecánicamente (fecha del commit
+   contra la fecha de descarga del dataset, o contra el registro de C.4) se resuelve en design.
+3. **Holdout obligatorio.** Sin holdout evaluado no hay `GO-MONO`.
+4. **La razón de `|U| = 1` va en el Gate 0 y no puede venir de un resultado.** Valen razones
+   estructurales («es el único comprado con apertura de contado») o de mecanismo («el reporte de
+   inventarios solo mueve al crudo»). «Es el que anduvo» no vale.
+5. **No se endurece el DSR con un número nuevo.** No hay fuente de la que derivarlo, e inventar un
+   umbral es justo lo que el spec prohíbe. El holdout es el control que reemplaza a C1.
+
+**Cuándo.** Antes de **B.1b**. El argumento del pre-registro **solo vale mientras no haya datos de
+futuros en el disco**, y esa ventana se cierra con la descarga. El ciclo SDD lo implementa después
+de B.4a, porque la guarda G2 no deja abrir dos changes a la vez. Primero se cambia el spec
+(§2.x y §7.2) y después la guarda `|U| < 2` de `build_candidate_gate_summary` (#130).
+
+**Aplicado a B.** Con B.9 aprobada, B se declara sobre `{MNQ}`. La razón estructural es que es el
+único instrumento comprado con apertura de contado (B.7). Su mejor veredicto posible es `GO-MONO`.
+
+**DoD.** (1) El spec reemplaza «ningún veredicto con `|U| = 1`» por la regla `GO-MONO` y sus
+condiciones. (2) La guarda de capa 4 distingue `|U| = 0` (sigue siendo error), `|U| = 1` (rama
+`GO-MONO`) y `|U| ≥ 2` (sin cambios). (3) Tests: `|U| = 1` sin holdout no puede emitir veredicto
+favorable, y `|U| = 1` nunca produce GO. (4) Se cierra #131.
 
 ---
 
@@ -1543,14 +1601,21 @@ B.7  Ancla del rango de apertura por clase  ← NUEVO. No espera la compra:
                                  HECHA 2026-10-02: ninguna ancla nueva.
                                  MGC/MCL/M6E/MBT no tienen apertura.
 
-     ↓ DECISIÓN HUMANA PENDIENTE: comprar MES + MYM (+$31,98)
-     B.7 no devolvió segunda ancla, así que la compra diferida se
-     reactiva. Sin ella B no tiene universo declarable.
+     ↓ DECIDIDO el 2026-10-02 (humano): NO se compran MES ni MYM.
+     El veredicto sobre un solo mercado se habilita con controles.
+
+B.9  Veredicto con |U| = 1 (GO-MONO)  ← NUEVO, #131. Spec + capa 4,
+                                 ciclo SDD después de B.4a (G2: un
+                                 change a la vez). C1 «no aplica»,
+                                 holdout obligatorio, pre-registro
+                                 previo al dato. ANTES de B.1b: el
+                                 pre-registro solo vale sin datos en
+                                 el disco.
 
      ↓ declaración del universo de B, ANTES de mirar un dato
-     Se declara con lo que B.7 devuelva. Si ninguna ancla adicional
-     cierra, se reactiva la compra de MES + MYM (+$31,98) — diferida,
-     no descartada.
+     B se declara sobre {MNQ}, con la razón estructural de B.7
+     (único comprado con apertura de contado). Mejor veredicto
+     posible: GO-MONO.
 
 B.1b Descargar la lista de §7.1e  ← acción humana (aprobación)
 B.2  Fichas de contrato CME       ← el `definition` de B.1b es su insumo
