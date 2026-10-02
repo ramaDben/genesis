@@ -522,7 +522,10 @@ Antes de construir la capa de riesgo y gatillos del Candidato A, se ejecuta un e
 | MES | Apertura de contado del S&P 500 — **14:30 UTC** | 21:00 UTC | DST US (NY): en EDT las horas UTC se desplazan −1 h (13:30–20:00 UTC) |
 | MNQ | Apertura de contado del Nasdaq 100 — **14:30 UTC** | 21:00 UTC | Ídem MES |
 | MYM | Apertura de contado del Dow 30 — **14:30 UTC** | 21:00 UTC | Ídem MES |
-| MGC | **PENDIENTE — no verificado** | **PENDIENTE — no verificado** | Ver la nota obligatoria de abajo |
+| MGC | **No tiene** — resultado verificado (B.7, 2026-10-02) | — | Ver la nota obligatoria de abajo |
+| MCL | **No tiene** — resultado verificado (B.7, 2026-10-02) | — | Ídem |
+| M6E | **No tiene** — resultado verificado (B.7, 2026-10-02) | — | Ídem |
+| MBT | **No tiene** — resultado verificado (B.7, 2026-10-02) | — | Ídem; además cotiza **24/7** |
 
 Los horarios exactos, incluyendo el desplazamiento DST, se materializan en `sessions.py` usando
 `zoneinfo`. La tabla anterior es la referencia normativa en horario estándar (UTC sin DST).
@@ -546,6 +549,33 @@ Los horarios exactos, incluyendo el desplazamiento DST, se materializan en `sess
 > como **no superado**, no como ausente: con el universo de §2.x, C1 ≥ 60% sigue exigiendo **3 de 4**
 > aunque MGC no sea evaluable, lo que obliga al Candidato B a pasar en **los tres micro-índices**.
 > Ver §2.x, *Universo del torneo y universo efectivo*.
+
+**Resolución de B.7 (2026-10-02) — ninguna clase fuera de los índices tiene apertura de contado.**
+Leído en la ficha oficial de cada contrato en cmegroup.com y en los procedimientos de liquidación
+diaria de CME (Client Systems Wiki, enlazado desde la ficha). El horario se transcribe tal como CME lo
+publica:
+
+| Instrumento | Lo que publica CME | Por qué no es un ancla |
+|---|---|---|
+| MGC | Globex: «Sunday - Friday 6:00 p.m. - 5:00 p.m. (5:00 p.m. - 4:00 p.m. CT) with a 60-minute break each day beginning at 5:00 p.m. (4:00 p.m. CT)». Liquidación diaria del oro (GC): ventana **13:29:00–13:30:00 ET** | La única hora oficial del día es la de **liquidación**, que es un cierre, no una apertura. La ficha no menciona ningún mercado de contado que abra |
+| MCL | Globex: «Sunday 5:00 p.m. - Friday - 4:00 p.m. CT with a 60-minute break each day beginning at 4:00 p.m. CT». Liquidación del CL: **14:28:00–14:30:00 ET** | Ídem: hora de cierre, no de apertura |
+| M6E | Globex: «Sunday - Friday 5:00 p.m. - 4:00 p.m. CT with a 60-minute break each day beginning at 4:00 p.m. CT» | El euro se negocia en un mercado interbancario continuo. La ficha no fija ninguna apertura |
+| MBT | Globex: «24/7 with the exception of the following maintenance windows: Saturday 2:00 a.m. to 4:00 a.m. CT & Monday-Friday 4:00 p.m. to 4:02 p.m. CT» | No cierra nunca, ni siquiera el fin de semana |
+
+Según la regla de la nota, la reapertura de Globex tras la pausa diaria **no** sirve de sustituto, y
+tampoco la ventana de liquidación. La liquidación es el final del día de referencia, no el principio:
+usarla sería **inventar otra estrategia** con el nombre de B. Por eso los cuatro quedan como «no
+tiene», que es un resultado válido (DoD de B.7).
+
+> **Consecuencia:** con la lista comprada en §7.1e, el universo declarable del Candidato B es
+> **solo MNQ**, y `|U| = 1` está prohibido (#130). Para que B tenga universo hace falta un **segundo
+> índice**. Eso reactiva la compra diferida de **MES + MYM** (+$31,98, roadmap §7.1e), que es
+> **decisión humana** porque cuesta dinero. Los cuatro instrumentos sin ancla siguen en el disco y
+> quedan disponibles para el Candidato C y para la búsqueda futura.
+>
+> **Hallazgo lateral:** MBT ahora cotiza **24/7**, con fin de semana incluido. Cualquier tabla de
+> sesiones que lo modele con cierre de fin de semana está desactualizada. Lo tiene que tomar B.2
+> (fichas de contrato).
 
 **Propiedades estructurales**: riesgo definido desde la entrada (compatible con el presupuesto de la
 firma), no usa volumen para la señal (inmune a la fragilidad del `tick_volume` — ver §4.1, donde esa
@@ -1486,7 +1516,7 @@ Ninguno se rellena con supuestos. Cada uno declara **qué falta** y **qué bloqu
 
 | Pendiente | Qué falta | Por qué bloquea |
 |---|---|---|
-| **PA-106-A — Ancla del rango de apertura de MGC** | Página de producto oficial de CME (fuente primaria) | Sin ella el Candidato B **no corre sobre MGC** (§2.3). No contrae el denominador de C1 |
+| ~~**PA-106-A — Ancla del rango de apertura de MGC**~~ **CERRADA (B.7, 2026-10-02): MGC no tiene ancla**, y tampoco MCL, M6E ni MBT | Página de producto oficial de CME (fuente primaria) — resuelta, ver §2.3 | El Candidato B **no corre sobre MGC** (§2.3), ahora de forma definitiva. No contrae el denominador de C1 |
 | **PA-106-B — Política de VPS de MFFU** | Búsqueda de "VPS" / "virtual private server" en su help center: **cero resultados**. Ausencia de regla **no es permiso** | Decide la arquitectura de operación post-GO |
 | **PA-106-C — Comisiones por contrato** | No publicadas; dependen de la plataforma (Tradovate / Rithmic / NinjaTrader) | Insumo obligatorio de `costs.py`, que bloquea **G3** (PF con costos completos), **G9** (PF con stress ×1.5) **y todos los gates P**. No es solo economía: sin comisiones verificadas los gates de robustez tampoco corren |
 | **PA-106-D — Árbitro de exposición (#96)** | No existe | Bloquea **operar** la canasta contra el `contract_budget` compartido y emitir gates P sobre ella. **No** bloquea C3, que se computa por superposición (§7.2) |
