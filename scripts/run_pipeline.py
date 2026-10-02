@@ -20,6 +20,9 @@ Limitaciones honestas de este runner, no del pipeline:
   Inspector queda inactivo, así que los resultados no descuentan ventanas de evento.
 - Un solo símbolo por corrida. El torneo multi-símbolo/multi-candidato compone varios
   `CandidateValidationBundle`; esto ejecuta uno.
+- El universo declarado es obligatorio (Change #130, B.6): sección `declared_universe:` del
+  genoma o `--declared-universe` sin genoma, con al menos 2 símbolos. C1 se mide sobre ese
+  universo, así que con un solo símbolo evaluado C1 no puede pasar (<= 1/|U| <= 50%).
 - `--server-offset-hours` desplaza el timestamp crudo **antes** de que `iter_bars` lo
   interprete con el `server_tz` de la ficha de firma. Solo tiene sentido junto a un
   `server_tz` que comparta las fechas de transición DST del reloj real del broker;
@@ -70,7 +73,7 @@ from genesis.validation.trial_ledger import (
     TrialIdentityContext,
     TrialLedger,
 )
-from genesis.validation.verdict import record_trial_completions
+from genesis.validation.verdict import record_trial_completions, validate_declared_universe
 from genesis.validation.wfa import run_wfa
 from genesis.validation.window_config import GridConfig, WfaWindowConfig
 
@@ -194,6 +197,60 @@ def _resolve_starting_balance(cli_value: float, firm_profile: FirmProfile) -> fl
     return cli_value
 
 
+def _parse_declared_universe(raw: str) -> frozenset[str]:
+    """`--declared-universe SYM_A,SYM_B` -> `frozenset`; rechaza vacíos y duplicados (D6)."""
+    items = [item.strip() for item in raw.split(",")]
+    if any(not item for item in items):
+        message = f"--declared-universe={raw!r} tiene elementos vacíos (formato: SYM_A,SYM_B)."
+        raise SystemExit(message)
+    duplicates = sorted({item for item in items if items.count(item) > 1})
+    if duplicates:
+        message = f"--declared-universe={raw!r} tiene símbolos duplicados: {duplicates!r}."
+        raise SystemExit(message)
+    return frozenset(items)
+
+
+def _resolve_declared_universe(
+    *,
+    genome_path: Path | None,
+    genome_declared: tuple[str, ...] | None,
+    cli_value: str | None,
+    candidate_id: str,
+    symbol: str,
+) -> frozenset[str]:
+    """Universo declarado de la corrida, validado ANTES de leer datos de mercado (D5).
+
+    Con genoma, el universo vive en su sección `declared_universe:` y el flag no puede
+    pisarlo; sin genoma, `--declared-universe` es obligatorio. La regla `|U| >= 2` y la
+    pertenencia de `--symbol` las aplica `validate_declared_universe` (misma que el veredicto):
+    un universo inválido no debe quemar un ensayo que el ledger no llegue a registrar.
+    """
+    if genome_path is not None:
+        if cli_value is not None:
+            message = (
+                "--declared-universe no se admite junto a --genome: el universo de un genoma "
+                f"vive en su sección `declared_universe:` versionada ({genome_path})."
+            )
+            raise SystemExit(message)
+        if genome_declared is None:
+            message = (
+                f"El genoma {genome_path} no declara la sección `declared_universe:` "
+                "(obligatoria desde el Change #130): C1 se mide contra el universo declarado."
+            )
+            raise SystemExit(message)
+        universe = frozenset(genome_declared)
+    else:
+        if cli_value is None:
+            message = (
+                "Falta --declared-universe SYM_A,SYM_B (obligatorio sin --genome, Change #130): "
+                "C1 se mide contra el universo declarado, no contra lo que se evalúe."
+            )
+            raise SystemExit(message)
+        universe = _parse_declared_universe(cli_value)
+    validate_declared_universe(candidate_id, universe, evaluated_symbols=(symbol,))
+    return universe
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -210,6 +267,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--genome",
         type=Path,
         help="Ruta al archivo YAML de genoma declarativo (ej. specs/b1.yaml).",
+    )
+    parser.add_argument(
+        "--declared-universe",
+        help="Universo declarado, símbolos separados por coma (SYM_A,SYM_B); al menos 2 y debe "
+        "incluir --symbol. Obligatorio sin --genome; con --genome no se admite (el universo "
+        "vive en la sección `declared_universe:` del genoma).",
     )
     parser.add_argument("--starting-balance", type=float, default=100_000.0)
     parser.add_argument("--seed", type=int, default=7)
@@ -249,6 +312,25 @@ def main() -> None:
     start, end = _parse_utc_date(args.start), _parse_utc_date(args.end)
     total_start = time.perf_counter()
 
+    # D5: candidato y universo se resuelven antes de leer un solo dato de mercado.
+    candidate_id = args.candidate
+    candidate_factory = None
+    genome_config = None
+    genome_declared: tuple[str, ...] | None = None
+    if args.genome is not None:
+        genome_factory = compile_genome(args.genome)
+        candidate_factory = genome_factory
+        candidate_id = genome_factory.candidate_id
+        genome_config = genome_factory.raw_config
+        genome_declared = genome_factory.genome.declared_universe
+    declared_universe = _resolve_declared_universe(
+        genome_path=args.genome,
+        genome_declared=genome_declared,
+        cli_value=args.declared_universe,
+        candidate_id=candidate_id,
+        symbol=args.symbol,
+    )
+
     firm_profile = load_firm_profile(args.firm_profile)
     starting_balance = _resolve_starting_balance(args.starting_balance, firm_profile)
     costs_config = load_costs_config()
@@ -265,20 +347,17 @@ def main() -> None:
     )
     prop_sim_config = PropSimConfig(n_paths=args.n_paths, seed=42)
 
-    candidate_id = args.candidate
-    candidate_factory = None
-    genome_config = None
-    if args.genome is not None:
-        genome_factory = compile_genome(args.genome)
-        candidate_factory = genome_factory
-        candidate_id = genome_factory.candidate_id
-        genome_config = genome_factory.raw_config
-
     print(f"=== Pipeline {candidate_id}/{args.symbol} ({resolved_symbol}) ===")
     print(
         f"Rango: {start:%Y-%m-%d} .. {end:%Y-%m-%d} | ficha: {figure.symbol} "
         f"volume_step={figure.volume_step}"
     )
+    print(f"Universo declarado (|U|={len(declared_universe)}): {sorted(declared_universe)}")
+    if len(declared_universe) > 1:
+        print(
+            f"AVISO: C1 se mide sobre |U|={len(declared_universe)}; con un símbolo evaluado "
+            f"C1 <= 1/{len(declared_universe)}."
+        )
     print("Sin calendario económico: el filtro de noticias queda inactivo.")
     if window_config != normative:
         print(
@@ -432,6 +511,7 @@ def main() -> None:
             mc_symbol_results_by_symbol={args.symbol: mc_symbol_result},
             mc_portfolio_result=mc_portfolio_result,
             prop_sim_result=prop_sim_result,
+            declared_universe=declared_universe,
             candidate_config=_candidate_config(
                 candidate_id=candidate_id,
                 symbol=args.symbol,

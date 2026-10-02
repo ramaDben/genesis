@@ -3337,3 +3337,430 @@ proposal cita "§2.3" del SSoT para el criterio de admisión al universo intrín
 criterio vive bajo "§2.x. Universos por candidato" → "Criterio de admisión al universo (normativo)"
 (`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md:566-578`), no dentro de la subsección 2.3
 del Candidato B. El contenido citado es correcto; solo el número de sección es aproximado.
+
+<!-- change:130-b-6-c1-no-tiene-guarda-mec-nica-el-denominador-es-lo-que-traiga -->
+# Specification: C1 no tiene guarda mecánica — el denominador es lo que traiga el bundle
+
+Change #130 (Issue #130). Dominio `validation` (toca además `strategy/genome` y `scripts/`).
+Fase `specify`. Formaliza `proposal.md` (fase `propose`, cerrado) y las "Precisiones del hilo
+principal" de `idea.md` (2026-09-24); no reabre ninguna de sus decisiones.
+Contra: `b49676f` (HEAD de `main` al iniciar esta fase).
+
+## 0. Objetivo
+
+Hacer que el gate C1 del veredicto de torneo (`validation/verdict.py`) mida contra el **universo
+declarado** del candidato, no contra los símbolos que el llamador decidió meter en el bundle esa
+corrida. Hoy `n_symbols = len(symbol_gate_outcomes)` (`verdict.py:388`), así que el denominador
+**es exactamente lo que se le pase**: un bundle de un solo símbolo da `1/1 = 100% ≥ 60%`, y si los
+demás gates pasan el veredicto sale GO sin que la estrategia haya pasado ninguna validación cruzada
+real. Es el único hallazgo de la revisión del 2026-09-22 que produce un **falso positivo** (deja
+pasar algo no validado) en vez de un falso negativo — el roadmap lo puso primero en la casilla B.6
+(`docs/ROADMAP_ARQUITECTO.md:1292-1320`) por esa asimetría. B.6 construye el mecanismo que hace
+cumplir dos reglas normativas ya escritas en el SSoT
+(`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md:580-620,973-985`) y que el código no
+implementa hoy: el denominador de C1 nunca se contrae, y ningún universo declarado de tamaño 1
+puede emitir veredicto.
+
+## 1. Alcance IN / OUT
+
+### IN
+
+1. Campo nuevo `declared_universe` en `CandidateValidationBundle` (`verdict.py:85-124`), **sin
+   valor por defecto** — todo llamador debe proveerlo explícitamente.
+2. Sección nueva, hermana de `universe:`, en el YAML del genoma
+   (`strategy/genome/schema.py`, `candidates/specs/*.yaml`): `declared_universe: [SYM, ...]`. No
+   se agrega a `GenomeUniverse` (que sigue siendo la unidad de ejecución: un símbolo, una
+   corrida).
+3. `scripts/run_pipeline.py` resuelve `declared_universe` según el camino de invocación: con
+   `--genome`, lo lee de la sección nueva del genoma; por el camino legado por letra
+   (`strategy/candidate_b/`, sin genoma), exige un flag CLI nuevo y explícito
+   `--declared-universe` y falla si está ausente. Nunca se infiere de los símbolos evaluados en
+   esa corrida.
+4. Recalculo del denominador de C1 en `build_candidate_gate_summary`
+   (`verdict.py:362-430`) sobre `len(declared_universe)`, no sobre
+   `len(symbol_gate_outcomes)`. Símbolos declarados sin entrada en el bundle cuentan como no
+   superados en el numerador.
+5. Guarda de tamaño mínimo: `len(declared_universe) < 2` levanta una extensión nueva de
+   `VerdictConfigError` con contexto (`candidate_id`, `declared_universe`), dentro de
+   `build_candidate_gate_summary`, antes de calcular ningún gate. No se emite NO-GO.
+6. Guarda de coherencia: un símbolo evaluado (presente en los 4 mapas por símbolo del bundle) que
+   **no** pertenece a `declared_universe` levanta `VerdictConfigError` — no se cuela en el
+   numerador de C1 por la puerta de atrás.
+7. Tercer estado por celda: campo `status: SymbolGateStatus` (`PASS | FAIL | NOT_APPLICABLE`) en
+   `SymbolGateOutcome` (`verdict.py:128-160`), paralelo a `all_pass`, que queda como propiedad
+   derivada (`status is SymbolGateStatus.PASS`). `NOT_APPLICABLE` cuenta como no superado en C1,
+   igual que "ausente del bundle".
+8. Serialización: manifest JSON y tearsheet (`_candidate_summary_payload`,
+   `render_tearsheet`, `verdict.py:1032-1086,1090-1170`) exponen `declared_universe`, los símbolos
+   evaluados, y el estado de 3 valores por símbolo, sin colapsarlo a `bool`.
+9. `CONFIG_VERSION` (`verdict.py:47`) sube de `"genesis-validation-j/2"` a
+   `"genesis-validation-j/3"`.
+10. `VerdictConfigError` (`validation/errors.py:95-103`) gana un disparador nuevo `(f)` en su
+    docstring normativo: universo declarado de tamaño `< 2`, o símbolo evaluado ausente de
+    `declared_universe`.
+11. Tests con símbolos de fixture inventados (`SYM_A`, `SYM_B`, ...), nunca el universo real de
+    ningún candidato.
+
+### OUT (YAGNI, heredado de `proposal.md` §"Alcance" sin reabrir)
+
+- **B.8** (`_select_winning_candidate`, término de torneo T1, veredicto sin ganador,
+  `docs/ROADMAP_ARQUITECTO.md:1364-1395`). Comparte archivo (`verdict.py`) pero no función
+  tocada, salvo la rama GO-PARCIAL que R12 cierra (enmienda aprobada en el gate de design,
+  2026-09-30). Reimplementar GO-PARCIAL tal como lo define el SSoT queda para B.8.
+- **El orquestador multi-símbolo.** `run_pipeline.py` sigue evaluando un símbolo por corrida; no
+  existe hoy nada que junte varias corridas en un solo bundle de veredicto, y B.6 no lo
+  construye — solo deja el bundle/gate correctos para cuando exista.
+- **Declarar el universo real de cualquier candidato.** B.6 construye el mecanismo, no decide
+  contenido. En particular, **el Candidato B real no puede declarar hoy un universo de tamaño
+  ≥ 2**: B.7 verificó que solo MNQ tiene apertura de contado con ancla confirmada en CME; con la
+  guarda de este change, cualquier corrida real de B con `declared_universe=["MNQ"]` **aborta con
+  `VerdictConfigError`**, no con NO-GO. Es el comportamiento correcto, no un defecto de B.6: la
+  guarda funcionando como se diseñó. Ningún test ni constante de este change fija `["MNQ"]` ni
+  ningún otro universo real como valor por defecto en producción.
+- **Colapsar `all_pass` a un enum de 3 valores sin campo paralelo.** El DoD solo exige poder
+  *expresar* el tercer estado; `status` como campo paralelo es menos invasivo para los ~13 usos
+  internos de `all_pass` ya inventariados en `idea.md`. Si vale la pena colapsarlo, es decisión de
+  un change posterior.
+- **Universo declarado como parámetro de CLI sin persistir, sin genoma.** Descartado en
+  `proposal.md`: permitiría declarar un universo distinto en cada corrida sin rastro versionado,
+  violando el requisito de pre-registro congelado del SSoT (`SPEC...md:611-612`). El flag
+  `--declared-universe` de este change es la única excepción deliberada, acotada al camino legado
+  sin genoma (Candidato B); no es un patrón a extender a candidatos con genoma.
+- **Modificar `candidates/specs/candidate_b1_orb.yaml` o `candidate_c1_gold_lob.yaml`** para
+  declarar un universo real. Ver R2 y la Nota de verificación (§7) sobre por qué el campo del
+  schema debe ser opcional para no requerir tocar estos dos archivos en B.6.
+
+## 2. Requisitos funcionales
+
+**R1 — `CandidateValidationBundle.declared_universe` sin default.** El campo
+`declared_universe: frozenset[str]` se agrega a `CandidateValidationBundle`
+(`verdict.py:85-124`) como parámetro **posicional u obligatorio con nombre, sin valor por
+defecto** (a diferencia de `candidate_config`, que sí queda opcional — R21 de Change #53 no
+aplica aquí porque este campo no es retrocompatible por diseño: todo llamador nuevo debe
+declararlo). `__post_init__` valida, además de la coincidencia ya existente entre los 4 mapas por
+símbolo (R58), que el conjunto de símbolos evaluados sea subconjunto de `declared_universe`; si no
+lo es, levanta `VerdictConfigError` citando el o los símbolos evaluados ausentes del universo
+declarado.
+
+**R2 — Sección nueva en el genoma, separada de `GenomeUniverse`.** `strategy/genome/schema.py`
+gana una sección `declared_universe` en el YAML, hermana de `universe:`
+(`schema.py:57-62` define hoy `GenomeUniverse` con `symbol: str` único — la unidad de ejecución,
+no se toca). El campo se parsea a `StrategyGenome.declared_universe: tuple[str, ...] | None`.
+**Es opcional en el schema** (ausente ⇒ `None`): los dos YAML existentes
+(`candidates/specs/candidate_b1_orb.yaml`, `candidates/specs/candidate_c1_gold_lob.yaml`) siguen
+cargando sin modificación, porque B.6 no declara el universo real de ningún candidato (Alcance
+OUT) y forzar el campo a obligatorio en el schema exigiría escribirles un universo real que no
+está decidido. La obligatoriedad real vive un nivel más arriba, en el runner (R3), no en el
+parser del genoma. Si la lista trae símbolos duplicados, `parse_genome` levanta
+`GenomeValidationError` citando el duplicado.
+
+**R3 — `run_pipeline.py` resuelve `declared_universe` sin inferencia.** `_candidate_config`
+(`run_pipeline.py:137-163`) no cambia — `declared_universe` no entra a `candidate_config` (R6).
+En el camino `--genome` (`run_pipeline.py:270-275`), si `StrategyGenome.declared_universe is
+None`, el runner falla con un mensaje que nombra el genoma y exige agregar la sección; si no es
+`None`, se usa tal cual. En el camino legado (`--genome` ausente, candidato por letra), el runner
+exige un flag nuevo `--declared-universe` (lista separada por comas, mismo patrón que
+`--server-tz`/otros flags de lista); si está ausente, el runner falla antes de construir el
+bundle. En ningún camino se deriva `declared_universe` de `args.symbol` ni de los símbolos
+efectivamente evaluados.
+
+**R4 — Denominador de C1 = universo declarado.** `build_candidate_gate_summary`
+(`verdict.py:362-430`) calcula `n_symbols = len(bundle.declared_universe)`, no
+`len(symbol_gate_outcomes)`. El numerador cuenta los símbolos de `declared_universe` cuyo
+`SymbolGateOutcome.status is SymbolGateStatus.PASS`; los símbolos declarados sin entrada evaluada
+en el bundle (ausentes de `symbol_gate_outcomes`) se tratan como no superados, sin necesidad de
+crear una entrada sintética para ellos.
+
+**R5 — Guarda de tamaño mínimo.** Al inicio de `build_candidate_gate_summary`, si
+`len(bundle.declared_universe) < 2`, se levanta `VerdictConfigError` con contexto
+(`candidate_id=bundle.candidate_id`, `declared_universe=sorted(bundle.declared_universe)`) antes
+de calcular cualquier `SymbolGateOutcome` o gate. La función retorna sin construir
+`CandidateGateSummary` — ningún veredicto (GO, GO-PARCIAL, GO-ACOTADO ni NO-GO) se emite para ese
+candidato.
+
+**R6 — Guarda de coherencia (símbolo evaluado fuera del universo declarado).** Si algún símbolo de
+`symbol_gate_outcomes` (equivalentemente, de los 4 mapas por símbolo del bundle) no pertenece a
+`bundle.declared_universe`, se levanta `VerdictConfigError` con contexto (`candidate_id`, el
+símbolo sobrante, `declared_universe`). Esta guarda vive en `CandidateValidationBundle.__post_init__`
+(R1), no en `build_candidate_gate_summary`: falla en el punto de construcción del insumo, antes de
+llegar al cálculo de gates.
+
+**R7 — Tercer estado en `SymbolGateOutcome`.** `SymbolGateOutcome` (`verdict.py:128-160`) gana un
+campo `status: SymbolGateStatus` con `SymbolGateStatus = StrEnum("PASS", "FAIL", "NOT_APPLICABLE")`.
+`all_pass` deja de ser un campo de dataclass y pasa a ser una `@property` derivada
+(`status is SymbolGateStatus.PASS`), preservando su tipo (`bool`) y su nombre para los ~13 usos
+internos ya inventariados en `idea.md` (construcción, clasificación GO-PARCIAL, serialización).
+`_build_symbol_gate_outcome` decide `NOT_APPLICABLE` cuando el candidato no está definido para ese
+símbolo en absoluto (p. ej. insumos ausentes o marcados explícitamente como no aplicables por el
+llamador) — el mecanismo concreto de esa señal de entrada es decisión de `design`, no de esta
+spec; lo que fija este requisito es el resultado observable: `NOT_APPLICABLE` cuenta como no
+superado en C1, exactamente igual que un símbolo ausente del bundle (R4).
+
+**R8 — Manifest y tearsheet exponen el universo de 3 valores.** `_candidate_summary_payload`
+(`verdict.py:1032-1086`) agrega `declared_universe` (lista ordenada), y cada entrada de
+`symbol_gate_outcomes` serializa `status` (string) en vez de, o además de, `all_pass`. La tabla de
+`render_tearsheet` (`verdict.py:1090-1170`) agrega la columna `status`/`declared_universe` de
+forma legible sin `quantstats`/`matplotlib` (R104, heredado). El campo `all_pass` serializado se
+mantiene por compatibilidad de lectura humana, derivado del mismo `status`.
+
+**R9 — `compute_trial_id` no cambia su hash.** `declared_universe` no entra a
+`candidate_config` en ningún punto de `_candidate_config` (`run_pipeline.py:137-163`) ni de
+`compute_trial_id` (`validation/trial_ledger.py:115-145`). Verificado en esta fase:
+`ledger/trials.jsonl` tiene 0 líneas en `main`, así que no hay ningún `trial_id` persistido que
+proteger retroactivamente, pero el requisito es estructural (no depende de que el ledger esté
+vacío): ningún camino de construcción de `candidate_config` debe leer `declared_universe`.
+
+**R10 — `CONFIG_VERSION` sube a `/3`.** `verdict.py:44-48` documenta el motivo del cambio de
+versión (manifest gana `declared_universe` y el estado de 3 valores por símbolo, sustituyendo el
+booleano binario), siguiendo el mismo patrón de changelog que dejó Change #109 al subir de `/1` a
+`/2`.
+
+**R11 — `VerdictConfigError` documenta el disparador nuevo.** El docstring de `VerdictConfigError`
+(`validation/errors.py:95-103`) gana el disparador `(f)`: universo declarado de tamaño `< 2`, o
+símbolo evaluado ausente de `declared_universe`.
+
+**R12 — Un candidato que falla C1 nunca emite GO-PARCIAL.** *(Enmienda aprobada por el dueño del
+proyecto en el gate de design, 2026-09-30, H1-A de `design.md` §9.)* Se elimina la rama que hoy
+clasifica como GO-PARCIAL a un candidato con `0 < c1_fraction_passing < 0.60` que pasa P1-P6 y T1
+(`_find_go_parcial_candidate`, `verdict.py:764-818`, y su llamada en `run_verdict`, `:964-975`).
+Si no hay GO-ENSEMBLE ni GO, el veredicto es NO-GO. Motivo: el SSoT
+(`SPEC…md:1217-1220`) dice que GO-PARCIAL "nunca es una vía para eludir C1: un candidato que falla
+C1 es NO-GO", y con el denominador corregido (R4) esa rama convertiría el GO falso de un solo
+símbolo en un GO-PARCIAL falso. `VerdictKind.GO_PARCIAL` se conserva como miembro del enum, sin
+emisor, hasta que B.8 lo reimplemente según el SSoT.
+
+**R13 — El manifest expone la versión del esquema del veredicto.** *(Aprobado con H2 de
+`design.md` §9.)* `verdict_result_to_manifest_json` agrega la clave de primer nivel
+`"verdict_schema_version": CONFIG_VERSION`, para que el `/3` de R10 sea visible a quien lea el
+manifest (hoy `CONFIG_VERSION` no lo lee ninguna función).
+
+## 3. Modelo de datos (arquitectura)
+
+```
+CandidateValidationBundle (capa 4, verdict.py)      SymbolGateOutcome (capa 4, verdict.py)
+├── candidate_id                                     ├── ... (g1_pass..g9_pass, sin cambio)
+├── declared_universe: frozenset[str]  (NUEVO,        ├── status: SymbolGateStatus  (NUEVO,
+│   sin default)                                      │   PASS | FAIL | NOT_APPLICABLE)
+├── wfa_results_by_symbol / dsr_pbo_.../               ├── all_pass: bool  (ahora @property,
+│   sensitivity_.../mc_symbol_...                      │   deriva de status)
+├── mc_portfolio_result / prop_sim_result              └── ...
+├── purged_cv_results_by_symbol (sin cambio)
+├── candidate_config (sin cambio — declared_universe
+│   NUNCA entra acá, R9)
+└── __post_init__: valida R58 (ya existe) +
+    R1 (subconjunto) + R6 (sin sobrantes)
+
+StrategyGenome (capa 2, strategy/genome/schema.py)
+├── metadata / universe (símbolo único, sin cambio)
+├── declared_universe: tuple[str, ...] | None  (NUEVO, sección hermana de `universe:`,
+│   opcional en el parser — ver R2 y Nota de verificación §7)
+├── alpha / risk_exit
+└── raw_config
+```
+
+`build_candidate_gate_summary` (`verdict.py:362-430`) queda con la firma actual
+(`bundle`, `house_rule`, `ledger_extra_trials`); no gana parámetros nuevos porque
+`declared_universe` viaja dentro de `bundle` (R1). El orden exacto de las guardas R5/R6 dentro de
+`__post_init__` vs. `build_candidate_gate_summary` es el fijado en R5/R6; `design` no debe
+reordenarlo sin justificar por qué.
+
+## 4. Criterios de aceptación (evals ejecutables)
+
+Formato BDD. Todos deben poder correr bajo `mise run test` o verificarse por lectura de artefacto
+(`rg`) sin ambigüedad.
+
+**AC1 — Un solo símbolo declarado aborta, no emite veredicto.**
+DADO un `CandidateValidationBundle` con `declared_universe={"SYM_A"}` y un único símbolo evaluado
+`SYM_A` que pasa todos los gates G1-G9
+CUANDO se llama `build_candidate_gate_summary`
+ENTONCES se levanta `VerdictConfigError` con `candidate_id` y `declared_universe` en el mensaje, y
+no se construye ningún `CandidateGateSummary`.
+Test: `tests/validation/test_verdict.py::test_declared_universe_de_tamano_1_levanta_verdict_config_error`
+(nuevo, reemplaza el caso trivial 1/1 de `test_c1_fraction_passing_y_pass`, que hoy asume
+implícitamente `|U|=1` porque no declara universo — línea ~711).
+
+**AC2 — El denominador de C1 es el universo declarado, no los símbolos evaluados.**
+DADO `declared_universe={"SYM_A", "SYM_B", "SYM_C", "SYM_D"}` y un bundle con solo `SYM_A` y
+`SYM_B` evaluados, ambos con `status=PASS`
+CUANDO se llama `build_candidate_gate_summary`
+ENTONCES `c1_fraction_passing == 0.5` (2 de 4), no `1.0` (2 de 2), y `c1_pass is False` (0.5 < 0.60).
+Test: `tests/validation/test_verdict.py::test_c1_denominador_es_universo_declarado_no_evaluado`
+(nuevo).
+
+**AC3 — Un símbolo evaluado fuera del universo declarado levanta excepción.**
+DADO `declared_universe={"SYM_A", "SYM_B"}` y un bundle que evalúa `SYM_A` y `SYM_C`
+CUANDO se construye `CandidateValidationBundle`
+ENTONCES se levanta `VerdictConfigError` citando `SYM_C` como símbolo evaluado ausente del
+universo declarado.
+Test: `tests/validation/test_verdict.py::test_simbolo_evaluado_fuera_de_universo_declarado_levanta_error`
+(nuevo).
+
+**AC4 — `NOT_APPLICABLE` cuenta como no superado.**
+DADO `declared_universe={"SYM_A", "SYM_B", "SYM_C"}` y un bundle donde `SYM_A` tiene
+`status=PASS`, `SYM_B` tiene `status=NOT_APPLICABLE` y `SYM_C` tiene `status=FAIL`
+CUANDO se calcula `c1_fraction_passing`
+ENTONCES el resultado es `1/3` (33.3%), no `1/2` (excluyendo `NOT_APPLICABLE` del denominador).
+Test: `tests/validation/test_verdict.py::test_not_applicable_cuenta_como_no_superado_en_c1`
+(nuevo).
+
+**AC5 — `all_pass` sigue siendo `bool` y deriva de `status`.**
+DADO un `SymbolGateOutcome` con `status=SymbolGateStatus.PASS`
+CUANDO se lee `outcome.all_pass`
+ENTONCES es `True`; y con `status=FAIL` o `status=NOT_APPLICABLE`, `all_pass` es `False`.
+Test: `tests/validation/test_verdict.py::test_all_pass_deriva_de_status` (nuevo).
+
+**AC6 — El genoma parsea `declared_universe` cuando está presente.**
+DADO un YAML de genoma con una sección `declared_universe: ["SYM_A", "SYM_B", "SYM_C"]`
+CUANDO se llama `parse_genome`
+ENTONCES `StrategyGenome.declared_universe == ("SYM_A", "SYM_B", "SYM_C")`.
+Test: `tests/strategy/genome/test_schema.py::test_parse_genome_lee_declared_universe` (nuevo).
+
+**AC7 — El genoma sin `declared_universe` parsea a `None`, sin romper los YAML existentes.**
+DADO `candidates/specs/candidate_b1_orb.yaml` y `candidates/specs/candidate_c1_gold_lob.yaml` tal
+como existen hoy en el árbol (sin sección `declared_universe`)
+CUANDO se llama `parse_genome` sobre cada uno
+ENTONCES ambos parsean sin excepción y `StrategyGenome.declared_universe is None`.
+Test: `tests/strategy/genome/test_schema.py::test_genomas_existentes_sin_declared_universe_parsean_a_none`
+(nuevo).
+
+**AC8 — `declared_universe` con duplicados se rechaza.**
+DADO un YAML de genoma con `declared_universe: ["SYM_A", "SYM_A"]`
+CUANDO se llama `parse_genome`
+ENTONCES levanta `GenomeValidationError` citando el símbolo duplicado.
+Test: `tests/strategy/genome/test_schema.py::test_declared_universe_con_duplicados_se_rechaza`
+(nuevo).
+
+**AC9 — `run_pipeline.py --genome` sin `declared_universe` en el genoma falla con mensaje claro.**
+DADO un genoma sin sección `declared_universe` invocado con `--genome`
+CUANDO se corre `run_pipeline.py`
+ENTONCES el proceso termina con un mensaje que nombra el genoma y pide agregar la sección, sin
+construir ningún `CandidateValidationBundle`.
+Verificable por: `rg -n "declared_universe" scripts/run_pipeline.py` muestra el punto de fallo
+explícito (no un `KeyError`/`AttributeError` sin contexto), y un test de integración
+`tests/validation/test_integration_pipeline_j.py::test_run_pipeline_con_genoma_sin_declared_universe_falla`
+(nuevo, o equivalente) ejercita el `SystemExit`/excepción con el mensaje.
+
+**AC10 — `run_pipeline.py` camino legado exige `--declared-universe` explícito.**
+DADO una invocación de `run_pipeline.py` sin `--genome` (candidato por letra) y sin
+`--declared-universe`
+CUANDO se corre
+ENTONCES el proceso falla antes de construir el bundle, con un mensaje que nombra el flag
+faltante.
+Verificable por: `rg -n -- "--declared-universe" scripts/run_pipeline.py` muestra el argumento
+definido y su chequeo de ausencia; test de integración equivalente al de AC9 para el camino
+legado.
+
+**AC11 — `compute_trial_id` no cambia para el mismo insumo evaluado.**
+DADO dos llamadas a `_candidate_config`/`compute_trial_id` con los mismos argumentos salvo que una
+corrida se ejecuta con `declared_universe` distinto de la otra (mismo símbolo evaluado, mismo
+`candidate_config`)
+CUANDO se calcula `trial_id` para ambas
+ENTONCES el `trial_id` es idéntico.
+Test: `tests/validation/test_trial_ledger.py::test_trial_id_no_depende_de_declared_universe`
+(nuevo) o extensión de un test existente de `compute_trial_id`.
+
+**AC12 — Manifest y tearsheet exponen el universo de 3 valores.**
+DADO un `VerdictResult` con al menos un candidato cuyo `declared_universe` tiene 4 símbolos y un
+`SymbolGateOutcome` con `status=NOT_APPLICABLE`
+CUANDO se escribe el manifest JSON (`write_verdict_artifacts`) y se renderiza el tearsheet
+ENTONCES el JSON trae la clave `declared_universe` con los 4 símbolos y `status` (no solo
+`all_pass`) por símbolo; el tearsheet Markdown contiene el texto `NOT_APPLICABLE` (o su
+representación) en la fila correspondiente.
+Verificable por: `rg -n "declared_universe|NOT_APPLICABLE" <manifest.json> <tearsheet.md>` da
+match; test `tests/validation/test_verdict.py::test_manifest_y_tearsheet_exponen_declared_universe_y_status`
+(nuevo).
+
+**AC13 — `CONFIG_VERSION` es `/3`.**
+DADO el módulo `genesis.validation.verdict`
+CUANDO se lee `CONFIG_VERSION`
+ENTONCES es `"genesis-validation-j/3"`.
+Verificable por: `rg -n 'CONFIG_VERSION.*genesis-validation-j/3' src/genesis/validation/verdict.py`.
+
+**AC14 — `mise run ci` verde.**
+DADO el árbol tras `apply`
+CUANDO se corre `mise run ci`
+ENTONCES lint (ruff+bandit+vulture+deptry) + `ty check` + `pytest` pasan sin fallos nuevos no
+declarados en Riesgos (la ruptura esperada de `tests/validation/test_verdict.py:711-715` y
+`:1084-1159`, que hoy no declaran `declared_universe`, se migra explícitamente, no se omite).
+
+**AC15 — C1 fallido da NO-GO, nunca GO-PARCIAL.**
+DADO el bundle de `_partial_bundle` (3 símbolos declarados y evaluados, 1 pasa, `c1 = 1/3`) que
+pasa P1-P6 y T1
+CUANDO se llama `run_verdict`
+ENTONCES `verdict.kind is VerdictKind.NO_GO`, y ningún camino del módulo emite `GO_PARCIAL`.
+Test: `tests/validation/test_verdict.py::test_c1_fallido_nunca_es_go_parcial` (reemplaza a
+`test_verdict_rama_go_parcial`). Verificable además por
+`rg -n "_find_go_parcial_candidate" src tests` sin resultados.
+
+**AC16 — El manifest trae `verdict_schema_version`.**
+DADO un `VerdictResult` cualquiera
+CUANDO se serializa con `verdict_result_to_manifest_json`
+ENTONCES el JSON trae `"verdict_schema_version": "genesis-validation-j/3"` en el primer nivel.
+Test: extensión de `tests/validation/test_verdict.py::test_manifest_roundtrip`.
+
+## 5. Riesgos
+
+- **R1.** Los tests existentes de C1 (`tests/validation/test_verdict.py:711-715,1084-1159`) y el
+  helper `_bundle` (`tests/validation/test_verdict.py:221-242`) no declaran `declared_universe`
+  hoy; como el campo no tiene default, **todos** los llamadores de `_bundle`/`CandidateValidationBundle`
+  en la suite existente se rompen hasta que se les agregue el argumento. Es consecuencia necesaria
+  del R1 de este spec (sin default), no una regresión a evitar — `apply` debe migrar el helper,
+  no parchear cada test.
+- **R2.** El camino de integración `tests/validation/test_integration_pipeline_j.py` (si construye
+  un `CandidateValidationBundle` real end-to-end) requiere el mismo ajuste.
+- **R3.** La guarda de tamaño mínimo (R5) hace que hoy **ninguna corrida real del Candidato B**
+  pueda emitir veredicto favorable (solo declara MNQ, `|U|=1`). Es el comportamiento correcto,
+  documentado en Alcance OUT, pero puede leerse como "B.6 rompió a B" si `review` no lo lee junto
+  con B.7.
+- **R4.** Hacer `declared_universe` opcional en el schema del genoma (R2) en vez de obligatorio dejó
+  una asimetría deliberada: el schema permite genomas sin universo declarado, pero
+  `run_pipeline.py` los rechaza igual al intentar emitir veredicto (R3/AC9). Si un consumidor
+  futuro del schema fuera de `run_pipeline.py` asume que `declared_universe is not None`, tendría
+  que replicar esa guarda — se documenta acá para que `design`/`apply` no la dupliquen con
+  semántica distinta.
+- **R5.** Subir `CONFIG_VERSION` a `/3` invalida la comparabilidad de manifest con `/2` para
+  cualquier consumidor externo. No se conoce ninguno hoy (mismo hallazgo que Change #109), pero no
+  se verificó exhaustivamente.
+
+## 6. Preguntas abiertas para `design`
+
+1. **Mecanismo concreto para que `_build_symbol_gate_outcome` decida `NOT_APPLICABLE` (R7).**
+   ¿Un parámetro de entrada explícito del llamador (p. ej. una lista de símbolos declarados pero
+   sin insumos, que `build_candidate_gate_summary` recorre además de `symbol_gate_outcomes`), o
+   una condición derivada de que ciertos campos de `WfaResult`/`DsrPboResult` vengan vacíos/`None`?
+   Esta spec solo fija el resultado observable (AC4), no el mecanismo de detección.
+2. **Formato exacto del flag `--declared-universe` en `run_pipeline.py`** (R3/AC10): lista separada
+   por comas (`MES,MNQ`) es la convención más simple dado el resto de la CLI del script, pero
+   `design` puede evaluar `nargs="+"` u otra forma; no cambia el requisito observable.
+3. **Si `SymbolGateStatus` vive en `verdict.py` o en un módulo compartido** (p. ej. junto a
+   `RejectionReason` en `strategy/inspector`). Esta spec lo ubica en `verdict.py` por defecto
+   (mismo archivo que `SymbolGateOutcome`), pero no es una decisión cerrada si `design` encuentra
+   una razón de reuso.
+
+## 7. Nota de verificación
+
+Todos los `file:line` citados en `idea.md`/`proposal.md` se verificaron contra `b49676f` y
+coinciden: `verdict.py:47(CONFIG_VERSION),71(_C1_MIN_FRACTION),85-124(CandidateValidationBundle),
+128-160(SymbolGateOutcome),362-430(build_candidate_gate_summary),800-820(_select_winning_candidate),
+1032-1086,1090-1170(serialización)`; `errors.py:95-103(VerdictConfigError)`;
+`trial_ledger.py:115-145(compute_trial_id)`; `run_pipeline.py:137-163(_candidate_config),
+270-275(--genome),427-455(construcción del bundle)`; `schema.py:57-62(GenomeUniverse)`;
+`candidates/specs/candidate_b1_orb.yaml` y `candidate_c1_gold_lob.yaml` sin sección
+`declared_universe`, confirmado en esta fase.
+
+**Corrección respecto a `idea.md`**: el hallazgo original citaba `docstring de
+`_ECONOMICS_WARNING`` colindante a `verdict.py:1043,1078,1125,1155` para la serialización; en el
+árbol actual esas funciones están en `verdict.py:1032-1086` (`_candidate_summary_payload`) y
+`verdict.py:1090-1170` (`render_tearsheet`) — el contenido es el mismo, solo cambiaron los números
+de línea exactos por código intermedio ya presente (bloque de advertencias `_D7_BIAS_WARNING`,
+`_DH4_FUNDED_STARTING_BALANCE_NOTICE`, `_ECONOMICS_WARNING`) que no formaba parte del hallazgo.
+
+**Sin contradicciones de fondo entre `proposal.md` y el código verificado en esta fase.** La
+única precisión que esta spec agrega sobre `proposal.md` es la resolución explícita de si
+`declared_universe` es obligatorio en el schema del genoma (R2): `proposal.md` lo dejaba como
+pregunta abierta #1 para specify ("¿el campo... vive dentro de `GenomeUniverse`... o como una
+sección nueva?"); esta spec resuelve la ubicación según la decisión ya cerrada por el hilo
+principal (sección hermana nueva) y agrega la resolución de obligatoriedad (opcional en el
+parser, obligatorio en el runner) que `proposal.md` no había fijado, precisamente para no requerir
+modificar los dos YAML existentes sin una decisión humana sobre su universo real — que sigue fuera
+de alcance de B.6.

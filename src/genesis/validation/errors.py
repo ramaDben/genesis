@@ -99,7 +99,10 @@ class VerdictConfigError(GenesisValidationError):
     inconsistentes entre los mapas por símbolo de `CandidateValidationBundle`;
     `(c)` `starting_balance <= 0`; `(d)` intersección de `trading_day` entre dos
     candidatos para T2 con menos de 2 días; `(e)` desviación estándar `std_i == 0`
-    de la canasta de un candidato en los pesos vol-inversa del ensemble.
+    de la canasta de un candidato en los pesos vol-inversa del ensemble; `(f)` universo
+    declarado del candidato de tamaño < 2 al emitir veredicto, o símbolo evaluado / marcado
+    no aplicable ausente de `declared_universe`, o símbolo a la vez evaluado y no aplicable
+    (Change #130).
     """
 
 

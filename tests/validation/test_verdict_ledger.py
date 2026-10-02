@@ -19,7 +19,6 @@ from genesis.validation.trial_ledger import TrialLedger, TrialOutcomeKind, compu
 from genesis.validation.verdict import (
     _build_symbol_gate_outcome,
     _compute_t1,
-    _find_go_parcial_candidate,
     _trial_id_for_bundle,
     build_candidate_gate_summary,
     record_trial_completions,
@@ -156,7 +155,7 @@ def test_a10_monotonia_del_gate_g4(house_rule_fixture: HouseRule, extra: int) ->
 
 
 def test_a16_privadas_sin_default_publicas_con_default() -> None:
-    for fn in (_build_symbol_gate_outcome, _compute_t1, _find_go_parcial_candidate):
+    for fn in (_build_symbol_gate_outcome, _compute_t1):
         param = inspect.signature(fn).parameters["ledger_extra_trials"]
         assert param.default is inspect.Parameter.empty
         assert param.kind is inspect.Parameter.KEYWORD_ONLY
