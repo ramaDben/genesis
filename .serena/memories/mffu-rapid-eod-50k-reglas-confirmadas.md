@@ -108,8 +108,12 @@ cuesta nada.
 - **Política de VPS**: búsqueda de "VPS" y "virtual private server" en su help center devuelve
   **cero resultados**. Ni permitida ni prohibida explícitamente (Topstep sí la veta por escrito).
   Ausencia de regla no es permiso — **preguntar a soporte antes de diseñar la operación**.
-- **Comisiones por contrato**: no publicadas en el help center; dependen de la plataforma
-  (Tradovate / Rithmic / NinjaTrader). Necesarias para `costs.py`.
+- **Comisiones por contrato** (verificadas; corrección del 2026-10-05): MFFU las publica en
+  https://help.myfundedfutures.com/en/articles/9735811 («Futures Instrument List», columna «Total
+  Cost Round Trip», página fechada 24-ago-2026), releída y firmada por el dueño el 2026-10-05.
+  Ida y vuelta por contrato: MNQ 1,90 · MGC 2,20 · MCL 1,16 · M6E 1,44 · MBT 3,50 (USD). Entraron
+  a `costs_config.json` en B.4a (#135). **No confirmado** si la cifra incluye bolsa, clearing y
+  NFA, ni si es igual en Tradovate, Rithmic y NinjaTrader.
 - **Precio del Rapid EOD 50K.**
 
 ## Sobre `SymbolFigure` y futuros (buena noticia)
@@ -205,5 +209,4 @@ El criterio de aprobación del holdout se reescribió sobre esta base: **no** «
 «¿llegó a ser fondeado, en cuánto tiempo y a cuántos intentos?». Ver
 `docs/DIMENSIONAMIENTO_HOLDOUT.md` §4 (PR #124).
 
-**Sigue sin verificar:** el precio del Rapid EOD 50K (no publicado), las comisiones por contrato y
-la política de VPS.
+**Sigue sin verificar:** el precio del Rapid EOD 50K (no publicado) y la política de VPS.

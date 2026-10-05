@@ -1,5 +1,46 @@
 {
-  "default_spread_points": 1.5,
-  "commission_per_lot": 7.0,
-  "slippage_points": 0.2
+  "_fuente": "MFFU, Futures Instrument List, columna Total Cost Round Trip (pagina fechada el 24-ago-2026). Cifras releidas y firmadas por el dueño el 2026-10-05 (Change #135, firma-cifras.md).",
+  "_nota": "No confirmado si Total Cost Round Trip incluye las tarifas de bolsa, clearing y NFA, ni si es uniforme entre Tradovate, Rithmic y NinjaTrader. spread_ticks y slippage_ticks: piso provisional hasta B.4b (1 tick cada uno, sin medicion de mercado).",
+  "instruments": {
+    "M6E": {
+      "round_trip_usd": 1.44,
+      "spread_ticks": 1,
+      "slippage_ticks": 1,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://help.myfundedfutures.com/en/articles/9735811",
+      "read_on": "2026-10-05"
+    },
+    "MBT": {
+      "round_trip_usd": 3.5,
+      "spread_ticks": 1,
+      "slippage_ticks": 1,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://help.myfundedfutures.com/en/articles/9735811",
+      "read_on": "2026-10-05"
+    },
+    "MCL": {
+      "round_trip_usd": 1.16,
+      "spread_ticks": 1,
+      "slippage_ticks": 1,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://help.myfundedfutures.com/en/articles/9735811",
+      "read_on": "2026-10-05"
+    },
+    "MGC": {
+      "round_trip_usd": 2.2,
+      "spread_ticks": 1,
+      "slippage_ticks": 1,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://help.myfundedfutures.com/en/articles/9735811",
+      "read_on": "2026-10-05"
+    },
+    "MNQ": {
+      "round_trip_usd": 1.9,
+      "spread_ticks": 1,
+      "slippage_ticks": 1,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://help.myfundedfutures.com/en/articles/9735811",
+      "read_on": "2026-10-05"
+    }
+  }
 }
