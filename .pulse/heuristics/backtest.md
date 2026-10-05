@@ -30,3 +30,11 @@
 **Contexto:** Cierre del Change #97 (dominio backtest); bump N/A→N/A.
 **Observacion:** design_approved_at=2026-09-09T20:10:48.420032+00:00; tests_passed_at=2026-09-09T20:44:12.249248+00:00; artefactos: /work/.pulse/changes/97-salida-por-trailing-estructural-chandelier-en-la-capa-3/idea.md, /work/.pulse/changes/97-salida-por-trailing-estructural-chandelier-en-la-capa-3/proposal.md, /work/.pulse/changes/97-salida-por-trailing-estructural-chandelier-en-la-capa-3/design.md, /work/.pulse/changes/97-salida-por-trailing-estructural-chandelier-en-la-capa-3/tasks.md.
 **Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de backtest.
+### Heurística: cierre Change #135 backtest [#135 · backtest · 2026-10-05]
+
+**Tipo:** captura
+**Fase de origen:** close
+**Change slug:** 135-b-4a-comision-por-instrumento-en-la-ficha-cierra-pa-106-c
+**Contexto:** Cierre del Change #135 (dominio backtest); bump N/A→N/A.
+**Observacion:** design_approved_at=2026-10-05T16:05:12.229858+00:00; tests_passed_at=2026-10-05T16:49:41.777467+00:00; artefactos: /work/.pulse/changes/135-b-4a-comision-por-instrumento-en-la-ficha-cierra-pa-106-c/idea.md, /work/.pulse/changes/135-b-4a-comision-por-instrumento-en-la-ficha-cierra-pa-106-c/proposal.md, /work/.pulse/changes/135-b-4a-comision-por-instrumento-en-la-ficha-cierra-pa-106-c/design.md, /work/.pulse/changes/135-b-4a-comision-por-instrumento-en-la-ficha-cierra-pa-106-c/tasks.md.
+**Recomendacion:** Revisar los artefactos enlazados antes de abrir el próximo Change de backtest.
