@@ -5,7 +5,7 @@ description = "Pipeline de validación institucional para prop firms: torneo de 
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "metatrader5>=5.0.5735 ; sys_platform == 'win32'",
+    "metatrader5>=5.0.6180 ; sys_platform == 'win32'",
     "numpy>=2.5.1",
     "pandas>=3.0.5",
     "pyarrow>=24.0.0",
