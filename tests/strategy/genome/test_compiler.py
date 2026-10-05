@@ -127,6 +127,7 @@ def test_compile_genome_trial_id_invariance():
         firm_hash,
         exit_geometry_hash,
         house_rule_hash,
+        {"US500": "costs_hash_1"},
     )
     trial_id_2 = compute_trial_id(
         factory2.raw_config,
@@ -134,6 +135,7 @@ def test_compile_genome_trial_id_invariance():
         firm_hash,
         exit_geometry_hash,
         house_rule_hash,
+        {"US500": "costs_hash_1"},
     )
 
     assert trial_id_1 == trial_id_2
@@ -207,6 +209,7 @@ def test_trial_id_no_depende_de_declared_universe():
             "firm_hash_1",
             "exit_geometry_hash_1",
             "house_rule_hash_1",
+            {"US500": "costs_hash_1"},
         )
         for factory in factories
     }

@@ -116,5 +116,7 @@ class TrialLedgerConfigError(GenesisValidationError):
     obligatorias ausentes, u `outcome` fuera de `TrialOutcomeKind`) al leerla con
     `read_trial_summary` (Q7 del diseño); `(d)` un `CandidateValidationBundle` con
     `candidate_config is None` cuando `run_verdict` recibe un `ledger` no `None`
-    (Q5 del diseño, fail-fast, nunca omisión silenciosa del candidato en el conteo).
+    (Q5 del diseño, fail-fast, nunca omisión silenciosa del candidato en el conteo);
+    `(e)` un `TrialIdentityContext` con `costs_hash_by_symbol` cuyas claves no coinciden
+    con `dataset_hash_by_symbol` (Change #135, R16).
     """

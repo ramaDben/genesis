@@ -83,6 +83,7 @@ def test_trial_id_for_bundle_coincide_con_compute_trial_id(tmp_path: Path) -> No
         identity.firm_profile_hash,
         identity.exit_geometry_hash,
         identity.house_rule_hash,
+        identity.costs_hash_by_symbol,
     )
     assert _trial_id_for_bundle(ledger, bundle) == expected
 

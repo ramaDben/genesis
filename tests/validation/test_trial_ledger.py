@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 
 from genesis.validation.errors import TrialLedgerConfigError
 from genesis.validation.trial_ledger import (
+    CONFIG_VERSION,
     TrialLedger,
     TrialLedgerSummary,
     TrialOutcomeKind,
@@ -67,8 +68,12 @@ def test_trial_record_coherente_completado_construye_y_es_inmutable() -> None:
 def test_compute_trial_id_invariante_al_orden_de_insercion() -> None:
     cfg_a = {"alpha": 1, "beta": 2}
     cfg_b = {"beta": 2, "alpha": 1}
-    id_a = compute_trial_id(cfg_a, {"US500": "h"}, "firm-h", "geometry-h", "house-h")
-    id_b = compute_trial_id(cfg_b, {"US500": "h"}, "firm-h", "geometry-h", "house-h")
+    id_a = compute_trial_id(
+        cfg_a, {"US500": "h"}, "firm-h", "geometry-h", "house-h", {"US500": "costs-h"}
+    )
+    id_b = compute_trial_id(
+        cfg_b, {"US500": "h"}, "firm-h", "geometry-h", "house-h", {"US500": "costs-h"}
+    )
     assert id_a == id_b
 
 
@@ -86,18 +91,32 @@ def test_compute_trial_id_sensibilidad_total_a_candidate_config(
     mutated[mutated_key] = mutated_value
     if mutated == base:
         return
-    original_id = compute_trial_id(base, {"US500": "h"}, "firm-h", "geometry-h", "house-h")
-    mutated_id = compute_trial_id(mutated, {"US500": "h"}, "firm-h", "geometry-h", "house-h")
+    original_id = compute_trial_id(
+        base, {"US500": "h"}, "firm-h", "geometry-h", "house-h", {"US500": "costs-h"}
+    )
+    mutated_id = compute_trial_id(
+        mutated, {"US500": "h"}, "firm-h", "geometry-h", "house-h", {"US500": "costs-h"}
+    )
     assert original_id != mutated_id
 
 
 def test_compute_trial_id_sensibilidad_a_los_cuatro_hashes() -> None:
     cfg = {"alpha": 1}
-    base_id = compute_trial_id(cfg, {"US500": "h1"}, "firm-h", "geometry-h", "house-h")
-    assert base_id != compute_trial_id(cfg, {"US500": "h2"}, "firm-h", "geometry-h", "house-h")
-    assert base_id != compute_trial_id(cfg, {"US500": "h1"}, "firm-h2", "geometry-h", "house-h")
-    assert base_id != compute_trial_id(cfg, {"US500": "h1"}, "firm-h", "geometry-h2", "house-h")
-    assert base_id != compute_trial_id(cfg, {"US500": "h1"}, "firm-h", "geometry-h", "house-h2")
+    base_id = compute_trial_id(
+        cfg, {"US500": "h1"}, "firm-h", "geometry-h", "house-h", {"US500": "costs-h"}
+    )
+    assert base_id != compute_trial_id(
+        cfg, {"US500": "h2"}, "firm-h", "geometry-h", "house-h", {"US500": "costs-h"}
+    )
+    assert base_id != compute_trial_id(
+        cfg, {"US500": "h1"}, "firm-h2", "geometry-h", "house-h", {"US500": "costs-h"}
+    )
+    assert base_id != compute_trial_id(
+        cfg, {"US500": "h1"}, "firm-h", "geometry-h2", "house-h", {"US500": "costs-h"}
+    )
+    assert base_id != compute_trial_id(
+        cfg, {"US500": "h1"}, "firm-h", "geometry-h", "house-h2", {"US500": "costs-h"}
+    )
 
 
 def test_compute_trial_id_valor_no_serializable_lanza_trial_ledger_config_error() -> None:
@@ -106,7 +125,12 @@ def test_compute_trial_id_valor_no_serializable_lanza_trial_ledger_config_error(
 
     with pytest.raises(TrialLedgerConfigError) as exc_info:
         compute_trial_id(
-            {"cb": _NoSerializable()}, {"US500": "h"}, "firm-h", "geometry-h", "house-h"
+            {"cb": _NoSerializable()},
+            {"US500": "h"},
+            "firm-h",
+            "geometry-h",
+            "house-h",
+            {"US500": "costs-h"},
         )
     assert "cb" in str(exc_info.value)
 
@@ -176,6 +200,7 @@ def test_read_trial_summary_trial_id_duplicado_no_lanza(tmp_path: Path) -> None:
         "firm_profile_hash": record.firm_profile_hash,
         "exit_geometry_hash": record.exit_geometry_hash,
         "house_rule_hash": record.house_rule_hash,
+        "costs_hash_by_symbol": dict(record.costs_hash_by_symbol),
         "git_commit": record.git_commit,
         "recorded_at_utc": record.recorded_at_utc,
     }
@@ -258,6 +283,7 @@ def test_append_trial_round_trip(tmp_path: Path) -> None:
         firm_profile_hash=raw["firm_profile_hash"],
         exit_geometry_hash=raw["exit_geometry_hash"],
         house_rule_hash=raw["house_rule_hash"],
+        costs_hash_by_symbol=raw["costs_hash_by_symbol"],
         git_commit=raw["git_commit"],
         recorded_at_utc=raw["recorded_at_utc"],
     )
@@ -287,6 +313,7 @@ def test_trial_ledger_trial_id_for_config_delega_en_compute_trial_id(tmp_path: P
         identity.firm_profile_hash,
         identity.exit_geometry_hash,
         identity.house_rule_hash,
+        identity.costs_hash_by_symbol,
     )
     assert ledger.trial_id_for_config(cfg) == expected
 
@@ -341,3 +368,91 @@ def test_summary_dataclass_expone_los_campos_minimos() -> None:
         content_hash=hashlib.sha256(b"").hexdigest(),
     )
     assert summary.n_trials_total == 0
+
+
+# --- Change #135: la huella de costos entra a la identidad del ensayo (R15, R16) ---
+
+_ID_ARGS = ({"alpha": 1}, {"MNQ": "dataset-h"}, "firm-h", "geometry-h", "house-h")
+
+
+def test_compute_trial_id_sensible_a_costs_hash_by_symbol() -> None:
+    assert compute_trial_id(*_ID_ARGS, {"MNQ": "costs-h1"}) != compute_trial_id(
+        *_ID_ARGS, {"MNQ": "costs-h2"}
+    )
+
+
+def test_compute_trial_id_invariante_al_orden_del_mapa_de_costos() -> None:
+    args = ({"alpha": 1}, {"MNQ": "d1", "MGC": "d2"}, "firm-h", "geometry-h", "house-h")
+    first = compute_trial_id(*args, {"MNQ": "c1", "MGC": "c2"})
+    second = compute_trial_id(*args, {"MGC": "c2", "MNQ": "c1"})
+    assert first == second
+
+
+def test_compute_trial_id_sin_costos_lanza_type_error() -> None:
+    with pytest.raises(TypeError):
+        compute_trial_id(*_ID_ARGS)  # ty: ignore[missing-argument]
+
+
+@given(
+    costs=st.dictionaries(
+        st.sampled_from(["MNQ", "MGC", "MCL", "M6E", "MBT"]),
+        st.text(alphabet="0123456789abcdef", min_size=1, max_size=8),
+        min_size=1,
+    ),
+    mutated_value=st.text(alphabet="0123456789abcdef", min_size=1, max_size=8),
+)
+def test_compute_trial_id_property_mapa_de_costos(
+    costs: dict[str, str], mutated_value: str
+) -> None:
+    trial_id = compute_trial_id(*_ID_ARGS, costs)
+    assert trial_id == compute_trial_id(*_ID_ARGS, dict(costs))
+    for symbol, value in costs.items():
+        if value == mutated_value:
+            continue
+        mutated = {**costs, symbol: mutated_value}
+        assert compute_trial_id(*_ID_ARGS, mutated) != trial_id
+
+
+def test_append_y_read_conservan_costs_hash_by_symbol(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "trials.jsonl"
+    record = make_trial_record(trial_id="con-costos", costs_hash_by_symbol={"US500": "c-h"})
+    append_trial(ledger_path, record)
+    raw = json.loads(ledger_path.read_text(encoding="utf-8").strip())
+    assert raw["costs_hash_by_symbol"] == {"US500": "c-h"}
+    assert read_trial_summary(ledger_path).n_trials_total == 1
+
+
+def test_fila_sin_costs_hash_by_symbol_es_ilegible(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "trials.jsonl"
+    append_trial(ledger_path, make_trial_record(trial_id="sin-costos"))
+    raw = json.loads(ledger_path.read_text(encoding="utf-8").strip())
+    del raw["costs_hash_by_symbol"]
+    ledger_path.write_text(json.dumps(raw) + "\n", encoding="utf-8", newline="\n")
+    with pytest.raises(TrialLedgerConfigError, match="costs_hash_by_symbol"):
+        read_trial_summary(ledger_path)
+
+
+def test_identity_context_rechaza_claves_de_costos_incoherentes() -> None:
+    with pytest.raises(TrialLedgerConfigError, match="MGC"):
+        make_trial_identity_context(
+            dataset_hash_by_symbol={"MNQ": "d1", "MGC": "d2"},
+            costs_hash_by_symbol={"MNQ": "c1"},
+        )
+
+
+def test_cambiar_costos_registra_un_ensayo_nuevo(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "trials.jsonl"
+    cfg = {"alpha": 1}
+    for costs in ({"US500": "costos-viejos"}, {"US500": "costos-nuevos"}):
+        identity = make_trial_identity_context(costs_hash_by_symbol=costs)
+        ledger = TrialLedger(ledger_path, identity)
+        ledger.record(
+            ledger.build_record(
+                "A", "US500", cfg, TrialOutcomeKind.WFA_COMPLETADO, recorded_at_utc="2026-10-05"
+            )
+        )
+    assert read_trial_summary(ledger_path).n_trials_total == 2
+
+
+def test_config_version_es_trial_ledger_2() -> None:
+    assert CONFIG_VERSION == "genesis-validation-trial-ledger/2"

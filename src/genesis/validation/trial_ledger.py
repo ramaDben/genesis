@@ -23,8 +23,11 @@ from pathlib import Path
 
 from genesis.validation.errors import TrialLedgerConfigError
 
-CONFIG_VERSION: str = "genesis-validation-trial-ledger/1"
-"""Versión del esquema de configuración de este módulo (propia, Alcance OUT del spec)."""
+CONFIG_VERSION: str = "genesis-validation-trial-ledger/2"
+"""Versión del esquema de configuración de este módulo (propia, Alcance OUT del spec).
+
+`/2` desde Change #135: la identidad del ensayo incluye `costs_hash_by_symbol`; las filas
+sin esa clave son ilegibles (sin lectura retrocompatible)."""
 
 LEDGER_RELATIVE_PATH: str = "ledger/trials.jsonl"
 """Única declaración de la ruta relativa del ledger versionado en git (D4)."""
@@ -40,6 +43,7 @@ _REQUIRED_FIELDS = (
     "firm_profile_hash",
     "exit_geometry_hash",
     "house_rule_hash",
+    "costs_hash_by_symbol",
     "git_commit",
     "recorded_at_utc",
 )
@@ -72,6 +76,7 @@ class TrialRecord:
     firm_profile_hash: str
     exit_geometry_hash: str
     house_rule_hash: str
+    costs_hash_by_symbol: Mapping[str, str]
     git_commit: str
     recorded_at_utc: str
 
@@ -118,8 +123,9 @@ def compute_trial_id(
     firm_profile_hash: str,
     exit_geometry_hash: str,
     house_rule_hash: str,
+    costs_hash_by_symbol: Mapping[str, str],
 ) -> str:
-    """`sha256` hexdigest de la serialización canónica completa de los 5 insumos (R4-R6).
+    """`sha256` hexdigest de la serialización canónica completa de los 6 insumos (R4-R6).
 
     `candidate_config` participa **completo, sin lista blanca** (D2/R5): dos
     configuraciones distintas en cualquier campo producen `trial_id` distintos
@@ -127,7 +133,9 @@ def compute_trial_id(
     `json.dumps` (valor no serializable) se envuelve en `TrialLedgerConfigError`
     citando el campo ofensor (R6) — nunca `default=str`, que colisionaría dos
     objetos distintos con el mismo `repr`. Change #109 (D9): `risk_profile_hash`
-    se sustituye por `exit_geometry_hash` + `house_rule_hash`.
+    se sustituye por `exit_geometry_hash` + `house_rule_hash`. Change #135 (R15):
+    `costs_hash_by_symbol`, la huella de costos de cada símbolo evaluado (mismas claves
+    que `dataset_hash_by_symbol`); un costo distinto es otro ensayo.
     """
     payload = {
         "candidate_config": candidate_config,
@@ -135,6 +143,7 @@ def compute_trial_id(
         "firm_profile_hash": firm_profile_hash,
         "exit_geometry_hash": exit_geometry_hash,
         "house_rule_hash": house_rule_hash,
+        "costs_hash_by_symbol": dict(costs_hash_by_symbol),
     }
     try:
         canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False)
@@ -194,6 +203,7 @@ def _parse_trial_record_line(line: str, *, ledger_path: Path, line_number: int) 
         firm_profile_hash=raw["firm_profile_hash"],
         exit_geometry_hash=raw["exit_geometry_hash"],
         house_rule_hash=raw["house_rule_hash"],
+        costs_hash_by_symbol=raw["costs_hash_by_symbol"],
         git_commit=raw["git_commit"],
         recorded_at_utc=raw["recorded_at_utc"],
     )
@@ -287,6 +297,7 @@ def append_trial(ledger_path: Path, record: TrialRecord) -> None:
         "firm_profile_hash": record.firm_profile_hash,
         "exit_geometry_hash": record.exit_geometry_hash,
         "house_rule_hash": record.house_rule_hash,
+        "costs_hash_by_symbol": dict(record.costs_hash_by_symbol),
         "git_commit": record.git_commit,
         "recorded_at_utc": record.recorded_at_utc,
     }
@@ -301,14 +312,29 @@ class TrialIdentityContext:
     """Claves institucionales de la corrida que registra/deriva un `TrialLedger` (Q5).
 
     `git_commit` solo se consume al registrar (`TrialLedger.build_record`), no al
-    leer: `read_summary`/`trial_id_for_config` no lo necesitan.
+    leer: `read_summary`/`trial_id_for_config` no lo necesitan. `costs_hash_by_symbol`
+    debe cubrir exactamente los símbolos de `dataset_hash_by_symbol` (Change #135, R16):
+    es el punto por el que pasa toda derivación sancionada del `trial_id`.
     """
 
     dataset_hash_by_symbol: Mapping[str, str]
     firm_profile_hash: str
     exit_geometry_hash: str
     house_rule_hash: str
+    costs_hash_by_symbol: Mapping[str, str]
     git_commit: str
+
+    def __post_init__(self) -> None:
+        dataset_keys = set(self.dataset_hash_by_symbol)
+        costs_keys = set(self.costs_hash_by_symbol)
+        if costs_keys != dataset_keys:
+            message = (
+                "TrialIdentityContext: costs_hash_by_symbol debe cubrir exactamente los "
+                "símbolos de dataset_hash_by_symbol (R16, Change #135); faltan costos para "
+                f"{sorted(dataset_keys - costs_keys)!r}, sobran costos para "
+                f"{sorted(costs_keys - dataset_keys)!r}."
+            )
+            raise TrialLedgerConfigError(message)
 
 
 class TrialLedger:
@@ -341,13 +367,14 @@ class TrialLedger:
         append_trial(self._ledger_path, record)
 
     def trial_id_for_config(self, candidate_config: Mapping[str, object]) -> str:
-        """`compute_trial_id(candidate_config, *self.identity[:4])` (PR-2/Q5)."""
+        """`compute_trial_id(candidate_config, *self.identity[:5])` (PR-2/Q5)."""
         return compute_trial_id(
             candidate_config,
             self._identity.dataset_hash_by_symbol,
             self._identity.firm_profile_hash,
             self._identity.exit_geometry_hash,
             self._identity.house_rule_hash,
+            self._identity.costs_hash_by_symbol,
         )
 
     def build_record(
@@ -381,6 +408,7 @@ class TrialLedger:
             firm_profile_hash=self._identity.firm_profile_hash,
             exit_geometry_hash=self._identity.exit_geometry_hash,
             house_rule_hash=self._identity.house_rule_hash,
+            costs_hash_by_symbol=self._identity.costs_hash_by_symbol,
             git_commit=self._identity.git_commit,
             recorded_at_utc=resolved_recorded_at_utc,
         )
