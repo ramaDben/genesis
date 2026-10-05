@@ -102,7 +102,8 @@ class VerdictConfigError(GenesisValidationError):
     de la canasta de un candidato en los pesos vol-inversa del ensemble; `(f)` universo
     declarado del candidato de tamaño < 2 al emitir veredicto, o símbolo evaluado / marcado
     no aplicable ausente de `declared_universe`, o símbolo a la vez evaluado y no aplicable
-    (Change #130).
+    (Change #130); `(g)` mapas por símbolo de identidad del manifest con claves distintas
+    (Change #135, D6).
     """
 
 

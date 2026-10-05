@@ -46,6 +46,8 @@ _MANIFEST_KWARGS: dict[str, Any] = {
     "firm_profile_hash": "firm-hash",
     "exit_geometry_hash": "exit-geometry-hash",
     "house_rule_hash": "house-rule-hash",
+    "costs_hash_by_symbol": {"US500": "hash-costs"},
+    "friction_status_by_symbol": {"US500": "provisional_hasta_b4b"},
     "prop_economics_profile_hash_value": "economics-hash",
     "seeds": {"A": {"mc_seed": 1, "prop_sim_seed": 2}},
     "git_commit": "deadbeef",

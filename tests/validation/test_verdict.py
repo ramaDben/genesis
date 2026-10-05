@@ -1367,6 +1367,8 @@ _MANIFEST_KWARGS: dict[str, Any] = {
     "firm_profile_hash": "hash-firm",
     "exit_geometry_hash": "hash-exit-geometry",
     "house_rule_hash": "hash-house-rule",
+    "costs_hash_by_symbol": {"US500": "hash-costs"},
+    "friction_status_by_symbol": {"US500": "provisional_hasta_b4b"},
     "prop_economics_profile_hash_value": "hash-economics",
     "seeds": {"A": {"mc_seed": 1, "prop_sim_seed": 2}},
     "git_commit": "deadbeef",
@@ -1411,7 +1413,7 @@ def test_manifest_roundtrip(
     summary = manifest_json_to_verdict_summary(raw)
 
     assert summary["config_version"] == "genesis-validation-j/2"
-    assert summary["verdict_schema_version"] == "genesis-validation-j/3"
+    assert summary["verdict_schema_version"] == "genesis-validation-j/4"
     assert summary["n_candidatos_torneo"] == result.n_candidatos_torneo
     assert summary["economics_confirmed"] == result.economics_confirmed
     assert summary["git_commit"] == "deadbeef"
@@ -1632,9 +1634,9 @@ def test_manifest_y_tearsheet_exponen_declared_universe_y_status(
     assert "|U|=4" in tearsheet
 
 
-def test_config_version_es_j3() -> None:
-    """N8 (AC13, R10)."""
-    assert CONFIG_VERSION == "genesis-validation-j/3"
+def test_config_version_es_j4() -> None:
+    """N8 (AC13, R10); `/4` desde Change #135."""
+    assert CONFIG_VERSION == "genesis-validation-j/4"
 
 
 def test_not_applicable_fuera_del_universo_levanta() -> None:
@@ -1718,3 +1720,71 @@ def test_property_c1_nunca_supera_evaluados_sobre_declarados(
     )
     wider_summary = build_candidate_gate_summary(wider, _house_rule())
     assert wider_summary.c1_fraction_passing <= summary.c1_fraction_passing
+
+
+# --- Change #135: el manifest declara los costos (R17, D5, D6, AE5) ---
+
+
+def _manifest_kwargs_for(
+    dataset: Mapping[str, str], costs: Mapping[str, str], friction: Mapping[str, str]
+) -> dict[str, Any]:
+    return {
+        **_MANIFEST_KWARGS,
+        "dataset_hash_by_symbol": dataset,
+        "costs_hash_by_symbol": costs,
+        "friction_status_by_symbol": friction,
+    }
+
+
+def test_manifest_trae_costs_hash_by_symbol(
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
+) -> None:
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
+    kwargs = _manifest_kwargs_for(
+        {"SYM_A": "d"}, {"SYM_A": "abc"}, {"SYM_A": "provisional_hasta_b4b"}
+    )
+    raw = json.loads(verdict_result_to_manifest_json(result, **kwargs))
+    assert raw["costs_hash_by_symbol"] == {"SYM_A": "abc"}
+
+
+def test_manifest_trae_friction_status_by_symbol(
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
+) -> None:
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
+    raw = json.loads(verdict_result_to_manifest_json(result, **_MANIFEST_KWARGS))
+    assert raw["friction_status_by_symbol"] == {"US500": "provisional_hasta_b4b"}
+
+
+def test_manifest_rechaza_costos_con_claves_distintas_al_dataset(
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
+) -> None:
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
+    kwargs = _manifest_kwargs_for(
+        {"US500": "d"}, {"NAS100": "c"}, {"US500": "provisional_hasta_b4b"}
+    )
+    with pytest.raises(VerdictConfigError, match="NAS100"):
+        verdict_result_to_manifest_json(result, **kwargs)
+
+
+def test_manifest_rechaza_friccion_con_claves_distintas_a_costos(
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule
+) -> None:
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
+    kwargs = _manifest_kwargs_for(
+        {"US500": "d"}, {"US500": "c"}, {"NAS100": "provisional_hasta_b4b"}
+    )
+    with pytest.raises(VerdictConfigError, match="NAS100"):
+        verdict_result_to_manifest_json(result, **kwargs)
+
+
+def test_tearsheet_declara_la_friccion_provisional_por_simbolo(
+    firm_profile_fixture: FirmProfile, house_rule_fixture: HouseRule, tmp_path
+) -> None:
+    """AE5: la persona que lee el tearsheet ve que spread y deslizamiento son provisionales."""
+    result = _go_result(firm_profile_fixture, house_rule_fixture)
+    _manifest_path, tearsheet_path = write_verdict_artifacts(
+        result, tmp_path / "artifacts", **_MANIFEST_KWARGS
+    )
+    tearsheet = tearsheet_path.read_text(encoding="utf-8")
+    assert "US500" in tearsheet
+    assert "provisionales hasta B.4b" in tearsheet
