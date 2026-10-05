@@ -1220,7 +1220,7 @@ el símbolo: `sizing_hint * config.commission_per_lot * stress`. El archivo que 
 
 **Contra la realidad medida:** MFFU cobra **$1,90** ida y vuelta en MNQ. El motor cobra $7,00 por
 lote más 1,5 puntos de spread —que en el micro, a $2 por punto, son $3,00—, o sea **≈$10 por
-operación contra ≈$2,40 reales.** (Esta cuenta de 2026-09-22 decía «cuatro veces de más»: se
+operación contra ≈$2,40 reales.** (La cuenta de 2026-09-22 estimaba un sobrecobro de 4×: se
 quedó corta, ver la nota siguiente.)
 
 > **[rev 2026-10-05, B.4a / #135] La cuenta de arriba se quedó corta.** El explore de B.4a encontró
