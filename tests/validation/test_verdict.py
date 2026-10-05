@@ -76,6 +76,7 @@ _TEST_PROVENANCE = RunProvenance(
     firm_profile_hash="test-firm-profile-hash",
     exit_geometry_hash="test-exit-geometry-hash",
     house_rule_hash="test-house-rule-hash",
+    costs_hash="test-costs-hash",
     exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
 )
 

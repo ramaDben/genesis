@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from genesis.backtest.costs import CostsConfig, commission_for
+from genesis.backtest.costs import CostsConfig, commission_for, costs_hash
 from genesis.backtest.errors import BacktestConfigError
 from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.ledger import FillRecord
@@ -307,6 +307,27 @@ def test_simbolo_sin_fila_falla_con_contexto(
     assert "'US500'" in message
     assert message.index("MGC") < message.index("MNQ")
     assert "sin valor de respaldo" in message.lower()
+
+
+# --- R14: procedencia de la corrida ---------------------------------------------------------
+
+
+def test_simulator_provenance_trae_costs_hash(
+    firm_profile_fixture: FirmProfile, exit_geometry_fixture: ExitGeometry
+) -> None:
+    config = load_test_costs_config()
+    simulator = _simulator(firm_profile_fixture, exit_geometry_fixture, config)
+    assert simulator.ledger.provenance.costs_hash == costs_hash("US500", config)
+
+
+def test_provenance_cambia_con_spread_ticks(
+    firm_profile_fixture: FirmProfile, exit_geometry_fixture: ExitGeometry
+) -> None:
+    one = _simulator(firm_profile_fixture, exit_geometry_fixture, _realistic_config())
+    two = _simulator(
+        firm_profile_fixture, exit_geometry_fixture, _realistic_config(spread_ticks=2.0)
+    )
+    assert one.ledger.provenance.costs_hash != two.ledger.provenance.costs_hash
 
 
 # --- D2: la tabla de test reproduce el modelo anterior --------------------------------------

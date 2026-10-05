@@ -29,6 +29,7 @@ _DEFAULT_DATASET_HASH_BY_SYMBOL: Mapping[str, str] = {"US500": "dataset-hash-fak
 _DEFAULT_FIRM_PROFILE_HASH = "firm-profile-hash-fake"
 _DEFAULT_EXIT_GEOMETRY_HASH = "exit-geometry-hash-fake"
 _DEFAULT_HOUSE_RULE_HASH = "house-rule-hash-fake"
+_DEFAULT_COSTS_HASH = "costs-hash-fake"
 _DEFAULT_GIT_COMMIT = "0000000000000000000000000000000000000fake"
 _DEFAULT_CONFIG_VERSION = "genesis-validation-trial-ledger/1"
 _DEFAULT_RECORDED_AT_UTC = "2026-01-01T00:00:00+00:00"
@@ -143,6 +144,7 @@ _BUNDLE_PROVENANCE = RunProvenance(
     firm_profile_hash=_DEFAULT_FIRM_PROFILE_HASH,
     exit_geometry_hash=_DEFAULT_EXIT_GEOMETRY_HASH,
     house_rule_hash=_DEFAULT_HOUSE_RULE_HASH,
+    costs_hash=_DEFAULT_COSTS_HASH,
     exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
 )
 

@@ -26,6 +26,7 @@ import pandas as pd
 
 from genesis.backtest.clock import SimulationClock
 from genesis.backtest.costs import CostsConfig, commission_for, slippage_for, spread_for, swap_for
+from genesis.backtest.costs import costs_hash as _costs_hash
 from genesis.backtest.errors import BacktestConfigError, SessionBoundaryError
 from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.exit_geometry import exit_geometry_hash as _exit_geometry_hash
@@ -342,6 +343,7 @@ class Simulator:
             firm_profile_hash=firm_profile_hash(firm_profile),
             exit_geometry_hash=_exit_geometry_hash(exit_geometry),
             house_rule_hash=_house_rule_hash(house_rule),
+            costs_hash=_costs_hash(symbol, costs_config),
             exhaustion_policy=exhaustion_policy,
         )
         self.ledger = Ledger(provenance=provenance, entries=[])

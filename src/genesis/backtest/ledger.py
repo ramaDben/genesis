@@ -99,6 +99,9 @@ class RunProvenance:
     Change #109: `risk_profile_hash` se sustituye por `exit_geometry_hash` +
     `house_rule_hash` (D2, D9) y se agrega `exhaustion_policy`, para que ningún
     artefacto quede ambiguo sobre qué modo lo produjo.
+
+    Change #135: `costs_hash` (huella de la fila de costos del símbolo, R13/R14), sin
+    default para que ningún constructor pueda olvidarla en silencio.
     """
 
     candidate_id: str
@@ -107,6 +110,7 @@ class RunProvenance:
     firm_profile_hash: str
     exit_geometry_hash: str
     house_rule_hash: str
+    costs_hash: str
     exhaustion_policy: ExhaustionPolicy
 
 
