@@ -1,6 +1,6 @@
 """Fixtures compartidas de la suite `tests/backtest/` (capa 3: backtest, R51).
 
-Reutiliza `load_firm_profile()`/`load_exit_geometry()`/`load_costs_config()` y el
+Reutiliza `load_firm_profile()`/`load_exit_geometry()`/la tabla de costos de test y el
 `SymbolFigure` fake de `tests/data/fakes.py`; no duplica su construcción (R51).
 """
 
@@ -9,11 +9,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from genesis.backtest.costs import CostsConfig, load_costs_config
+from genesis.backtest.costs import CostsConfig
 from genesis.backtest.exit_geometry import ExitGeometry, load_exit_geometry
 from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
 from genesis.data.symbols import SymbolFigure
+from tests.backtest.fakes import load_test_costs_config
 from tests.data.fakes import _default_symbol_figure
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -51,8 +52,8 @@ def symbol_figure_fixture() -> SymbolFigure:
 
 @pytest.fixture
 def costs_config_fixture() -> CostsConfig:
-    """Configuración de costos por defecto (`load_costs_config()`)."""
-    return load_costs_config()
+    """Tabla de costos de test (Change #135, R19): reproduce el modelo anterior (D2)."""
+    return load_test_costs_config()
 
 
 @pytest.fixture

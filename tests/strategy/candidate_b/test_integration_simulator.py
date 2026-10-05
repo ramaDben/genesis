@@ -11,7 +11,6 @@ from datetime import timedelta
 import pandas as pd
 import pytest
 
-from genesis.backtest.costs import load_costs_config
 from genesis.backtest.errors import BacktestConfigError
 from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.simulator import RiskLevelsProvider, Simulator
@@ -19,6 +18,7 @@ from genesis.data.profile import load_firm_profile
 from genesis.data.symbols import SymbolFigure
 from genesis.strategy.candidate_b.candidate import CandidateB
 from genesis.strategy.inspector import InspectorFunnelConfig
+from tests.backtest.fakes import load_test_costs_config
 from tests.data.fakes import _default_symbol_figure
 
 pytestmark = pytest.mark.integration
@@ -62,7 +62,7 @@ def _build_simulator(
         exit_geometry=load_exit_geometry(),
         figure=symbol_figure,
         funnel_config=_FUNNEL_CONFIG,
-        costs_config=load_costs_config(),
+        costs_config=load_test_costs_config(),
         news_events=[],
         tick_store=None,
         starting_balance=100_000.0,

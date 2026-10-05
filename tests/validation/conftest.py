@@ -1,6 +1,6 @@
 """Fixtures compartidas de la suite `tests/validation/` (capa 4: validación, R53).
 
-Reutiliza `load_firm_profile()`/`load_exit_geometry()`/`load_costs_config()` y el
+Reutiliza `load_firm_profile()`/`load_exit_geometry()`/la tabla de costos de test y el
 `SymbolFigure` fake de `tests/data/fakes.py` (patrón `tests/backtest/conftest.py`);
 no duplica su construcción. Extensión Issue I (`design.md` §5.2): añade
 `wfa_result_fixture` (garantiza `n_windows >= 4`, precondición de CSCV, Rg-3),
@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from genesis.backtest.costs import CostsConfig, load_costs_config
+from genesis.backtest.costs import CostsConfig
 from genesis.backtest.exit_geometry import ExitGeometry, load_exit_geometry
 from genesis.backtest.ledger import Ledger
 from genesis.data.house_rule import HouseRule
@@ -27,6 +27,7 @@ from genesis.strategy.inspector import InspectorFunnelConfig
 from genesis.validation.dsr_pbo import SignalTrialMatrix
 from genesis.validation.wfa import WfaResult, run_wfa
 from genesis.validation.window_config import WfaWindowConfig
+from tests.backtest.fakes import load_test_costs_config
 from tests.data.fakes import _default_symbol_figure
 from tests.validation.fixtures.ledgers import (
     build_ledger_with_daily_trades,
@@ -64,8 +65,8 @@ def symbol_figure_fixture() -> SymbolFigure:
 
 @pytest.fixture
 def costs_config_fixture() -> CostsConfig:
-    """Configuración de costos por defecto (`load_costs_config()`)."""
-    return load_costs_config()
+    """Tabla de costos de test (Change #135, R19): reproduce el modelo anterior (D2)."""
+    return load_test_costs_config()
 
 
 @pytest.fixture

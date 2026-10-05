@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from genesis.backtest.costs import CostsConfig
+from genesis.backtest.costs import CostsConfig, commission_for
 from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.ledger import FillRecord
 from genesis.backtest.simulator import OpenPosition, ResolvedFill, Simulator
@@ -98,13 +98,12 @@ def test_floating_pnl_usa_value_per_point(
     assert scaled_pnl == pytest.approx(baseline_pnl * 100.0)
 
 
-def test_costo_de_entrada_usa_value_per_point(
+def _entry_cost(
     firm_profile_fixture: FirmProfile,
     exit_geometry_fixture: ExitGeometry,
     costs_config_fixture: CostsConfig,
-) -> None:
-    """A7: el `cost_applied` de la entrada (`is_exit=False`) difiere entre las dos fichas
-    (el componente de spread/slippage escala con `value_per_point`; la comisión no)."""
+    figure: SymbolFigure,
+) -> float:
     bar = make_annotated_bar(_ENTRY_TIME, open_=100.0, high=101.0, low=99.0, close=100.5)
     intent = EntryIntent(
         direction=Direction.LONG,
@@ -112,28 +111,39 @@ def test_costo_de_entrada_usa_value_per_point(
         candidate_id="B",
         config_version=CONFIG_VERSION,
     )
-
-    baseline_sim = _simulator(
-        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, _figure_with(1.0, 1.0)
+    simulator = _simulator(
+        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, figure
     )
-    baseline_sim._open_position(intent, bar, [], False, 90.0, 120.0)
-    baseline_entry = next(
-        e.payload
-        for e in baseline_sim.ledger.entries
+    simulator._open_position(intent, bar, [], False, 90.0, 120.0)
+    return next(
+        e.payload.cost_applied
+        for e in simulator.ledger.entries
         if isinstance(e.payload, FillRecord) and not e.payload.is_exit
     )
 
-    scaled_sim = _simulator(
-        firm_profile_fixture, exit_geometry_fixture, costs_config_fixture, _figure_with(1.0, 0.01)
-    )
-    scaled_sim._open_position(intent, bar, [], False, 90.0, 120.0)
-    scaled_entry = next(
-        e.payload
-        for e in scaled_sim.ledger.entries
-        if isinstance(e.payload, FillRecord) and not e.payload.is_exit
-    )
 
-    assert scaled_entry.cost_applied != pytest.approx(baseline_entry.cost_applied)
+def test_costo_de_entrada_escala_con_tick_value_no_con_tick_size(
+    firm_profile_fixture: FirmProfile,
+    exit_geometry_fixture: ExitGeometry,
+    costs_config_fixture: CostsConfig,
+) -> None:
+    """A7 reescrito (Change #135, R20): la fricción va en ticks, así que su costo en dinero
+    es `ticks * tick_value * q`, independiente de `tick_size`.
+
+    E20.1: fichas `(1.0, 1.0)` y `(1.0, 0.01)` -> mismo `cost_applied` de entrada.
+    E20.2: fichas `(1.0, 1.0)` y `(2.0, 1.0)` -> la fricción (costo menos comisión de la pata)
+    se duplica. E20.3: si alguien volviera a convertir puntos con `tick_value` crudo en vez de
+    `value_per_point`, la ficha `(1.0, 0.01)` daría una fricción 100 veces menor y E20.1
+    fallaría.
+    """
+    args = (firm_profile_fixture, exit_geometry_fixture, costs_config_fixture)
+    baseline = _entry_cost(*args, _figure_with(1.0, 1.0))
+    small_tick = _entry_cost(*args, _figure_with(1.0, 0.01))
+    double_value = _entry_cost(*args, _figure_with(2.0, 1.0))
+    commission_leg = commission_for("US500", 0.1, costs_config_fixture)
+
+    assert small_tick == pytest.approx(baseline)
+    assert double_value - commission_leg == pytest.approx(2 * (baseline - commission_leg))
 
 
 def test_pnl_realizado_usa_la_misma_conversion_que_el_flotante(

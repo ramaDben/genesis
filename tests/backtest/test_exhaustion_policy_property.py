@@ -11,14 +11,13 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from genesis.backtest.costs import load_costs_config
 from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.ledger import BreachEvent, BreachKind, ExhaustionPolicy, FillRecord
 from genesis.backtest.simulator import Simulator
 from genesis.data.profile import load_firm_profile
 from genesis.strategy.contract import CONFIG_VERSION, Direction, EntryIntent
 from genesis.strategy.inspector import InspectorFunnelConfig
-from tests.backtest.fakes import FakeRiskCandidate
+from tests.backtest.fakes import FakeRiskCandidate, load_test_costs_config
 from tests.data.fakes import _default_symbol_figure
 from tests.strategy.fakes import make_annotated_bar
 
@@ -50,7 +49,7 @@ def _build_simulator(exhaustion_policy: ExhaustionPolicy) -> Simulator:
         exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure("US500"),
         funnel_config=_FUNNEL_CONFIG,
-        costs_config=load_costs_config(),
+        costs_config=load_test_costs_config(),
         news_events=[],
         tick_store=None,
         starting_balance=_STARTING_BALANCE,

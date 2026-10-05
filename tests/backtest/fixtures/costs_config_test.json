@@ -1,0 +1,37 @@
+{
+  "_nota": "Tabla de costos DE TEST (Change #135, R19). No es una fuente de costos reales: los hosts .invalid lo marcan. Sus valores reproducen bit a bit el modelo de costos anterior a B.4a en todo test que simula SIN cobertura de ticks, con fichas de tick_size y value_per_point unitarios: media comision de 14 por pata equivale a la comision por lote anterior en cada pata, y 1,7 ticks de spread de entrada con deslizamiento cero equivalen a la suma anterior de spread y deslizamiento de entrada, sin cobro en la salida. CON cobertura de ticks en la entrada la equivalencia no vale: el modelo anterior sumaba su deslizamiento de entrada a la mediana ask-bid y esta tabla suma cero. Tampoco ejercita el deslizamiento de salida. Un test que necesite friccion realista usa make_costs_config con valores explicitos (tests/backtest/fakes.py).",
+  "instruments": {
+    "NAS100": {
+      "round_trip_usd": 14.0,
+      "spread_ticks": 1.7,
+      "slippage_ticks": 0.0,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://costos-de-prueba.invalid/genesis-tests",
+      "read_on": "2026-10-02"
+    },
+    "SYM_A": {
+      "round_trip_usd": 14.0,
+      "spread_ticks": 1.7,
+      "slippage_ticks": 0.0,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://costos-de-prueba.invalid/genesis-tests",
+      "read_on": "2026-10-02"
+    },
+    "SYM_B": {
+      "round_trip_usd": 14.0,
+      "spread_ticks": 1.7,
+      "slippage_ticks": 0.0,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://costos-de-prueba.invalid/genesis-tests",
+      "read_on": "2026-10-02"
+    },
+    "US500": {
+      "round_trip_usd": 14.0,
+      "spread_ticks": 1.7,
+      "slippage_ticks": 0.0,
+      "friction_status": "provisional_hasta_b4b",
+      "source_url": "https://costos-de-prueba.invalid/genesis-tests",
+      "read_on": "2026-10-02"
+    }
+  }
+}
