@@ -24,8 +24,11 @@ contemplado en ninguna parte del spec.
   cripto no tiene swap; los perpetuos tienen **funding rate**, que no es swap (periódico, cambia
   de signo, lo fija el mercado). `swap_rollover_day` (swap triple del miércoles) no tiene análogo.
   No es cosmético: **G3 exige «PF OOS con costos completos, swap incluido»**.
-- **`costs.py` cobra `commission_per_lot`.** Los exchanges cobran maker/taker en **puntos básicos
-  del nocional**. Modelo distinto, no parámetro distinto.
+- **`costs.py` es una tabla por instrumento** (Change #135, 2026-10-05): una fila por símbolo con
+  comisión ida y vuelta en USD por contrato, spread y deslizamiento en ticks, y fuente con fecha
+  obligatorias; sin valor de respaldo. **BTCUSDT no tiene fila**, así que el simulador falla en
+  `__init__` con un error que lista los símbolos que sí la tienen. Los exchanges cobran maker/taker
+  en **puntos básicos del nocional**: sigue siendo un modelo distinto, no una fila más.
 - **`sessions.py`** es una tabla normativa de sesión de contado por índice resuelta con
   `zoneinfo`. En cripto no existe sesión de contado. Hay precedente de extensión aditiva
   (`FixedUtcWindowSpec`, agregada para el universo FX), pero hay que decidir si 24/7 es «sin
