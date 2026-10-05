@@ -9,10 +9,12 @@ silencioso (R21).
 
 Modelo de costos monetario (decisión de implementación, sin R-número específico que
 fije la fórmula exacta de P&L): el P&L en puntos de precio se convierte a dinero vía
-`figure.value_per_point` (`tick_value / tick_size`, R10 + Change #55); comisión y swap
-se cobran como cargos explícitos (`cost_applied`) separados del precio de ejecución,
-que permanece geométricamente puro (bar.open/nivel SL-TP/precio de tick) para no
-contaminar la tabla golden de fills (R32–R36).
+`figure.value_per_point` (`tick_value / tick_size`, R10 + Change #55). Los costos se
+cobran como cargos explícitos (`cost_applied`) separados del precio de ejecución, que
+permanece geométricamente puro (bar.open/nivel SL-TP/precio de tick) para no contaminar la
+tabla golden de fills (R32–R36). Por pata (Change #135, R10): la comisión es la mitad del
+ida y vuelta de la fila del símbolo en cada pata; el spread se cobra una sola vez, en la
+entrada; el deslizamiento se cobra en la entrada y en toda salida; el swap, en la salida.
 """
 
 from collections.abc import Sequence
@@ -24,6 +26,7 @@ import pandas as pd
 
 from genesis.backtest.clock import SimulationClock
 from genesis.backtest.costs import CostsConfig, commission_for, slippage_for, spread_for, swap_for
+from genesis.backtest.costs import costs_hash as _costs_hash
 from genesis.backtest.errors import BacktestConfigError, SessionBoundaryError
 from genesis.backtest.exit_geometry import ExitGeometry
 from genesis.backtest.exit_geometry import exit_geometry_hash as _exit_geometry_hash
@@ -241,11 +244,13 @@ def _rounded_to_volume_step(intent: EntryIntent, figure: SymbolFigure) -> EntryI
 class Simulator:
     """Orquestador event-driven de un backtest para `(candidate, symbol)` (R22).
 
-    Verifica al construirse, antes de procesar la primera barra: `(1)` que
-    `candidate` implementa `RiskLevelsProvider` (R21); `(2)` que `costs_config` es
-    válido ("sin costos no hay reporte", R40); `(3)` que `symbol` está en la tabla de
-    sesiones (`session_window`, R3c). Fail-fast con `BacktestConfigError` con contexto
-    ante cualquier violación.
+    Verifica al construirse, antes de procesar la primera barra y en este orden: `(1)`
+    que `candidate` implementa `RiskLevelsProvider` (R21); `(2)` que `costs_config` es
+    una `CostsConfig` ("sin costos no hay reporte", R40); `(3)` que `symbol` está en la
+    tabla de sesiones (`session_window`, R3c); `(4)` que `symbol` tiene fila en la tabla
+    de costos por instrumento (Change #135, R11); `(5)` que la ficha de firma declara
+    `house_rule`. Fail-fast con `BacktestConfigError` con contexto ante la primera
+    violación.
     """
 
     def __init__(
@@ -292,6 +297,12 @@ class Simulator:
             )
             raise BacktestConfigError(message) from exc
 
+        try:
+            costs_config.instrument(symbol)
+        except BacktestConfigError as exc:
+            message = f"No se puede simular candidate_id={candidate_id!r}: {exc}"
+            raise BacktestConfigError(message) from exc
+
         house_rule = firm_profile.house_rule
         if house_rule is None:
             message = (
@@ -332,6 +343,7 @@ class Simulator:
             firm_profile_hash=firm_profile_hash(firm_profile),
             exit_geometry_hash=_exit_geometry_hash(exit_geometry),
             house_rule_hash=_house_rule_hash(house_rule),
+            costs_hash=_costs_hash(symbol, costs_config),
             exhaustion_policy=exhaustion_policy,
         )
         self.ledger = Ledger(provenance=provenance, entries=[])
@@ -662,8 +674,12 @@ class Simulator:
             self.costs_config,
             stress=self.stress,
         )
-        slippage_points = slippage_for(self.figure, self.costs_config, stress=self.stress)
-        commission = commission_for(intent.sizing_hint, self.costs_config, stress=self.stress)
+        slippage_points = slippage_for(
+            self.symbol, self.figure, self.costs_config, stress=self.stress
+        )
+        commission = commission_for(
+            self.symbol, intent.sizing_hint, self.costs_config, stress=self.stress
+        )
         points_total = spread_points + slippage_points
         cost_points = points_total * intent.sizing_hint * self.figure.value_per_point
         entry_cost = commission + cost_points
@@ -714,7 +730,15 @@ class Simulator:
         # con el P&L realizado que va al ledger, y nada lo detectaría.
         pnl_gross = self._floating_pnl(position, fill.price)
 
-        commission = commission_for(position.sizing_hint, self.costs_config, stress=self.stress)
+        # Media comisión y deslizamiento en toda salida (stop, objetivo, trailing, cierre de
+        # sesión, vela única: las tres rutas pasan por acá). El spread no se cobra al salir.
+        commission = commission_for(
+            self.symbol, position.sizing_hint, self.costs_config, stress=self.stress
+        )
+        slippage_points = slippage_for(
+            self.symbol, self.figure, self.costs_config, stress=self.stress
+        )
+        slippage_money = slippage_points * position.sizing_hint * self.figure.value_per_point
         days_held = (fill.timestamp_utc.date() - position.entry_time.date()).days
         swap_money = 0.0
         if days_held >= 1:
@@ -727,7 +751,7 @@ class Simulator:
             )
             swap_money = abs(swap_rate) * position.sizing_hint
 
-        total_cost = commission + swap_money
+        total_cost = commission + slippage_money + swap_money
         self.account.balance += pnl_gross - total_cost
 
         self.ledger.append(

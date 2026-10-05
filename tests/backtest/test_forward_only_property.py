@@ -24,7 +24,6 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from genesis.backtest.costs import load_costs_config
 from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.ledger import ExhaustionPolicy, LedgerEntry
 from genesis.backtest.simulator import Simulator
@@ -32,7 +31,11 @@ from genesis.data.mt5_export import RawParquetStore
 from genesis.data.profile import FirmProfile, load_firm_profile
 from genesis.data.store import AnnotatedBar
 from genesis.strategy.inspector import InspectorFunnelConfig
-from tests.backtest.fakes import FakeRiskCandidate, build_server_local_tick_chunk
+from tests.backtest.fakes import (
+    FakeRiskCandidate,
+    build_server_local_tick_chunk,
+    load_test_costs_config,
+)
 from tests.data.fakes import _default_symbol_figure
 from tests.strategy.fakes import make_annotated_bar
 
@@ -66,7 +69,7 @@ def _build_simulator(
         exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure("US500"),
         funnel_config=_FUNNEL_CONFIG,
-        costs_config=load_costs_config(),
+        costs_config=load_test_costs_config(),
         news_events=[],
         tick_store=None,
         starting_balance=100_000.0,
@@ -87,7 +90,7 @@ def _build_simulator_with_tick_store(
         exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure("US500"),
         funnel_config=_FUNNEL_CONFIG,
-        costs_config=load_costs_config(),
+        costs_config=load_test_costs_config(),
         news_events=[],
         tick_store=tick_store,
         starting_balance=100_000.0,

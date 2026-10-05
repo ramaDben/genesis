@@ -189,8 +189,8 @@ en el camino crítico hacia el primer veredicto.** El carril A construye la máq
 B no hay nada que responda. Ver §9.1 para el razonamiento completo y §9.4 para el orden vigente.
 
 **[rev 2026-09-22] Y B creció, porque «tener los datos» no alcanza.** Se le sumaron tres casillas que
-no son de datos sino del motor que los consume: **B.4** (los costos son globales y cuatro veces
-mayores que los reales), **B.5** (F-retardo estaba declarado y sin dueño) y **B.6** (el denominador
+no son de datos sino del motor que los consume: **B.4** (los costos son globales y muy superiores a
+los reales: en MNQ la comisión sola era 7,4 veces la publicada, ver B.4), **B.5** (F-retardo estaba declarado y sin dueño) y **B.6** (el denominador
 de C1 es «lo que le pases»). Las tres comparten el mismo defecto: el motor **responde igual** tenga
 razón o no, sin avisar. Un carril que entrega datos a un motor que miente no desbloquea el primer
 veredicto — lo vuelve peligroso.
@@ -1220,7 +1220,14 @@ el símbolo: `sizing_hint * config.commission_per_lot * stress`. El archivo que 
 
 **Contra la realidad medida:** MFFU cobra **$1,90** ida y vuelta en MNQ. El motor cobra $7,00 por
 lote más 1,5 puntos de spread —que en el micro, a $2 por punto, son $3,00—, o sea **≈$10 por
-operación contra ≈$2,40 reales: cuatro veces de más.**
+operación contra ≈$2,40 reales.** (La cuenta de 2026-09-22 estimaba un sobrecobro de 4×: se
+quedó corta, ver la nota siguiente.)
+
+> **[rev 2026-10-05, B.4a / #135] La cuenta de arriba se quedó corta.** El explore de B.4a encontró
+> un **doble cobro**: el simulador cobraba la comisión completa de $7 **al abrir y otra vez al
+> cerrar** (`simulator.py:666` y `:717` en `b0f2950`). La comisión sola era $14 por operación contra
+> $1,90 publicados: **7,4 veces** lo real. Sumando 1,5 puntos de spread y 0,2 de deslizamiento al
+> entrar, un MNQ pagaba **≈$17,40** por operación. B.4a lo corrige (comisión a mitad por pata).
 
 **Por qué importa más de lo que parece.** Un costo inflado no produce un error simétrico: produce
 **falsos negativos**. Génesis rechazaría estrategias viables, y cada rechazo **quema un ensayo en el
@@ -1257,6 +1264,12 @@ en fuente primaria de MFFU. (2) `commission_for` **falla con contexto** si el s�
 en vez de caer a una constante — la degradación silenciosa es el modo de falla que ya se pagó en
 `spread_for` (§7.1b). (3) Un golden test fija el costo de una operación de MNQ en $1,90 y una de MGC
 en $2,20. (4) `commission_per_lot` desaparece de `costs_config.json` como valor global.
+
+> **[rev 2026-10-05, gate de diseño de #135]** El punto (1) se cumple con una **tabla de costos por
+> instrumento en capa 3** (`backtest/costs_config.json`, una fila por símbolo con fuente y fecha de
+> lectura obligatorias), no con un campo nuevo en `SymbolFigure`. La comisión es de la firma, no del
+> contrato: MFFU la puede cambiar sin que el contrato cambie, y meterla en la ficha habría tocado los
+> sidecars ya guardados. Aprobado por el dueño en el gate (G1/H2).
 
 ### ☐ B.5 — F-retardo: está declarado, no planificado **[rev 2026-09-22 — casilla nueva]**
 
@@ -1357,7 +1370,8 @@ del lote se registran en el ledger **antes** de computar cualquier veredicto. (3
 DSR de la canasta diaria de **cada** estrategia, sin `n_candidatos_torneo`. (4) Test de invariancia:
 la misma estrategia con los mismos datos da el mismo veredicto corrida sola, en lote de tres, o en
 cualquier orden. (5) Test de dureza: ningún `n_trials` resulta menor que el del código actual para el
-mismo conjunto de ensayos. (6) El manifest sube de versión (`genesis-validation-j/3`): veredictos
+mismo conjunto de ensayos. (6) El manifest sube a la versión siguiente libre de `genesis-validation-j` (#130 usó la 3 y
+#135 la 4): veredictos
 por estrategia, sin claves de ganador ni `n_candidatos_torneo`.
 
 **Rompe a sabiendas** unos 13 tests de `tests/validation/test_verdict.py` y `test_verdict_ledger.py`

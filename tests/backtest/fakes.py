@@ -8,9 +8,16 @@ sin I/O de red. `FakeRiskCandidate` implementa `StrategyCandidate` **y**
 
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
+from pathlib import Path
 
 import pandas as pd
 
+from genesis.backtest.costs import (
+    CostsConfig,
+    FrictionStatus,
+    InstrumentCosts,
+    load_costs_config,
+)
 from genesis.backtest.ticks import TickRow, _day_window
 from genesis.data.metadata import ArtifactMetadata
 from genesis.data.mt5_export import Granularity, RawParquetStore
@@ -18,6 +25,45 @@ from genesis.data.store import AnnotatedBar
 from genesis.strategy.contract import CONFIG_VERSION, Direction, EntryIntent
 
 _DEFAULT_ON_BAR: Callable[[AnnotatedBar], list[EntryIntent]] = lambda bar: []  # noqa: E731
+
+TEST_COSTS_CONFIG_PATH = Path(__file__).parent / "fixtures" / "costs_config_test.json"
+_TEST_SOURCE_URL = "https://costos-de-prueba.invalid/genesis-tests"
+_TEST_READ_ON = "2026-10-02"
+
+
+def load_test_costs_config() -> CostsConfig:
+    """Tabla de costos de test (R19): fixture JSON cargado con el cargador real.
+
+    Sus valores reproducen bit a bit el modelo anterior a B.4a solo con fichas de
+    `tick_size` y `value_per_point` unitarios y sin cobertura de ticks en la entrada
+    (`design.md` D2, riesgo R-1). Un test que necesite fricción realista usa
+    `make_costs_config` con valores explícitos.
+    """
+    return load_costs_config(TEST_COSTS_CONFIG_PATH)
+
+
+def make_instrument_costs(
+    symbol: str,
+    *,
+    round_trip_usd: float = 14.0,
+    spread_ticks: float = 1.7,
+    slippage_ticks: float = 0.0,
+) -> InstrumentCosts:
+    """Fila de test con `friction_status`, `source_url` (*.invalid) y `read_on` fijos."""
+    return InstrumentCosts(
+        symbol=symbol,
+        round_trip_usd=round_trip_usd,
+        spread_ticks=spread_ticks,
+        slippage_ticks=slippage_ticks,
+        friction_status=FrictionStatus.PROVISIONAL_HASTA_B4B,
+        source_url=_TEST_SOURCE_URL,
+        read_on=_TEST_READ_ON,
+    )
+
+
+def make_costs_config(*rows: InstrumentCosts) -> CostsConfig:
+    """Tabla de costos de test armada con filas explícitas."""
+    return CostsConfig(instruments=rows)
 
 
 class FakeRiskCandidate:

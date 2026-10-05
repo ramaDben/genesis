@@ -26,7 +26,7 @@ from datetime import date
 import pandas as pd
 
 import genesis.backtest.ledger as backtest_ledger
-from genesis.backtest.costs import CostsConfig
+from genesis.backtest.costs import CostsConfig, costs_hash
 from genesis.backtest.errors import BacktestConfigError
 from genesis.backtest.exit_geometry import ExitGeometry, exit_geometry_hash
 from genesis.backtest.ledger import ExhaustionPolicy, FillRecord, Ledger, LedgerEntry, RunProvenance
@@ -438,10 +438,12 @@ def _stitch_oos_ledgers(
     firm_profile: FirmProfile,
     exit_geometry: ExitGeometry,
     dataset_hash: str,
+    costs_config: CostsConfig,
 ) -> Ledger:
     """Cose los `Ledger` OOS de todas las ventanas, en orden, bajo una única `RunProvenance` (R30).
 
-    Sin solape entre ventanas (garantizado por R9); solo contiene trades OOS (R62).
+    Sin solape entre ventanas (garantizado por R9); solo contiene trades OOS (R62). La
+    procedencia lleva la huella de costos de `symbol` (Change #135, R14).
     """
     house_rule = firm_profile.house_rule
     if house_rule is None:
@@ -457,6 +459,7 @@ def _stitch_oos_ledgers(
         firm_profile_hash=firm_profile_hash(firm_profile),
         exit_geometry_hash=exit_geometry_hash(exit_geometry),
         house_rule_hash=house_rule_hash(house_rule),
+        costs_hash=costs_hash(symbol, costs_config),
         exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
     )
     entries = [
@@ -576,6 +579,7 @@ def run_wfa(
         firm_profile=firm_profile,
         exit_geometry=resolved_exit_geometry,
         dataset_hash=full_dataset_hash,
+        costs_config=costs_config,
     )
     wfe = _compute_wfe(oos_ledger_cosido, windows)
     n_windows = len(windows)

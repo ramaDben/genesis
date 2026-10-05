@@ -27,6 +27,10 @@ Limitaciones honestas de este runner, no del pipeline:
   interprete con el `server_tz` de la ficha de firma. Solo tiene sentido junto a un
   `server_tz` que comparta las fechas de transición DST del reloj real del broker;
   con un `server_tz` de offset fijo (`Etc/GMT-N`) sobra y debe quedar en 0.
+- Spread y deslizamiento son un piso provisional hasta B.4b (`friction_status_by_symbol`
+  del manifest y sección del tearsheet). El store actual de CFD no tiene fila en la tabla
+  de costos por instrumento: el simulador se detiene con un error que lista los símbolos
+  que sí la tienen (Change #135).
 
 Uso:
     uv run python scripts/run_pipeline.py \\
@@ -398,6 +402,7 @@ def main() -> None:
     provenance = wfa_result.oos_ledger_cosido.provenance
     exit_geometry_hash_value = provenance.exit_geometry_hash
     house_rule_hash_value = provenance.house_rule_hash
+    costs_hash_value = provenance.costs_hash
 
     oos_ledgers = {args.symbol: wfa_result.oos_ledger_cosido}
     house_rule = firm_profile.house_rule
@@ -483,6 +488,11 @@ def main() -> None:
     print(f"  prop_sim: p_pass={prop_sim_result.p_pass}")
 
     dataset_hash_by_symbol = {args.symbol: store.chunk_hash(frame)}
+    # Misma clave que dataset_hash_by_symbol (args.symbol, no resolved_symbol): R15/R16.
+    costs_hash_by_symbol = {args.symbol: costs_hash_value}
+    friction_status_by_symbol = {
+        args.symbol: costs_config.instrument(args.symbol).friction_status.value
+    }
     firm_hash = firm_profile_hash(firm_profile)
     git_commit = current_git_commit()
 
@@ -495,6 +505,7 @@ def main() -> None:
                 firm_profile_hash=firm_hash,
                 exit_geometry_hash=exit_geometry_hash_value,
                 house_rule_hash=house_rule_hash_value,
+                costs_hash_by_symbol=costs_hash_by_symbol,
                 git_commit=git_commit,
             ),
         )
@@ -544,6 +555,8 @@ def main() -> None:
         firm_profile_hash=firm_hash,
         exit_geometry_hash=exit_geometry_hash_value,
         house_rule_hash=house_rule_hash_value,
+        costs_hash_by_symbol=costs_hash_by_symbol,
+        friction_status_by_symbol=friction_status_by_symbol,
         prop_economics_profile_hash_value=prop_economics_profile_hash(prop_economics),
         seeds={candidate_id: {"mc_seed": 13, "prop_sim_seed": prop_sim_config.seed}},
         git_commit=git_commit,

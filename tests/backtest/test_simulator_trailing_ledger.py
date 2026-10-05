@@ -11,7 +11,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from genesis.backtest.costs import load_costs_config
 from genesis.backtest.exit_geometry import load_exit_geometry
 from genesis.backtest.ledger import FillRecord, TrailingStopMoved
 from genesis.backtest.simulator import (
@@ -22,6 +21,7 @@ from genesis.backtest.simulator import (
 from genesis.data.profile import load_firm_profile
 from genesis.strategy.contract import Direction, EntryIntent, StrategyCandidate
 from genesis.strategy.inspector import InspectorFunnelConfig
+from tests.backtest.fakes import load_test_costs_config
 from tests.data.fakes import _default_symbol_figure
 from tests.strategy.fakes import make_annotated_bar
 
@@ -49,7 +49,7 @@ def test_criterio_a7_y_a8_golden_test_trailing_stop_fill_y_ledger() -> None:
         exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure(_SYMBOL),
         funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
-        costs_config=load_costs_config(),
+        costs_config=load_test_costs_config(),
         news_events=[],
         tick_store=None,
         starting_balance=100_000.0,
@@ -158,7 +158,7 @@ def test_criterio_a7_y_a8_short_position_trailing_stop_fill_y_ledger() -> None:
         exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure(_SYMBOL),
         funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
-        costs_config=load_costs_config(),
+        costs_config=load_test_costs_config(),
         news_events=[],
         tick_store=None,
         starting_balance=100_000.0,
@@ -268,7 +268,7 @@ def test_criterio_a10_determinismo() -> None:
             exit_geometry=load_exit_geometry(),
             figure=_default_symbol_figure(_SYMBOL),
             funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
-            costs_config=load_costs_config(),
+            costs_config=load_test_costs_config(),
             news_events=[],
             tick_store=None,
             starting_balance=100_000.0,
@@ -321,7 +321,7 @@ def test_criterio_a11_ningun_consumidor_ve_stop_viejo() -> None:
         exit_geometry=load_exit_geometry(),
         figure=_default_symbol_figure(_SYMBOL),
         funnel_config=InspectorFunnelConfig(min_rr=2.0, min_lot=0.01, max_lot=50.0),
-        costs_config=load_costs_config(),
+        costs_config=load_test_costs_config(),
         news_events=[],
         tick_store=None,
         starting_balance=100_000.0,

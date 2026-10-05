@@ -50,6 +50,7 @@ def _daily_ledger(daily_values: list, *, symbol: str = "US500") -> Ledger:
         firm_profile_hash="slow-hash",
         exit_geometry_hash="slow-hash",
         house_rule_hash="slow-hash",
+        costs_hash="test-costs-hash",
         exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
     )
     base_day = date(2024, 1, 1)

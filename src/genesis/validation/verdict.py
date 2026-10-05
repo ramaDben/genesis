@@ -50,14 +50,21 @@ from genesis.validation.sensitivity import SensitivityResult
 from genesis.validation.trial_ledger import TrialLedger, TrialLedgerSummary, TrialOutcomeKind
 from genesis.validation.wfa import WfaResult
 
-CONFIG_VERSION: str = "genesis-validation-j/3"
+CONFIG_VERSION: str = "genesis-validation-j/4"
 """Versión del esquema de configuración de este Change (Issue J, decisión 10 §3).
 
 `/2` desde Change #109: `manifest.json` sustituye `risk_profile_hash` por
 `exit_geometry_hash` + `house_rule_hash`, y agrega el bloque de sesgo del proxy (D7).
 `/3` desde Change #130: cada candidato del manifest gana `declared_universe`,
 `symbols_evaluated`, `symbols_not_evaluated` y `status` de 3 valores por símbolo; C1 se mide
-contra el universo declarado."""
+contra el universo declarado.
+`/4` desde Change #135: el manifest gana `costs_hash_by_symbol` (la misma huella que entra
+al `trial_id`) y `friction_status_by_symbol` (calidad de la fuente de spread/deslizamiento;
+fuera del `trial_id`)."""
+
+# Valor de `FrictionStatus.PROVISIONAL_HASTA_B4B` de capa 3, como texto: el manifest recibe
+# `str` puros y el tearsheet solo lo traduce a lenguaje llano (Change #135, AE5).
+_FRICTION_PROVISIONAL = "provisional_hasta_b4b"
 
 # --- Umbrales de gate, constantes de módulo nombradas (ADR-J11, R63/R65) ---
 _G1_MIN_TRADES_OOS = 300
@@ -1332,6 +1339,44 @@ def _purged_cv_summary_payload(
     return summary
 
 
+def _check_identity_maps_share_keys(
+    dataset_hash_by_symbol: Mapping[str, str],
+    costs_hash_by_symbol: Mapping[str, str],
+    friction_status_by_symbol: Mapping[str, str],
+) -> None:
+    """Los tres mapas por símbolo del manifest cubren los mismos símbolos (Change #135, D6).
+
+    Un manifest no declara costos de un símbolo que no evaluó, ni evalúa uno sin declarar
+    sus costos. Cubre también el camino sin ledger, donde no corre la guarda de R16.
+    """
+    dataset_keys = sorted(dataset_hash_by_symbol)
+    costs_keys = sorted(costs_hash_by_symbol)
+    friction_keys = sorted(friction_status_by_symbol)
+    if not dataset_keys == costs_keys == friction_keys:
+        message = (
+            "Los mapas por símbolo del manifest deben tener las mismas claves (Change #135, "
+            f"D6): dataset_hash_by_symbol={dataset_keys!r}, "
+            f"costs_hash_by_symbol={costs_keys!r}, "
+            f"friction_status_by_symbol={friction_keys!r}."
+        )
+        raise VerdictConfigError(message)
+
+
+def _friction_status_section(friction_status_by_symbol: Mapping[str, str]) -> str:
+    """Sección del tearsheet con la marca de fricción por símbolo (Change #135, AE5)."""
+    lines = ["", "## Costos de fricción", ""]
+    for symbol in sorted(friction_status_by_symbol):
+        status = friction_status_by_symbol[symbol]
+        if status == _FRICTION_PROVISIONAL:
+            lines.append(
+                f"- `{symbol}`: spread y deslizamiento provisionales hasta B.4b "
+                f"(piso sin medición de mercado; `{status}`)."
+            )
+        else:
+            lines.append(f"- `{symbol}`: `{status}`.")
+    return "\n".join(lines) + "\n"
+
+
 def verdict_result_to_manifest_json(
     result: VerdictResult,
     config_version: str,
@@ -1339,6 +1384,8 @@ def verdict_result_to_manifest_json(
     firm_profile_hash: str,
     exit_geometry_hash: str,
     house_rule_hash: str,
+    costs_hash_by_symbol: Mapping[str, str],
+    friction_status_by_symbol: Mapping[str, str],
     prop_economics_profile_hash_value: str,
     seeds: Mapping[str, Mapping[str, int]],
     git_commit: str,
@@ -1348,7 +1395,9 @@ def verdict_result_to_manifest_json(
 
     Campos mínimos de R98: `config_version`, `dataset_hash_by_symbol`,
     `firm_profile_hash`, `exit_geometry_hash`, `house_rule_hash` (Change #109, D9:
-    sustituyen a `risk_profile_hash`), `prop_economics_profile_hash`,
+    sustituyen a `risk_profile_hash`), `costs_hash_by_symbol` y
+    `friction_status_by_symbol` (Change #135, con las mismas claves que
+    `dataset_hash_by_symbol`, D6), `prop_economics_profile_hash`,
     `candidate_ids`, `winning_candidate_id`, `verdict`, `seeds`, `git_commit`,
     `n_candidatos_torneo`, `n_trials_deflactado`, `t1_dsr`/`t1_dsr_pre_deflation`,
     `economics_confirmed`, `prop_sim_bias` (D7: sesgo del proxy cierre-a-cierre),
@@ -1356,6 +1405,9 @@ def verdict_result_to_manifest_json(
     `purged_cv_summary` si `purged_cv_results_by_candidate` no es `None` (R106).
     Fuera de `__all__` (§1.10): detalle de composición de `write_verdict_artifacts`.
     """
+    _check_identity_maps_share_keys(
+        dataset_hash_by_symbol, costs_hash_by_symbol, friction_status_by_symbol
+    )
     payload: dict = {
         "config_version": config_version,
         "verdict_schema_version": CONFIG_VERSION,
@@ -1363,6 +1415,8 @@ def verdict_result_to_manifest_json(
         "firm_profile_hash": firm_profile_hash,
         "exit_geometry_hash": exit_geometry_hash,
         "house_rule_hash": house_rule_hash,
+        "costs_hash_by_symbol": dict(costs_hash_by_symbol),
+        "friction_status_by_symbol": dict(friction_status_by_symbol),
         "prop_economics_profile_hash": prop_economics_profile_hash_value,
         "candidate_ids": sorted(result.candidate_summaries),
         "winning_candidate_id": result.winning_candidate_id,
@@ -1416,6 +1470,8 @@ def write_verdict_artifacts(
     firm_profile_hash: str,
     exit_geometry_hash: str,
     house_rule_hash: str,
+    costs_hash_by_symbol: Mapping[str, str],
+    friction_status_by_symbol: Mapping[str, str],
     prop_economics_profile_hash_value: str,
     seeds: Mapping[str, Mapping[str, int]],
     git_commit: str | None = None,
@@ -1425,22 +1481,27 @@ def write_verdict_artifacts(
 
     `output_dir` siempre provisto por el llamador (sin ruta por defecto).
     `git_commit is None` -> `current_git_commit()` (`genesis.data.metadata`),
-    propagando `GenesisDataError` sin capturar (R101).
+    propagando `GenesisDataError` sin capturar (R101). El tearsheet agrega una sección con
+    la marca de fricción por símbolo (Change #135, AE5).
     """
     resolved_git_commit = git_commit if git_commit is not None else current_git_commit()
     manifest_json = verdict_result_to_manifest_json(
         result,
-        config_version,
-        dataset_hash_by_symbol,
-        firm_profile_hash,
-        exit_geometry_hash,
-        house_rule_hash,
-        prop_economics_profile_hash_value,
-        seeds,
-        resolved_git_commit,
-        purged_cv_results_by_candidate,
+        config_version=config_version,
+        dataset_hash_by_symbol=dataset_hash_by_symbol,
+        firm_profile_hash=firm_profile_hash,
+        exit_geometry_hash=exit_geometry_hash,
+        house_rule_hash=house_rule_hash,
+        costs_hash_by_symbol=costs_hash_by_symbol,
+        friction_status_by_symbol=friction_status_by_symbol,
+        prop_economics_profile_hash_value=prop_economics_profile_hash_value,
+        seeds=seeds,
+        git_commit=resolved_git_commit,
+        purged_cv_results_by_candidate=purged_cv_results_by_candidate,
     )
-    tearsheet_markdown = render_tearsheet(result)
+    tearsheet_markdown = render_tearsheet(result) + _friction_status_section(
+        friction_status_by_symbol
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "manifest.json"

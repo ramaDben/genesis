@@ -381,7 +381,7 @@ wheels = [
 
 [[package]]
 name = "genesis"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "metatrader5", marker = "sys_platform == 'win32'" },

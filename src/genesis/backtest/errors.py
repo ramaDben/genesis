@@ -27,8 +27,10 @@ class SessionBoundaryError(GenesisBacktestError):
 class BacktestConfigError(GenesisBacktestError):
     """Configuración inválida o incompleta de la capa 3 (R3).
 
-    Disparadores normativos: (a) ficha de riesgo o de costos inválida/incompleta al
-    cargar el recurso empaquetado; (b) el candidato inyectado no implementa
-    `RiskLevelsProvider`; (c) el símbolo solicitado no está en la tabla de sesiones
-    `genesis.data.sessions.SESSIONS`.
+    Disparadores normativos: (a) ficha de riesgo inválida/incompleta al cargar el
+    recurso empaquetado, o tabla de costos inválida al cargarla o al construir una
+    fila/tabla; (b) el candidato inyectado no implementa `RiskLevelsProvider`; (c) el
+    símbolo solicitado no está en la tabla de sesiones `genesis.data.sessions.SESSIONS`;
+    (d) el símbolo no tiene fila en la tabla de costos por instrumento (Change #135,
+    R9/R11).
     """

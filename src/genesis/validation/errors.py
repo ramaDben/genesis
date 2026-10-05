@@ -102,7 +102,8 @@ class VerdictConfigError(GenesisValidationError):
     de la canasta de un candidato en los pesos vol-inversa del ensemble; `(f)` universo
     declarado del candidato de tamaño < 2 al emitir veredicto, o símbolo evaluado / marcado
     no aplicable ausente de `declared_universe`, o símbolo a la vez evaluado y no aplicable
-    (Change #130).
+    (Change #130); `(g)` mapas por símbolo de identidad del manifest con claves distintas
+    (Change #135, D6).
     """
 
 
@@ -116,5 +117,7 @@ class TrialLedgerConfigError(GenesisValidationError):
     obligatorias ausentes, u `outcome` fuera de `TrialOutcomeKind`) al leerla con
     `read_trial_summary` (Q7 del diseño); `(d)` un `CandidateValidationBundle` con
     `candidate_config is None` cuando `run_verdict` recibe un `ledger` no `None`
-    (Q5 del diseño, fail-fast, nunca omisión silenciosa del candidato en el conteo).
+    (Q5 del diseño, fail-fast, nunca omisión silenciosa del candidato en el conteo);
+    `(e)` un `TrialIdentityContext` con `costs_hash_by_symbol` cuyas claves no coinciden
+    con `dataset_hash_by_symbol` (Change #135, R16).
     """

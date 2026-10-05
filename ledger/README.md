@@ -16,7 +16,8 @@ derivado de la configuración completa del candidato + las claves de identidad
 institucional de la corrida), `outcome` (`wfa-completado` o `descartado`, con
 `discard_reason` obligatorio en el segundo caso) y las claves de trazabilidad
 (`config_version`, `dataset_hash_by_symbol`, `firm_profile_hash`,
-`exit_geometry_hash`, `house_rule_hash`, `git_commit`, `recorded_at_utc`).
+`exit_geometry_hash`, `house_rule_hash`, `costs_hash_by_symbol`, `git_commit`,
+`recorded_at_utc`).
 
 ## Corte de Change #109
 
@@ -26,6 +27,15 @@ institucional de la corrida), `outcome` (`wfa-completado` o `descartado`, con
 corrieron bajo un contrato de cuenta distinto y **no se mezclan** con los nuevos:
 se archivaron en `ledger/archive/trials_pre_109.jsonl` (no leído por
 `read_trial_summary`, es un respaldo histórico) y este archivo arrancó limpio.
+
+## Corte de Change #135
+
+La identidad del ensayo gana `costs_hash_by_symbol`: la huella de la fila de costos
+de cada símbolo evaluado (comisión, spread y deslizamiento; no la cita). Si cambia
+un costo, la corrida nueva es otro ensayo. `CONFIG_VERSION` pasa a
+`genesis-validation-trial-ledger/2`. Al corte el ledger estaba **vacío** (0 bytes),
+así que no hubo nada que archivar. Las filas sin `costs_hash_by_symbol` son
+**ilegibles**: no hay lectura retrocompatible.
 
 ## Cómo se lee
 

@@ -2058,3 +2058,934 @@ configuraciones distintas comparten `trial_id`. **Verifica R15, que no tenía cr
 - `docs/SPEC_GENESIS_v1.4_PropTrading_TorneoCandidatos.md:459` (el spec ya lo promete) y §9
   (propiedad central de anti-anticipación).
 - LeBeau & Lucas (1992), origen del par `(N = 22, k = 3,0)`.
+
+<!-- change:135-b-4a-comision-por-instrumento-en-la-ficha-cierra-pa-106-c -->
+# Specification: B.4a — costos por instrumento (comisión, spread y deslizamiento); cierra PA-106-C
+
+Change #135 (Issue #135). Dominio `backtest` (toca además `validation`, por la enmienda E2, y
+`scripts/run_pipeline.py`, por la misma razón). Fase `specify`. Formaliza `idea.md` y `proposal.md`
+**con sus enmiendas E1, E2 y E3** (que mandan sobre el texto anterior de la propuesta cuando chocan);
+no reabre ninguna de sus decisiones y deja marcadas las que siguen siendo de un humano o de `design`.
+Contra: `b0f2950` (HEAD de `main` al iniciar esta fase). Todo `archivo:línea` de `src/` fue
+verificado contra ese commit; las diferencias con lo que citan `idea.md`/`proposal.md` (escritos
+contra `94aba5a`) están en la §9.
+
+## 0. Resumen para el dueño (lenguaje llano)
+
+Hoy el motor cobra **$7 de comisión al abrir y otros $7 al cerrar, en cualquier contrato**, más 1,5
+puntos de spread y 0,2 de deslizamiento al abrir. Un MNQ de un contrato queda en **≈$17,40 de costo
+contra $1,90 de comisión publicada por MFFU**. En M6E el mismo spread de 1,5 puntos serían $18.750.
+
+Este change reemplaza esos tres números globales por **una tabla con una fila por contrato**:
+
+- La **comisión** es la que MFFU publica «ida y vuelta»; se cobra **la mitad al abrir y la mitad al
+  cerrar**. Una operación de un MNQ suma exactamente $1,90; una de MGC, $2,20.
+- El **spread** y el **deslizamiento** pasan a medirse en **ticks** (el tick de cada contrato), con un
+  piso provisional de 1 tick cada uno **hasta B.4b**. El deslizamiento se cobra **también al salir**
+  (un stop desliza); el spread se cobra una sola vez, al entrar.
+- Si el contrato **no tiene fila, el simulador no arranca** (ni cae a un número de respaldo).
+- Los costos pasan a ser **parte de la identidad del ensayo**: si cambia una cifra, es otro ensayo y
+  queda registrado como tal.
+- **Antes de aplicar, usted firma las cinco cifras** (§R23). Ningún agente las da por buenas.
+
+Con 1+1 ticks, el costo total ida y vuelta de un contrato queda entre $3,40 (MNQ) y $5,20 (MGC),
+todos plausibles (tabla T1). Es un piso, no una medición: B.4b lo reemplaza.
+
+## 1. Objetivo
+
+Que el motor de capa 3 cobre, para cada instrumento, los costos de ese instrumento y de esa firma, y
+que lo haga de forma verificable: cada cifra con su fuente y su fecha de lectura exigidas por el
+cargador, ningún valor de respaldo, la falla ocurriendo antes de la primera barra, y los costos
+visibles en la procedencia de cada corrida y en la identidad de cada ensayo del ledger.
+
+Esto cierra **PA-106-C** (`SPEC_GENESIS_v1.5...md`, §11.1): las comisiones por contrato entran al
+motor, y G3 (PF con costos completos), G9 (PF con estrés ×1,5) y los gates P dejan de correr sobre
+un número heredado de los CFDs. **No** significa que corran sobre costos completamente verificados:
+la **comisión** queda verificada; el **spread y el deslizamiento** siguen provisionales hasta B.4b, y
+el texto de cierre de PA-106-C lo dice (R22).
+
+## 2. Alcance IN / OUT
+
+### IN
+
+1. Tabla de costos por instrumento en `src/genesis/backtest/costs_config.json` con cinco filas de
+   futuros CME (T1), cada una con `round_trip_usd`, `spread_ticks`, `slippage_ticks`,
+   `friction_status`, `source_url` y `read_on`, y su validación de carga y de construcción (R1-R4).
+2. `commission_for`, `spread_for` y `slippage_for` con símbolo, por pata, en ticks, y con falla con
+   contexto cuando falta la fila (R5-R9).
+3. Cobro por pata en `Simulator`: comisión en las dos patas (mitad cada una), deslizamiento en las dos
+   patas, spread una vez en la entrada (R10).
+4. Validación de la fila del símbolo en `Simulator.__init__`, con orden determinista respecto de la
+   sesión (R11).
+5. `CostsConfig` inmutable, hasheable y comparable por valor (R12).
+6. `costs_hash` por símbolo en `RunProvenance`, en `compute_trial_id`, en `TrialIdentityContext`/
+   `TrialRecord`/`ledger/trials.jsonl` y en el manifiesto del veredicto (R13-R17); cambio mínimo en
+   `scripts/run_pipeline.py` para propagarlo (R18).
+7. Adaptación de los tests existentes (R19), reescritura del test A7 (R20) y goldens (R21).
+8. Docs: roadmap, spec v1.5 (PA-106-C), memorias de Serena, `ledger/README.md` (R22).
+9. Precondición de `apply`: firma humana de las cinco cifras y de la cita (R23).
+
+### OUT (YAGNI explícito)
+
+- **B.4b**: leer el `bbo-1m`, su loader y su almacenamiento. La rama de ticks reales de `spread_for`
+  se conserva con su valor actual.
+- **B.2 / B.3**: fichas de contrato CME, exportador, clave contrato → raíz (`MNQZ6` → `MNQ`) y
+  **`SESSIONS`** (`data/sessions.py:45-74`): MNQ y los demás no se agregan. Un MNQ sigue sin poder
+  simularse por el `Simulator` (lo rechaza la tabla de sesiones); por eso los goldens son a nivel de
+  función (R21).
+- **`SymbolFigure`, sidecars (#114), `ArtifactMetadata`, `FirmProfile`, `firm_profile_hash`**: no se
+  tocan (`git diff --stat -- src/genesis/data` vacío).
+- **`swap_for`**: sin cambios, aunque los futuros no tengan swap. El simulador lo cobra con
+  `days_held >= 1` (`simulator.py:720`); es un tema del modelo de tenencia nocturna.
+- **Distinguir el tipo de salida** (stop, objetivo, cierre de sesión, trailing) para el deslizamiento:
+  se cobra en toda salida (R10). Distinguirlas es modelo de fill, no de esta casilla.
+- **Cobro de spread en la salida**: el spread completo de la entrada ya equivale a dos medios spreads.
+- **Validar `figure.symbol == symbol`**: hoy los tests usan una misma ficha con símbolos distintos;
+  agregar la guarda los rompería y no es objeto de B.4a.
+- **Medir spread o deslizamiento**: las cifras de 1 tick son un piso provisional sin fuente de mercado
+  (E1), no una calibración.
+- **`scripts/bench_simulator.py`**: sin diff. Corre sobre `data/raw/` (solo CFDs/forex/BTCUSDT), así
+  que tras el cambio falla con el error claro de R11; es coherente con el pivote a CME.
+- **Reparar el desfase de las specs vivas** con `risk_profile_hash` (R98, R100, R2, R4, R45; ver §3 y
+  §9): el delta agrega lo suyo y no reescribe lo ajeno. Las specs vivas (`.pulse/specs/**`) las
+  actualiza el engine al cerrar; nadie las edita a mano.
+
+## 3. Delta sobre las specs vivas
+
+Las specs vivas acumulan los requisitos de cada change con numeración propia (`R1` existe en varios
+changes). Aquí se cita como `R<n> (#<change>)`. Los `R1..R24` de este documento son locales a este
+change.
+
+### MODIFICA
+
+| Spec viva | Requisito | Qué cambia | Local |
+|---|---|---|---|
+| backtest | **R37 (#6)** | `spread_for`/`commission_for`/`slippage_for` reciben el símbolo y lo **usan**; `commission_for` devuelve **una pata**; las tres fallan con contexto si el símbolo no tiene fila. `swap_for` sin cambios. | R5-R7, R9 |
+| backtest | **R38 (#6)** | `stress` sigue siendo factor final de primera clase; se precisa que multiplica el costo de **cada pata** y el spread de entrada. Sin cambio de semántica. | R8 |
+| backtest | **R39 (#6)** | `load_costs_config` ya no carga «defaults» globales sino una **tabla por instrumento con fuente obligatoria**, con rechazo explícito de cada caso inválido. | R1-R4 |
+| backtest | **R40 (#6)** | «Sin costos válidos no hay reporte» incluye «**sin fila de costos para el símbolo**», verificado en `Simulator.__init__` con orden fijo. | R11 |
+| backtest | **R45 (#6)** | `RunProvenance` gana `costs_hash`. (La enumeración literal de R45 está desfasada desde #109; el delta solo agrega esta huella.) | R13, R14 |
+| backtest | **R111 (#24)** | Se **conserva su sustancia** (`spread_for` consume la ventana de ticks ya filtrada y no invoca `has_sufficient_tick_coverage`/`ticks_in_bar_window`) y se **retira su prohibición de modificar el archivo**, que era una restricción de alcance del change #24 (R109 de ese mismo change lo declara «en este Change»). | R6 |
+| backtest | **`BacktestConfigError`** (R3 y tabla de decisiones, #6) | Gana el disparador (d): «símbolo sin fila en la tabla de costos». | R11 |
+| validation | **R2 (#53)** | `TrialRecord` gana `costs_hash_by_symbol`. (La enumeración literal está desfasada desde #109.) | R16 |
+| validation | **R4 (#53)** | `compute_trial_id` gana el parámetro `costs_hash_by_symbol`. | R15 |
+| validation | **R15 (#53)** | Su cláusula «las mismas claves de identidad que recibe `verdict_result_to_manifest_json`» obliga a que el manifiesto reciba también la huella de costos. | R17 |
+| validation | **R98 y R100 (#14)** | El manifiesto y `write_verdict_artifacts` reciben y serializan `costs_hash_by_symbol`; `verdict_schema_version` pasa a `/4`. | R17 |
+
+### AGREGA
+
+- Tabla `T1` y su validación (R1-R4); cobro por pata (R10); inmutabilidad de `CostsConfig` (R12);
+  `costs_hash` y su serialización canónica (R13); guarda de coherencia de claves en
+  `TrialIdentityContext` (R16); propagación en el runner (R18); fixture de test y reescritura de A7
+  (R19, R20); goldens (R21); documentación (R22); precondición de firma (R23); invariantes de lo que
+  no cambia (R24).
+
+### ELIMINA
+
+No se elimina ningún requisito vivo completo. Se eliminan **campos y comportamientos**:
+
+- Los tres globales `default_spread_points`, `commission_per_lot`, `slippage_points`, tanto de
+  `CostsConfig` como de `costs_config.json` (`costs.py:24-30`, `costs_config.json:2-4`).
+- El **fallback global conservador** de `spread_for` (`costs.py:52-53`, `:45`), sustituido por
+  `spread_ticks` de la fila.
+- El **doble cobro**: la comisión por lote completa en cada pata (`simulator.py:666` y `:717`).
+- La **asimetría «deslizamiento solo en la entrada»**: la salida deja de pagar solo comisión y swap
+  (`simulator.py:717-731`).
+- La prohibición de modificar `costs.py::spread_for` (R111 de #24), según arriba.
+
+## 4. Requisitos funcionales
+
+Convención: **DEBE / NO DEBE** normativo. Cada requisito lleva sus escenarios en formato
+`DADO / CUANDO / ENTONCES` (evals ejecutables, `.agents/rules/eval-tdd-conventions.md`). Los nombres
+de test son orientativos: `apply` puede ajustarlos conservando la semántica. `==` significa
+igualdad exacta (no `approx`).
+
+### Tabla T1 — fuente única de las cinco filas
+
+Fuente: <https://help.myfundedfutures.com/en/articles/9735811>, «Futures Instrument List», columna
+«Total Cost Round Trip», fechada por la página 24-ago-2026, leída el **2026-10-02**. Las columnas
+marcadas «derivado» no se leen de la fuente.
+
+| Símbolo | `round_trip_usd` | Por pata (= ÷2) | Tick | Valor del tick | $/punto (derivado) | Fricción de 1 tick en USD (derivado) | Total ida y vuelta con 1+1 ticks (derivado) |
+|---|---|---|---|---|---|---|---|
+| MNQ | 1,90 | 0,95 | 0,25 | $0,50 | 2,00 | 0,50 | **3,40** |
+| MGC | 2,20 | 1,10 | 0,10 | $1,00 | 10,00 | 1,00 | **5,20** |
+| MCL | 1,16 | 0,58 | 0,01 | $1,00 | 100,00 | 1,00 | **4,16** |
+| M6E | 1,44 | 0,72 | 0,0001 | $1,25 | 12.500 | 1,25 | **5,19** |
+| MBT | 3,50 | 1,75 | 5,00 | $0,50 | 0,10 | 0,50 | **5,00** |
+
+«Total con 1+1 ticks» = comisión + 1 tick de spread (una vez) + 1 tick de deslizamiento por pata
+(dos veces) = `round_trip_usd + 3 × valor del tick`, por contrato, con `stress = 1`.
+
+**H1 resuelta por el orquestador (2026-10-02; se aprueba en el gate de design): cinco filas, sin MES
+ni MYM.** El roadmap rechazó comprar esos datos (`ROADMAP_ARQUITECTO.md`, B.7 y §7.1e) y el DoD de
+B.4a pide la comisión de «cada instrumento **del universo**». Dos filas que ningún flujo usa serían
+configuración muerta y dos cifras más para firmar. Agregarlas después cuesta una fila y una firma.
+MFFU publica $1,90 para ambas, y esa lectura queda registrada en §9.
+
+### Tabla de costos y carga
+
+**R1 — Estructura de la tabla.** *(Modifica R39 (#6); mapea proposal «What Changes» 1-2.)*
+`CostsConfig` DEBE representar **una fila por símbolo** y cada fila DEBE tener exactamente estos
+campos:
+
+| Campo | Tipo y rango | Significado |
+|---|---|---|
+| `round_trip_usd` | número finito, `> 0` | USD por contrato, ida y vuelta: **literalmente** la columna «Total Cost Round Trip» de la lista de MFFU |
+| `spread_ticks` | número finito, `>= 0` | spread de entrada, en ticks (múltiplos de `SymbolFigure.tick_size`) |
+| `slippage_ticks` | número finito, `>= 0` | deslizamiento **por pata**, en ticks |
+| `friction_status` | cadena, valor ∈ {`provisional_hasta_b4b`} | marca de procedencia de `spread_ticks` y `slippage_ticks` |
+| `source_url` | cadena, `https://` con host | fuente primaria de `round_trip_usd` |
+| `read_on` | cadena `YYYY-MM-DD` | fecha de la lectura de la fuente |
+
+`CostsConfig` NO DEBE conservar `default_spread_points`, `commission_per_lot` ni
+`slippage_points`, ni ningún valor global equivalente. La **clave** de cada fila es el `symbol`
+convencional tal como llega a `Simulator`/`run_wfa` (p. ej. `MNQ`; en `run_pipeline.py` es
+`args.symbol`, no `resolved_symbol`), con **comparación exacta**, sin normalizar mayúsculas ni
+sufijos. Ni el nombre del terminal (`US500.cash`) ni el código de contrato (`MNQZ6`) son claves: el
+mapeo contrato → raíz es de B.3. El conjunto cerrado de `friction_status` se amplía solo cuando B.4b
+defina un valor «medido».
+
+- E1.1 DADO el árbol tras `apply` CUANDO `rg -n "commission_per_lot|default_spread_points" src scripts`
+  y `rg -n "config\.slippage_points|\"slippage_points\"" src` ENTONCES 0 coincidencias.
+  *(No usar `slippage_points` pelado: sobrevive como variable local en `simulator.py:665-667`.)*
+- E1.2 DADO el JSON empaquetado cargado CUANDO se pide la fila de `"mnq"` (minúsculas) ENTONCES
+  `BacktestConfigError` (no hay normalización). Test: `test_clave_de_simbolo_es_exacta`.
+
+**R2 — El JSON empaquetado trae exactamente T1.** *(Modifica R39 (#6); mapea criterios 1 y 2 de la
+propuesta.)* `costs_config.json` DEBE contener **exactamente las cinco filas de T1** y ninguna otra:
+ni de CFD, ni de test, ni de respaldo. Cada fila DEBE llevar
+`source_url = "https://help.myfundedfutures.com/en/articles/9735811"`,
+`read_on = "2026-10-02"` (o la fecha de la relectura del dueño si es posterior, R23),
+`spread_ticks = 1`, `slippage_ticks = 1` y `friction_status = "provisional_hasta_b4b"`. El archivo
+PUEDE llevar claves de comentario en la raíz que empiecen con `_` (convención de
+`profiles/mffu_rapid_eod_50k.json`); DEBE llevar `_nota` con lo que el dueño declare sobre el alcance
+de «Total Cost Round Trip» (R23).
+
+- E2.1 DADO `load_costs_config()` CUANDO se leen sus símbolos y filas ENTONCES los símbolos son
+  `M6E, MBT, MCL, MGC, MNQ` y, para cada uno, `round_trip_usd == ` el valor de T1,
+  `spread_ticks == 1.0`, `slippage_ticks == 1.0`, `friction_status`, `source_url` exacta y `read_on`
+  con la fecha firmada. Test:
+  `test_load_costs_config_empaquetado_trae_exactamente_las_cinco_filas`.
+- E2.2 DADO `src/genesis/backtest/costs_config.json` CUANDO `rg -c '"round_trip_usd"'` ENTONCES `5`, y
+  `rg -n "US500|NAS100|US30|GER40|XAUUSD|EURUSD|GBPUSD|USDJPY|BTCUSDT|SYM_|TEST" <archivo>` ENTONCES
+  0 coincidencias.
+
+**R3 — Validación de carga y de construcción.** *(Modifica R39 (#6); mapea criterio 6.)* Todo camino
+que produzca una fila o un `CostsConfig` —el cargador **o la construcción directa**— DEBE rechazar
+con `BacktestConfigError` cada caso de la lista siguiente. El mensaje DEBE citar la fuente (ruta o
+recurso), el símbolo, el campo y el valor recibido. Los campos numéricos aceptan `int` y `float`
+(se normalizan a `float`) y rechazan `bool`, cadenas, `null`, listas y objetos. La validación NO DEBE
+tocar la red ni el reloj: `source_url` no se resuelve y `read_on` no se compara con «hoy».
+
+| Caso | Se rechaza cuando |
+|---|---|
+| T-a | el JSON no se puede parsear |
+| T-b | la raíz no es un objeto |
+| T-c | falta `instruments`, o no es un objeto |
+| T-d | `instruments` está vacío |
+| T-e | hay una clave desconocida en la raíz que no empieza con `_`, **incluidas las del formato viejo** (`commission_per_lot`, `default_spread_points`, `slippage_points`) |
+| T-f | un símbolo aparece **duplicado** en el objeto JSON (el parser lo resolvería en silencio con el último) |
+| T-g | un símbolo es vacío o tiene espacios en los extremos |
+| F-a | una fila no es un objeto |
+| F-b | falta cualquiera de los seis campos de R1 |
+| F-c | una fila trae una clave desconocida |
+| F-d | `round_trip_usd` es `<= 0`, `NaN`, `±Infinity`, o de tipo no numérico (incluido `true`) |
+| F-e | `spread_ticks` o `slippage_ticks` es `< 0`, `NaN`, `±Infinity`, o de tipo no numérico |
+| F-f | `friction_status` está fuera del conjunto cerrado de R1 |
+| F-g | `source_url` es vacía, solo espacios, no empieza con `https://` o no tiene host |
+| F-h | `read_on` no cumple `^\d{4}-\d{2}-\d{2}$` o no es una fecha del calendario (p. ej. `2026-02-30`) |
+
+`spread_ticks = 0` y `slippage_ticks = 0` **son válidos**: el cargador no distingue producción de
+test. El guardián de producción es E2.1 (el empaquetado debe traer 1 y 1).
+
+- E3.1 DADO el JSON empaquetado y una mutación por caso de la tabla (una por letra, y una por
+  variante de tipo/valor dentro de F-d, F-e y F-g) CUANDO `load_costs_config(path)` ENTONCES
+  `BacktestConfigError` cuyo texto nombra el símbolo (si aplica) y el campo. Test parametrizado:
+  `test_load_costs_config_rechaza[<caso>]`, un id por caso.
+- E3.2 DADO una construcción directa de una fila con `round_trip_usd=-1.0` (y una por cada caso F)
+  CUANDO se construye ENTONCES `BacktestConfigError` (la validación vive en la fila, no solo en el
+  cargador). Test: `test_fila_invalida_no_se_puede_construir`.
+- E3.3 DADO `{"default_spread_points": 1.5, "commission_per_lot": 7.0, "slippage_points": 0.2}`
+  (el formato viejo) CUANDO `load_costs_config(path)` ENTONCES `BacktestConfigError` y el mensaje
+  menciona el formato anterior. Test: `test_formato_viejo_se_rechaza_con_mensaje_claro`.
+- E3.4 DADO `read_on = "20261002"` o `"2026-W40-5"` (que `date.fromisoformat` acepta en Python 3.14)
+  CUANDO se carga ENTONCES `BacktestConfigError`. *(Por eso F-h exige la expresión regular además de
+  la fecha válida.)*
+
+**R4 — Sin valor de respaldo.** *(Mapea criterio 4 y punto 2 del DoD del roadmap.)* `src/` NO DEBE
+contener constante, fila implícita ni rama «si no hay fila, usar X» que devuelva un costo para un
+símbolo sin fila. Se verifica por comportamiento (E5.6, E6.4, E7.3, E9.1) y por E1.1.
+
+### Funciones de costo
+
+**R5 — `commission_for` cobra una pata.** *(Modifica R37 (#6); mapea punto 2 del encargo.)*
+Firma: `commission_for(symbol, sizing_hint, config, *, stress=1.0) -> float`. DEBE devolver
+`(round_trip_usd / 2) * sizing_hint * stress`, **evaluado en ese orden de izquierda a derecha** y sin
+redondeo (ni a centavos: el redondeo por pata rompería la igualdad `pata + pata == ida y vuelta` y la
+linealidad del `stress`). El ida y vuelta es la suma de la llamada de apertura y la de cierre. Un
+símbolo sin fila DEBE fallar según R9.
+
+- E5.1 (golden MNQ) DADO la configuración empaquetada CUANDO `commission_for("MNQ", 1.0, cfg)` se
+  invoca para la apertura y para el cierre ENTONCES cada pata `== 0.95` y la suma `== 1.90`.
+  Test: `test_commission_for_mnq_ida_y_vuelta_es_1_90`.
+- E5.2 (golden MGC) ídem: pata `== 1.10`, suma `== 2.20`. Test:
+  `test_commission_for_mgc_ida_y_vuelta_es_2_20`.
+- E5.3 DADO cada símbolo de T1 CUANDO se suman dos patas ENTONCES `== round_trip_usd` de T1.
+  Test parametrizado: `test_commission_for_tabla_completa_pata_mas_pata`.
+- E5.4 DADO `sizing_hint = 3.0` CUANDO se compara con `1.0` ENTONCES `approx(3 * leg)` (lineal en
+  contratos).
+- E5.5 DADO `stress = 2.0` ENTONCES `approx(2 * commission_for(..., stress=1.0))`.
+- E5.6 DADO un símbolo sin fila ENTONCES `BacktestConfigError` y ningún valor devuelto (R9).
+
+**R6 — `spread_for` por instrumento.** *(Modifica R37 (#6) y R111 (#24).)* La firma **no cambia**:
+`spread_for(symbol, timestamp, figure, ticks_window, config, *, stress=1.0)`. DEBE resolver primero la
+fila del símbolo, **con o sin ventana de ticks**, de modo que la falla por símbolo sin fila no dependa
+de la cobertura de ticks de ese día (una falla que aparece solo en las barras sin ticks es
+indeterminista de cara al usuario). Con ventana no vacía DEBE devolver
+`mediana(ask - bid) * stress` (valor y semántica actuales, `costs.py:50-51`). Sin ventana, o con
+ventana vacía, DEBE devolver `spread_ticks * figure.tick_size * stress`, en **puntos de precio**, de
+modo que el simulador sigue multiplicando por `value_per_point`. NO DEBE invocar
+`has_sufficient_tick_coverage` ni `ticks_in_bar_window`.
+
+- E6.1 (rama de ticks, mismo valor) DADO ventana `[bid 100.0 / ask 100.2, bid 100.0 / ask 100.4]` y
+  una fila para `US500` en la configuración de test CUANDO `spread_for("US500", ...)` ENTONCES
+  `approx(0.3)`. *(Es el test existente `test_spread_for_con_ticks_usa_mediana_de_ask_menos_bid`, con
+  el mismo valor esperado.)*
+- E6.2 (golden MNQ) DADO una ficha construida a mano `tick_value=0.5, tick_size=0.25` y la
+  configuración empaquetada CUANDO `spread_for("MNQ", ts, fig, None, cfg)` ENTONCES `== 0.25`, y
+  `0.25 * 1.0 * fig.value_per_point == 0.50`. Test: `test_golden_mnq_spread_un_tick`.
+- E6.3 DADO `stress = 2.0` ENTONCES `approx(2 * spread_for(..., stress=1.0))` en las dos ramas.
+- E6.4 DADO un símbolo sin fila y una ventana de ticks **no vacía** ENTONCES `BacktestConfigError`
+  (la falla no depende de la cobertura). Test: `test_spread_for_simbolo_sin_fila_falla_con_ticks`.
+
+**R7 — `slippage_for` por instrumento.** *(Modifica R37 (#6).)* Firma nueva:
+`slippage_for(symbol, figure, config, *, stress=1.0) -> float` (el símbolo pasa a ser el primer
+parámetro, igual que en `spread_for`; hoy es `slippage_for(figure, config, *, stress)`,
+`costs.py:62`). DEBE devolver `slippage_ticks * figure.tick_size * stress`, en puntos de precio **por
+pata**. Un símbolo sin fila DEBE fallar según R9.
+
+- E7.1 (golden MNQ) DADO la ficha de E6.2 y la configuración empaquetada CUANDO `slippage_for("MNQ",
+  fig, cfg)` ENTONCES `== 0.25`, y `0.25 * 1.0 * fig.value_per_point == 0.50`. Test:
+  `test_golden_mnq_deslizamiento_un_tick`.
+- E7.2 DADO `stress = 2.0` ENTONCES `approx(2 * slippage_for(..., stress=1.0))`.
+- E7.3 DADO un símbolo sin fila ENTONCES `BacktestConfigError` (R9).
+
+**R8 — `stress` de primera clase.** *(Modifica R38 (#6).)* Las tres funciones DEBEN seguir aceptando
+`stress: float = 1.0` solo por nombre y aplicarlo como **factor final**: para cualquier entrada válida,
+`f(stress=2.0)` es `approx(2 * f(stress=1.0))`. `swap_for` queda sin cambios (firma incluida).
+
+- E8.1 DADO cada una de `commission_for`, `spread_for` (sin ticks y con ticks) y `slippage_for`
+  CUANDO se invoca con `stress=2.0` ENTONCES `approx(2 *` el valor con `stress=1.0)`. Tests: los
+  `test_*_stress_duplica_el_costo` existentes, adaptados.
+- E8.2 DADO `swap_for` CUANDO se invoca como hoy ENTONCES el test
+  `test_swap_for_stress_duplica_el_costo` pasa **sin modificación**.
+
+**R9 — Falla con contexto.** *(Modifica R37/R40 (#6); mapea criterio 4.)* Para `commission_for`,
+`spread_for`, `slippage_for`, `costs_hash` (R13) y `Simulator.__init__` (R11), un símbolo sin fila
+DEBE lanzar `BacktestConfigError` cuyo mensaje contenga `repr(symbol)`, la **lista ordenada** de los
+símbolos que sí tienen fila, y la indicación de que no existe un valor de respaldo. NO DEBE devolver
+ningún valor. La redacción exacta es de `design`; el contenido es el de este requisito.
+
+- E9.1 DADO `config` con filas `{"MNQ", "MGC"}` y el símbolo `"NOPE"` CUANDO se invoca cada una de las
+  cinco funciones ENTONCES `pytest.raises(BacktestConfigError)` y `str(exc)` contiene `'NOPE'`,
+  `MGC` y `MNQ` en ese orden relativo (alfabético) y la indicación de falta de respaldo. Test
+  parametrizado: `test_simbolo_sin_fila_falla_con_contexto[<funcion>]`.
+
+### Simulador
+
+**R10 — Cobro por pata.** *(Agrega; incorpora la enmienda E1; mapea punto 3 del encargo.)* Con `q =
+sizing_hint`, `v = figure.value_per_point`, `s = stress`, `c = round_trip_usd` de la fila, el
+`Simulator` DEBE cobrar:
+
+- **Entrada** (`cost_applied` del `FillRecord` con `is_exit=False`):
+  `(c/2)·q·s  +  (spread_pts + slip_pts)·q·v`, con `spread_pts = spread_for(...)` y
+  `slip_pts = slippage_for(...)`, ambos en puntos y ya con `s`.
+- **Salida** (`cost_applied` del `FillRecord` con `is_exit=True`):
+  `(c/2)·q·s  +  slip_pts·q·v  +  swap_money`, con `swap_money` como hoy (`simulator.py:720-728`).
+- **El spread NO se cobra en la salida.**
+- El deslizamiento de la salida se cobra **en toda salida** (stop, objetivo, trailing, cierre forzado
+  de sesión y caso de vela única): las tres rutas pasan por `_close_position`
+  (`simulator.py:433, 611, 707`), que es donde se cobra.
+- El balance DEBE seguir descontando exactamente lo que se registra en `cost_applied`: tras una
+  operación, `balance_final - balance_inicial == pnl_bruto - (cost_entrada + cost_salida)`.
+
+Sin swap, el ida y vuelta es `c·q·s + (spread_pts + 2·slip_pts)·q·v`. Como `v = tick_value /
+tick_size`, el costo de fricción en dinero es `ticks · tick_value · q · s`: **independiente de
+`tick_size`**. El valor `1+1 ticks` de T1 no es «conservador» (E1): es un **piso provisional**.
+
+- E10.1 DADO una ficha `tick_value=0.5, tick_size=0.25` (como MNQ) y una fila de test
+  `round_trip_usd=1.90, spread_ticks=1, slippage_ticks=1`, `sizing_hint=1.0`, `stress=1.0`, sin
+  ticks CUANDO se abre y se cierra el mismo día ENTONCES `entrada.cost_applied == approx(1.95)`,
+  `salida.cost_applied == approx(1.45)` y su suma `== approx(3.40)`. Test:
+  `test_simulator_cobra_comision_mitad_por_pata_y_deslizamiento_en_ambas`.
+- E10.2 DADO la misma configuración con `spread_ticks=0, slippage_ticks=0` ENTONCES la suma de los dos
+  `cost_applied` `== approx(1.90)` (exactamente el ida y vuelta de la fila). *(`approx` porque pasa
+  por el balance; la igualdad exacta se fija a nivel de función, R5.)*
+- E10.3 DADO `stress=2.0` ENTONCES entrada `approx(3.90)` y salida `approx(2.90)`.
+- E10.4 DADO una salida por cierre forzado de sesión y otra por stop ENTONCES las dos cobran el mismo
+  deslizamiento (no se distingue el tipo de salida). Test:
+  `test_deslizamiento_de_salida_se_cobra_en_toda_salida`.
+- E10.5 DADO esa operación CUANDO se compara el balance final ENTONCES
+  `approx(inicial + pnl_bruto - (entrada + salida))`. *(Lo cubren también las propiedades de
+  reconstrucción de equity existentes, que NO se modifican.)*
+
+**R11 — Validación en `Simulator.__init__`, con orden determinista.** *(Modifica R40 (#6); mapea
+criterio 5 y punto 4 del encargo.)* `Simulator.__init__` DEBE comprobar, **en este orden y
+deteniéndose en el primer incumplimiento**:
+
+1. el candidato implementa `RiskLevelsProvider` (`simulator.py:271-277`, sin cambio);
+2. `costs_config` es una instancia de `CostsConfig` (`simulator.py:279-284`, sin cambio);
+3. el símbolo está en la tabla de sesiones (`simulator.py:286-292`, sin cambio de texto);
+4. **el símbolo tiene fila de costos (NUEVO, R9)**;
+5. la ficha de firma declara `house_rule` (`simulator.py:294-300`, sin cambio).
+
+Razón del orden: el chequeo nuevo solo puede **convertir en error corridas que antes arrancaban**;
+ningún error que ya existía cambia de tipo ni de mensaje, y un símbolo ausente de las dos tablas
+produce el mismo error de sesión que hoy. La falla sale del constructor, antes de que `run()` procese
+la primera barra. El docstring de la clase DEBE reflejar el orden, y el docstring de
+`BacktestConfigError` DEBE ganar el disparador (d).
+
+Efectos que este requisito **declara** para que nadie los lea como regresión: con el JSON empaquetado,
+todo símbolo de `SESSIONS` (`US500`, `NAS100`, `US30`, `GER40`, `XAUUSD`, `EURUSD`, `GBPUSD`,
+`USDJPY`, `BTCUSDT`) falla en `__init__` por falta de fila, y por lo tanto
+`scripts/run_pipeline.py` y `scripts/bench_simulator.py` sobre el `data/raw/` actual fallan con este
+error claro. Un MNQ pasa el chequeo de costos y falla en el de sesión (B.3 lo resuelve).
+
+- E11.1 DADO una configuración sin fila de `US500` (símbolo sí presente en `SESSIONS`) CUANDO se
+  construye `Simulator(..., symbol="US500")` ENTONCES `BacktestConfigError` con `'US500'` y la lista
+  de símbolos con fila, **lanzado por el constructor** (el test no llama a `run`). Test:
+  `test_simulator_simbolo_sin_fila_falla_en_init`.
+- E11.2 (orden) DADO `symbol="NOPE"` (ausente de `SESSIONS` y de la tabla) ENTONCES el mensaje
+  menciona la tabla de sesiones y no la fila de costos.
+- E11.3 (orden) DADO un símbolo con fila de test pero fuera de `SESSIONS` ENTONCES el error es el de
+  sesiones.
+- E11.4 DADO `load_costs_config()` (empaquetado) y `symbol="US500"`, y otra vez con `"BTCUSDT"`
+  ENTONCES `BacktestConfigError` que lista los cinco símbolos de T1. Test:
+  `test_json_empaquetado_no_trae_filas_de_cfd_ni_de_cripto`.
+- E11.5 DADO un símbolo con fila y con sesión ENTONCES el constructor termina sin error.
+- E11.6 DADO `tests/backtest/test_simulator_contract.py` CUANDO se corre ENTONCES pasa sin
+  modificación de sus aserciones (el chequeo (1) y el de `NOPE` se conservan).
+
+### Inmutabilidad
+
+**R12 — `CostsConfig` inmutable y hasheable.** *(Incorpora la enmienda E3; mapea punto 5.)*
+`CostsConfig` y cada fila DEBEN ser **inmutables** (asignar un campo falla), **hasheables**
+(`hash(config)` funciona) y **comparables por valor** (`==`). Dos configuraciones con las mismas filas
+cargadas en distinto orden DEBEN ser iguales y tener el mismo `hash`. NO DEBE existir camino público
+de construcción que deje un `CostsConfig` no hasheable, ni operación pública que devuelva una
+estructura mutable cuya mutación altere la configuración. Condición para `design`: verificado en
+Python 3.14.4 que `hash(MappingProxyType({...}))` **falla** (`unhashable type: 'dict'`), así que un
+mapa de solo lectura sobre un `dict` no cumple; la forma por defecto es una **tupla ordenada por
+símbolo de filas congeladas** (la elección final de nombres y de cómo se expone la consulta por
+símbolo es de `design`).
+
+- E12.1 DADO un `CostsConfig` cargado CUANDO se asigna cualquiera de sus campos o de los de una fila
+  ENTONCES se lanza el error de inmutabilidad (`FrozenInstanceError`/`AttributeError`/`TypeError`).
+  Test: `test_costs_config_no_se_puede_mutar`.
+- E12.2 DADO `load_costs_config()` invocado dos veces ENTONCES `a == b` y `hash(a) == hash(b)`, y
+  `{a: 1}[b] == 1`. Test: `test_costs_config_es_hasheable_y_comparable`.
+- E12.3 DADO el mismo JSON con las filas en otro orden ENTONCES `a == b` y `hash(a) == hash(b)`.
+- E12.4 DADO la lista de símbolos que expone la configuración ENTONCES es una tupla ordenada.
+
+### Identidad de la corrida y del ensayo
+
+**R13 — `costs_hash` por símbolo y su serialización canónica.** *(Incorpora E2; mapea punto 6.)* La
+capa 3 DEBE exponer `costs_hash(symbol, config) -> str` (SHA-256 hexadecimal), con símbolo sin fila
+según R9. La serialización canónica DEBE ser **exactamente** esta, con la misma llamada que
+`exit_geometry_hash` (`strategy/exit_geometry.py:69-77`):
+
+```
+json.dumps({"round_trip_usd": float(c), "slippage_ticks": float(sl), "spread_ticks": float(sp)},
+           ensure_ascii=False, sort_keys=True)   ->   UTF-8   ->   sha256
+```
+
+- **Entran** al hash: `round_trip_usd`, `spread_ticks`, `slippage_ticks`, normalizados con `float()`
+  (para que `1` y `1.0` no produzcan huellas distintas: `json.dumps(1)` es `"1"` y `json.dumps(1.0)`
+  es `"1.0"`).
+- **No entran**: `source_url`, `read_on`, `friction_status` y el propio símbolo.
+
+**Decisión sobre `source_url`/`read_on` (punto 6 del encargo): la cita NO identifica un ensayo.** Un
+ensayo es lo que se simuló, y lo que se simuló lo determinan los tres números. Si MFFU mueve su
+página, o el dueño la relee el 2026-12-01 y el número sigue siendo $1,90, la simulación es
+**mecánicamente idéntica**; contarla como ensayo nuevo inflaría el `n_trials` del DSR (más
+deflación, más falsos negativos) y rompería la idempotencia de `append_trial` por una razón que no es
+estadística. Es el mismo criterio que ya rige a `exit_geometry_hash` (excluye `source`) y a
+`house_rule_hash` (excluye `funded_starting_balance`, DH-4: «dos fichas cuyas simulaciones son
+mecánicamente idénticas producirían huellas distintas y sus ensayos dejarían de colapsar»). A la
+inversa, si el **número** cambia aunque la cita no, es otro ensayo y la huella cambia. Por la misma
+razón `friction_status` no entra: si B.4b confirma que 1 tick era el valor medido, el número no cambió
+y el resultado guardado sigue siendo válido. El símbolo no entra porque el mapa de R15 ya está
+indexado por símbolo; dos instrumentos con la misma fila numérica comparten huella sin ambigüedad.
+
+- E13.1 (golden) DADO la configuración empaquetada ENTONCES `costs_hash("MNQ", cfg) ==
+  "6b5b237b9be9f6488049b7f34240b2cce3107c80e965d51f61cce409f8c81d1b"`, que es el SHA-256 de la cadena
+  `{"round_trip_usd": 1.9, "slippage_ticks": 1.0, "spread_ticks": 1.0}`. Test:
+  `test_costs_hash_mnq_golden`.
+- E13.2 DADO dos configuraciones cuyas filas de `MNQ` difieren **solo** en `source_url` y `read_on`
+  ENTONCES `costs_hash("MNQ", a) == costs_hash("MNQ", b)`.
+- E13.3 DADO dos configuraciones que difieren en `round_trip_usd`, o en `spread_ticks`, o en
+  `slippage_ticks` de `MNQ` (una prueba por campo) ENTONCES los hashes difieren.
+- E13.4 DADO dos configuraciones que difieren **solo** en la fila de `MGC` ENTONCES
+  `costs_hash("MNQ", a) == costs_hash("MNQ", b)`.
+- E13.5 DADO una fila cargada con `"spread_ticks": 1` y otra con `1.0` ENTONCES mismo hash.
+- E13.6 DADO una configuración de test con dos símbolos de fila numéricamente idéntica (`SYM_A` y
+  `SYM_B`) ENTONCES `costs_hash("SYM_A", cfg) == costs_hash("SYM_B", cfg)`. Documenta que el símbolo no
+  entra al hash.
+- E13.7 DADO un símbolo sin fila ENTONCES `BacktestConfigError` (R9).
+
+**R14 — `RunProvenance.costs_hash`.** *(Modifica R45 (#6); incorpora E2.)* `RunProvenance`
+(`backtest/ledger.py:96-111`) DEBE ganar `costs_hash: str`, **sin valor por defecto** (un default
+permitiría olvidarlo en silencio, que es el modo de falla que E2 cierra; mismo criterio que
+`exit_geometry_hash`, `house_rule_hash` y `exhaustion_policy`). Lo DEBE poblar `Simulator.__init__`
+(`simulator.py:328-336`) con `costs_hash(symbol, costs_config)` y `_stitch_oos_ledgers`
+(`validation/wfa.py:433-462`) con el mismo cálculo sobre el `symbol` y el `costs_config` que
+`run_wfa` ya recibe, **sin cambiar la firma de `run_wfa`**. `ledger.CONFIG_VERSION`
+(`"genesis-backtest/1"`) NO se modifica: es el precedente de #109, que agregó tres campos a
+`RunProvenance` sin subirlo, y `tests/backtest/test_ledger.py:47` lo fija.
+
+- E14.1 DADO un `Simulator` de `US500` con la configuración de test CUANDO se lee
+  `sim.ledger.provenance.costs_hash` ENTONCES `== costs_hash("US500", cfg)`. Test:
+  `test_simulator_provenance_trae_costs_hash`.
+- E14.2 DADO el resultado de `run_wfa(...)` sobre un símbolo ENTONCES
+  `wfa_result.oos_ledger_cosido.provenance.costs_hash == costs_hash(symbol, cfg)`. Test:
+  `test_wfa_provenance_trae_costs_hash`.
+- E14.3 DADO dos corridas que difieren solo en `spread_ticks` de la fila ENTONCES sus
+  `provenance.costs_hash` difieren.
+- E14.4 DADO `RunProvenance(...)` construido sin `costs_hash` ENTONCES `TypeError`.
+- E14.5 DADO `python -c "import inspect; from genesis.validation.wfa import run_wfa;
+  print(list(inspect.signature(run_wfa).parameters))"` ENTONCES la lista es `['candidate_id',
+  'symbol', 'frame', 'firm_profile', 'exit_geometry', 'figure', 'funnel_config', 'costs_config',
+  'news_events', 'dataset_store', 'tick_store', 'starting_balance', 'window_config',
+  'grid_config', 'candidate_factory', 'seed']` (la actual, sin cambios).
+
+**R15 — `compute_trial_id` incluye los costos.** *(Modifica R4 (#53); incorpora E2.)*
+`compute_trial_id` (`validation/trial_ledger.py:115-147`) DEBE ganar el parámetro **obligatorio**
+`costs_hash_by_symbol: Mapping[str, str]` y DEBE incluirlo en el diccionario canónico bajo la clave
+`"costs_hash_by_symbol"`. `trial_ledger.py` sigue siendo solo `stdlib` más `genesis.validation.errors`
+y sin importar de capas 1-3: recibe cadenas, nunca una `CostsConfig`. El mapa DEBE cubrir **los
+símbolos evaluados en la corrida** (mismas claves que `dataset_hash_by_symbol`), de modo que cambiar
+una fila de un símbolo **no evaluado** no altere ningún `trial_id`. La función `costs_hash` es la
+única derivación sancionada de cada valor.
+
+- E15.1 DADO dos llamadas idénticas salvo `costs_hash_by_symbol={"MNQ": h1}` contra `{"MNQ": h2}`
+  ENTONCES `trial_id` distintos.
+- E15.2 DADO dos llamadas idénticas salvo el orden de inserción del mapa ENTONCES mismo `trial_id`.
+- E15.3 DADO dos configuraciones de costos que difieren solo en `source_url`/`read_on` de `MNQ`
+  ENTONCES el `trial_id` de una corrida sobre `MNQ` es idéntico (la cita no es otro ensayo).
+- E15.4 DADO dos configuraciones que difieren solo en la fila de `MGC` ENTONCES el `trial_id` de una
+  corrida solo sobre `MNQ` es idéntico.
+- E15.5 DADO `compute_trial_id` sin el parámetro nuevo ENTONCES `TypeError`.
+- E15.6 (propiedad, `hypothesis`) DADO cualquier mapa de hashes ENTONCES determinismo y sensibilidad a
+  cada valor. Tests en `tests/validation/test_trial_ledger.py`.
+
+**R16 — El ledger de ensayos registra los costos.** *(Modifica R2 (#53); incorpora E2.)*
+`TrialIdentityContext` (`trial_ledger.py:300-310`) y `TrialRecord` (`:56-76`) DEBEN ganar
+`costs_hash_by_symbol: Mapping[str, str]`, obligatorio; `_REQUIRED_FIELDS` (`:32`) DEBE incluirlo;
+`append_trial` DEBE escribirlo en la fila JSONL (claves ordenadas, separadores compactos, R19 de
+#53); `TrialLedger.build_record` y `trial_id_for_config` DEBEN usarlo. `TrialIdentityContext` DEBE
+rechazar con `TrialLedgerConfigError`, citando los símbolos sobrantes o faltantes, un
+`costs_hash_by_symbol` cuyas claves no coincidan con las de `dataset_hash_by_symbol` (si un símbolo
+quedara sin costos en la identidad, el ensayo no distinguiría esa fila). Una fila persistida **sin**
+`costs_hash_by_symbol` DEBE ser rechazada por `read_trial_summary` con el fail-fast ya existente
+(nombrando la clave): **no hay lectura retrocompatible**, para no mezclar ensayos de antes y después
+de los costos por instrumento. `trial_ledger.CONFIG_VERSION` DEBE subir de
+`"genesis-validation-trial-ledger/1"` a `"genesis-validation-trial-ledger/2"` (la identidad cambió de
+definición). `ledger/trials.jsonl` tiene 0 bytes (verificado) y no tiene historia salvo el commit
+inicial de #53, así que no hay filas que migrar ni archivar.
+
+- E16.1 DADO un `TrialRecord` con `costs_hash_by_symbol` CUANDO `append_trial` y `read_trial_summary`
+  ENTONCES la fila contiene la clave y se lee sin error.
+- E16.2 DADO una línea JSONL sin `costs_hash_by_symbol` ENTONCES `TrialLedgerConfigError` que nombra
+  la clave.
+- E16.3 DADO `dataset_hash_by_symbol={"MNQ": ..., "MGC": ...}` y `costs_hash_by_symbol={"MNQ": ...}`
+  CUANDO se construye `TrialIdentityContext` ENTONCES `TrialLedgerConfigError` citando `MGC`.
+- E16.4 (el escenario que motiva E2) DADO un ledger con un ensayo del candidato X sobre los datos D
+  con `costs_hash_by_symbol={"MNQ": h1}` CUANDO se registra el mismo candidato sobre los mismos datos
+  con `{"MNQ": h2}` ENTONCES `read_trial_summary(...).n_trials_total == 2` (antes habría quedado en 1,
+  porque `append_trial` descarta en silencio un `trial_id` repetido, `trial_ledger.py:264-277`).
+- E16.5 DADO `rg -n "trial-ledger/2" src/genesis/validation/trial_ledger.py` ENTONCES ≥ 1 coincidencia.
+
+**R17 — El manifiesto declara los costos.** *(Modifica R98 y R100 (#14); R15 (#53) lo exige por
+paridad.)* `verdict_result_to_manifest_json` (`verdict.py:1335`) y `write_verdict_artifacts`
+(`verdict.py:1411`) DEBEN recibir `costs_hash_by_symbol` (obligatorio, justo después de
+`house_rule_hash`) y el manifiesto DEBE llevarlo como clave de primer nivel `"costs_hash_by_symbol"`.
+`verdict.CONFIG_VERSION` DEBE subir de `"genesis-validation-j/3"` a `"genesis-validation-j/4"`, con la
+entrada correspondiente en el docstring de versiones (patrón de #109 y #130). Sin esto un veredicto
+publicado no diría con qué costos se corrió, y el repo es público a propósito (lo pre-registrado queda
+fechado).
+
+- E17.1 DADO un `VerdictResult` y `costs_hash_by_symbol={"SYM_A": "abc"}` CUANDO se serializa
+  ENTONCES el JSON trae `"costs_hash_by_symbol": {"SYM_A": "abc"}` en el primer nivel.
+- E17.3 (H4) El manifiesto DEBE llevar además la clave de primer nivel `"friction_status_by_symbol"`
+  (mismas claves que `costs_hash_by_symbol`; valor: el `friction_status` de la fila de cada símbolo,
+  hoy `provisional_hasta_b4b`). Esta clave **no entra** a `compute_trial_id`: describe la calidad de
+  la fuente, no lo que se simuló (mismo criterio que R13). DADO un manifiesto serializado con la
+  configuración empaquetada ENTONCES trae `"friction_status_by_symbol": {"MNQ":
+  "provisional_hasta_b4b"}`.
+- E17.2 DADO `rg -n 'genesis-validation-j/4' src/genesis/validation/verdict.py` ENTONCES ≥ 1 y
+  `rg -n 'genesis-validation-j/3' src tests` ENTONCES 0. *(Los dos tests que fijan `/3`,
+  `test_verdict.py:1413` y `:1636`, se migran.)*
+
+**R18 — Propagación en `scripts/run_pipeline.py`.** *(Incorpora E2; corrige la propuesta, que daba
+los scripts por intactos.)* El runner DEBE leer `provenance.costs_hash` de la `RunProvenance` que
+`run_wfa` ya produjo (mismo patrón que `exit_geometry_hash`/`house_rule_hash`,
+`run_pipeline.py:397-400`) y construir `costs_hash_by_symbol = {args.symbol: <ese hash>}` con la
+**misma clave** que `dataset_hash_by_symbol` (`:485`), pasándolo a `TrialIdentityContext` (`:493`) y a
+`write_verdict_artifacts` (`:539`). NO DEBE cambiar ninguna opción de CLI ni la firma de ninguna
+función; el cambio es de unas pocas líneas del cuerpo de `main()`. `scripts/bench_simulator.py` NO
+cambia.
+
+- E18.1 DADO el runner tras `apply` CUANDO `rg -n "costs_hash_by_symbol" scripts/run_pipeline.py`
+  ENTONCES ≥ 2 coincidencias (identidad y manifiesto) y `rg -n "provenance\.costs_hash"
+  scripts/run_pipeline.py` ENTONCES ≥ 1.
+- E18.2 DADO `git diff --stat -- scripts/bench_simulator.py` ENTONCES vacío; y `rg -n "add_argument"
+  scripts/run_pipeline.py` ENTONCES el mismo número de opciones que en `b0f2950`.
+
+### Tests
+
+**R19 — Tests existentes: tabla de costos de test, explícita.** *(Mapea proposal «Plan de tests».)*
+Los tests que simulan con símbolos de CFD o sintéticos (conteo de `symbol="..."` en
+`tests/backtest`, `tests/validation` y `tests/strategy/candidate_b`: `US500` ×52, `NAS100` ×14,
+`SYM_A` ×5, `XAUUSD` ×2, `US30`, `SYM_B`, `SYM_C`, y `NOPE` ×1, que solo ejerce el error de sesión)
+DEBEN recibir una **tabla de costos de test explícita**, con
+fila para cada símbolo con el que algún test construye un `Simulator`, y con `source_url` de host
+reservado (`*.invalid`) que la marque como de test. Esa tabla NO DEBE entrar al paquete ni a ningún
+módulo de `src/`. Los dos conftest (`tests/backtest/conftest.py:53-55`,
+`tests/validation/conftest.py:66-68`) y los archivos que llaman `load_costs_config()` sin ruta DEBEN
+dejar de usar el recurso empaquetado. Los valores de la tabla de test DEBEN elegirse de modo que
+ningún test existente cambie de resultado esperado; si alguno lo hace, se re-basa explícitamente y se
+lista en el reporte de `apply`. La ubicación de la tabla (JSON de test cargado con
+`load_costs_config(path)`, que además ejercita el cargador real, o módulo auxiliar) es de `design`.
+Verificado: ningún test de `tests/backtest/` ni de `tests/validation/` simula `BTCUSDT`
+(`test_prop_sim.py:679` solo lo usa como clave de un ledger armado a mano).
+
+- E19.1 DADO el árbol tras `apply` CUANDO `rg -ln "load_costs_config\(\)" tests` ENTONCES los únicos
+  archivos son los de pruebas del propio cargador y del JSON empaquetado
+  (`tests/backtest/test_costs*.py`).
+- E19.2 DADO `mise run test` ENTONCES verde, con las únicas diferencias de aserción listadas en
+  R20 y en los tests adaptados de `test_costs.py` (`:36`, `:47-49`, `:61-64`, `:67-70`, `:85-95`).
+- E19.3 DADO `rg -n "1\.5|7\.0|0\.2" src/genesis/backtest/costs.py
+  src/genesis/backtest/costs_config.json` ENTONCES 0 coincidencias (los tres valores heredados de los
+  CFDs no sobreviven en ninguna parte del paquete). *(Hoy da 3, todas en el JSON.)*
+
+**R20 — Reescritura del test A7.** *(Mapea proposal «Riesgos» 1; punto 8.)* El test
+`test_costo_de_entrada_usa_value_per_point` (`tests/backtest/test_simulator_money_conversion.py:101-136`)
+DEBE reescribirse. **No es un test que se debilita; es un test que ya no puede afirmar lo que
+afirmaba, y se lo reemplaza por aserciones más estrictas del mismo invariante.**
+
+*Lo que afirmaba.* Que el `cost_applied` de la entrada **difiere** entre una ficha
+`(tick_value=1, tick_size=1)` y otra `(1, 0.01)`. Eso era consecuencia de que el spread y el
+deslizamiento estaban en **puntos globales** y se multiplicaban por `value_per_point`
+(`tick_value / tick_size`), así que cambiar `tick_size` cambiaba el dinero.
+
+*Por qué ya no vale.* Con costos en **ticks**, el dinero es `ticks · tick_size · (tick_value /
+tick_size) = ticks · tick_value`, independiente de `tick_size`. Las dos fichas dan el mismo costo y el
+`!=` falla **porque el cambio funciona**, no porque algo esté roto.
+
+*Qué sigue cubierto, sin tocar.* El invariante de fondo de #55 («la conversión punto → dinero usa
+`value_per_point` y nunca `tick_value` crudo») lo prueban `test_pnl_flotante...` (A6) y
+`test_pnl_realizado_usa_la_misma_conversion_que_el_flotante` (H2): el P&L sigue en puntos y esos dos
+tests no cambian.
+
+*Qué lo reemplaza (más fuerte que `!=`).*
+
+- E20.1 DADO una fila de test y fichas `(tick_value=1.0, tick_size=1.0)` y `(1.0, 0.01)` CUANDO se
+  abre una posición con cada una ENTONCES `entrada.cost_applied` es **igual** (`approx`) en las dos.
+- E20.2 DADO fichas `(1.0, 1.0)` y `(2.0, 1.0)` ENTONCES `entrada.cost_applied - comisión_de_pata` de
+  la segunda `== approx(2 *` el de la primera) (la fricción escala con `tick_value`).
+- E20.3 Cobertura de la regresión original: si alguien volviera a convertir con `tick_value` crudo, la
+  ficha `(1.0, 0.01)` daría una fricción 100 veces menor que la `(1.0, 1.0)` y E20.1 fallaría.
+
+El test se renombra `test_costo_de_entrada_escala_con_tick_value_no_con_tick_size`. Verificación:
+`git diff -U0 -- tests/backtest/test_simulator_money_conversion.py` solo toca esa función (y, si
+hace falta, el helper `_simulator`); las funciones A6 y H2 conservan su cuerpo.
+
+**R21 — Goldens.** *(Mapea criterios 3 y 7; punto 7.)* DEBEN existir, **a nivel de función**
+(`MNQ` no está en `SESSIONS`, `sessions.py:45-74`, así que un golden por `Simulator` no es posible):
+
+- comisión de **MNQ `== 1.90`** y de **MGC `== 2.20`** como suma de apertura y cierre (E5.1, E5.2),
+  con la configuración empaquetada y aserción `==`. Es exacto: `x/2 + x/2 == x` en coma flotante para
+  las cinco cifras de T1 (verificado por cálculo);
+- spread de MNQ `== 0.25` puntos `== $0,50` y deslizamiento de MNQ `== 0.25` puntos `== $0,50` por
+  pata (E6.2, E7.1);
+- **golden compuesto** (E21.1): DADO la ficha de E6.2 y la configuración empaquetada CUANDO se compone
+  a mano `commission_for(apertura) + commission_for(cierre) + (spread_for + 2·slippage_for) ·
+  value_per_point` ENTONCES `approx(3.40)`. Test: `test_golden_mnq_costo_total_ida_y_vuelta`.
+
+### Documentación
+
+**R22 — Docs dentro del change.** *(Mapea criterio 11; punto 9.)* Las ediciones van en `docs/`,
+`.serena/memories/` y `ledger/README.md` (vía rápida, pero dentro de este change). Cada una se
+verifica por texto, no por número de línea, porque `ROADMAP_ARQUITECTO.md` y el spec v1.5 ya
+cambiaron de líneas desde que se escribió la propuesta (§9).
+
+1. **Roadmap** (`docs/ROADMAP_ARQUITECTO.md`): corregir las **dos** frases que dicen «cuatro veces»
+   sobre costos —en B.4 (hoy `:1221-1223`) y en el resumen del carril B (hoy `:192-193`)— porque
+   contaban una sola pata. El texto nuevo dice que **la comisión sola es 7,4 veces lo publicado**
+   ($14 contra $1,90) y que la fricción total del MNQ era ≈$17,40; registra el **doble cobro** como
+   hallazgo; y, si el dueño aprueba la interpretación de «la ficha» (§8 H2), aclara el punto (1) del
+   DoD de B.4a como «tabla de costos por instrumento en capa 3».
+   - E22.1 `rg -nU "cuatro veces\s+(de más|mayores)" docs/ROADMAP_ARQUITECTO.md` ENTONCES 0.
+     *(Con `-U`: una de las dos frases parte el renglón entre «veces» y «mayores». Hoy da 2
+     coincidencias, en `:192-193` y `:1223`.)*
+   - E22.2 `rg -n "doble cobro" docs/ROADMAP_ARQUITECTO.md` ENTONCES ≥ 1; `rg -n "7,4"` ≥ 1;
+     `rg -n "17,40"` ≥ 1.
+2. **Spec v1.5** (`docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md`): (a) la fila de §11.1
+   `PA-106-C` (hoy `:1530`) pasa al formato de cierre que ya usa PA-106-A
+   (`~~**PA-106-C — ...**~~ **CERRADA (B.4a, #135, <fecha>)**`), con la fuente, la fecha de lectura
+   `2026-10-02`, y la salvedad **«spread y deslizamiento siguen provisionales hasta B.4b»**, más lo que
+   el dueño haya declarado sobre el alcance de «Total Cost Round Trip» (R23); (b) la fila
+   «Comisiones por contrato: no verificado» de la tabla de la firma (hoy `:316`) deja de decir «no
+   verificado» y cita la fuente.
+   - E22.3 `rg -n "~~\*\*PA-106-C" docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md` ≥ 1, y esa
+     línea contiene `CERRADA`, `provisionales hasta B.4b` y `9735811`.
+   - E22.4 `rg -n "Comisiones por contrato.*no verificado" docs/SPEC_GENESIS_v1.5_PropTrading_TorneoCandidatos.md`
+     ENTONCES 0.
+3. **Memoria de MFFU** (`.serena/memories/mffu-rapid-eod-50k-reglas-confirmadas.md`): reemplazar el
+   «no publicadas en el help center» (hoy `:111-112`) y sacar «las comisiones por contrato» de
+   «Sigue sin verificar» (hoy `:208-209`); anotar las cinco cifras, la URL y la fecha.
+   - E22.5 `rg -n "no publicadas en el help center|las comisiones por contrato" <archivo>` ENTONCES 0;
+     `rg -n "9735811" <archivo>` ≥ 1; y por cada fila de T1, `rg -n "<SIM>.*<cifra>" <archivo>` ≥ 1
+     (`MNQ`/`1,90`, `MGC`/`2,20`, `MCL`/`1,16`, `M6E`/`1,44`, `MBT`/`3,50`).
+4. **Memoria de cripto** (`.serena/memories/cripto-encaje-por-capa.md:27`): la afirmación «`costs.py`
+   cobra `commission_per_lot`» queda obsoleta (el campo desaparece) y se reescribe con el modelo nuevo.
+   - E22.6 `rg -n "cobra .commission_per_lot" .serena/memories/cripto-encaje-por-capa.md` ENTONCES 0.
+5. **`ledger/README.md`**: agregar `costs_hash_by_symbol` a la lista de claves y un párrafo «Corte de
+   Change #135» (patrón del «Corte de Change #109»): el ledger estaba vacío al corte, no hay nada que
+   archivar y las filas sin la clave son ilegibles.
+   - E22.7 `rg -n "costs_hash_by_symbol|Corte de Change #135" ledger/README.md` ENTONCES ≥ 2.
+6. **No se editan** `.pulse/specs/**` (las actualiza el engine al cerrar), ni `CLAUDE.md`, ni
+   `.pulse/specs/data/spec.md:954` (R146 de BTCUSDT menciona una `commission_per_lot` de perfil que no
+   existe en `FirmProfile`; no se toca).
+
+### Precondición de apply
+
+**R23 — Firma humana de las cinco cifras.** *(Mapea la precondición de la propuesta; punto 10.)*
+Antes de la **primera tarea que escriba `costs_config.json`** (la que introduce las cinco cifras),
+DEBE existir `.pulse/changes/<slug>/firma-cifras.md` con:
+
+- (a) las cinco filas de T1 con su `round_trip_usd`, **idénticas a T1 y al JSON**;
+- (b) la URL y la **fecha en que el dueño releyó** la fuente (si es posterior a 2026-10-02, esa es la
+  `read_on` del JSON);
+- (c) la declaración del dueño sobre lo que cubre «Total Cost Round Trip» (si incluye comisión de la
+  firma, tarifa de bolsa/clearing y NFA) y si es **uniforme** entre Tradovate, Rithmic y NinjaTrader
+  (`ROADMAP:854-855`), o la frase «no confirmado»; esa declaración se copia a la clave `_nota` del
+  JSON y al texto de cierre de PA-106-C (R22);
+- (d) la línea `Firmado: <nombre>, <YYYY-MM-DD>, «<cita textual de su confirmación>»`.
+
+El registro lo transcribe el hilo principal a partir de la confirmación explícita del dueño; ningún
+agente de fase lo crea por iniciativa propia. **La aprobación del gate `DESIGN → APPLY` no sustituye
+esta firma**: el proyecto ya reconoció (`CLAUDE.md`) que los gates se aprobaron sin leer cuando las
+decisiones llegaban en un vocabulario ajeno. Por eso la firma es un artefacto aparte, en lenguaje
+llano, con las cinco cifras a la vista. Si falta, `apply` se detiene en esa tarea y pregunta.
+
+- E23.1 `fd firma-cifras.md .pulse/changes` ENTONCES existe en el directorio de este change.
+- E23.2 `rg -n "^Firmado: .+, [0-9]{4}-[0-9]{2}-[0-9]{2}, «.+»$" <firma-cifras.md>` ENTONCES ≥ 1.
+- E23.3 DADO las cinco filas de `firma-cifras.md` y las del JSON empaquetado CUANDO se comparan
+  símbolo por símbolo ENTONCES coinciden en `round_trip_usd` y en `read_on`. Comando de `apply`/
+  `review` (no de CI, porque el change se archiva y la ruta cambia):
+  `rg -o "\| (MNQ|MGC|MCL|M6E|MBT) \| [0-9,]+ \|" <firma-cifras.md>` contra el JSON.
+
+**R24 — Lo que NO cambia.** *(Mapea criterio 9 de la propuesta, corregido.)* Este change NO DEBE:
+
+- modificar `src/genesis/data/**` (`SymbolFigure`, `ArtifactMetadata`, `FirmProfile`,
+  `firm_profile_hash`, `SESSIONS`): E24.1 `git diff --stat main -- src/genesis/data` vacío;
+- modificar `validation/dsr_pbo.py` ni `validation/sensitivity.py`: E24.2 `git diff --stat main --
+  src/genesis/validation/dsr_pbo.py src/genesis/validation/sensitivity.py` vacío;
+- cambiar la firma pública de `run_wfa` (E14.5), ni la de `run_dsr_pbo`/`run_sensitivity` (sin diff);
+- cambiar `swap_for`, `exit_geometry`, `house_rule`, el embudo del Inspector ni `max_lot`;
+- cambiar `genesis.backtest.__all__` salvo que `design` decida exportar `costs_hash` (en cuyo caso se
+  actualiza `tests/backtest/test_public_api.py`, que fija ese conjunto);
+- agregar `figure.symbol == symbol` ni ninguna otra guarda no pedida.
+
+Y DEBE dejar `mise run ci` (ruff, bandit, vulture, deptry, ty, pytest) en verde: E24.3.
+
+## 5. Modelo de datos
+
+```
+costs_config.json (capa 3, recurso empaquetado)           raíz: {"_fuente"?, "_nota", "instruments": {...}}
+└── instruments: { "<SIMBOLO>": { round_trip_usd, spread_ticks, slippage_ticks,
+                                  friction_status, source_url, read_on }, ... }   <- T1, 7 filas
+
+CostsConfig (capa 3, frozen, hasheable)                   nombres propuestos; forma final = design
+└── instruments: tuple[InstrumentCosts, ...]              ordenada por símbolo, única, no vacía
+InstrumentCosts (capa 3, frozen)  = {symbol, round_trip_usd, spread_ticks, slippage_ticks,
+                                     friction_status, source_url, read_on}   validada en construcción
+
+costs_hash(symbol, config) -> str                         capa 3; sha256 de {c, sl, sp} (R13)
+RunProvenance        (+ costs_hash: str)                  capa 3  (backtest/ledger.py)
+compute_trial_id     (+ costs_hash_by_symbol)             capa 4  (solo recibe str)
+TrialIdentityContext (+ costs_hash_by_symbol)             capa 4  (clave-coherencia con dataset_hash_by_symbol)
+TrialRecord / ledger/trials.jsonl (+ costs_hash_by_symbol)
+manifest.json        (+ costs_hash_by_symbol, verdict_schema_version "/4")
+```
+
+Dependencias (invariantes de capas de `CLAUDE.md`): `costs.py` (capa 3) importa de capa 1
+(`symbols`) y solo `stdlib` para hash y validación (`hashlib`, `json`, `math`, `re`, `datetime`); no
+importa `scipy`/`statsmodels`/`matplotlib`/`quantstats` (R41 (#6) se conserva).
+`validation/trial_ledger.py` (capa 4) sigue siendo `stdlib` + `validation.errors`, sin importar de
+capas 1-3: la huella le llega como `str`. `validation/wfa.py` y `verdict.py` ya importan de capa 3
+(`CostsConfig`, `RunProvenance`); no se crea ninguna dependencia nueva hacia arriba.
+
+Cobro por pata (R10), por contrato, `stress = 1`:
+
+```
+                 comisión        deslizamiento        spread        swap
+entrada          c / 2           slip_ticks · tick_value   spread_ticks · tick_value   —
+salida           c / 2           slip_ticks · tick_value   —                           como hoy (days_held >= 1)
+```
+
+## 6. Trazabilidad: criterios de la propuesta → requisitos → evals
+
+| Criterio de la propuesta | Requisitos | Evals |
+|---|---|---|
+| 1. JSON con exactamente cinco filas de futuros CME (H1), comisiones de T1, fuente y `read_on`, 1+1 ticks provisionales | R1, R2 | E2.1, E2.2 |
+| 2. `commission_per_lot`, `default_spread_points`, `slippage_points` no existen | R1 | E1.1 *(patrón corregido, §9)* |
+| 3. Golden `==`: MNQ $1,90 y MGC $2,20 a nivel `commission_for` | R5, R21 | E5.1, E5.2, E5.3 |
+| 4. `commission_for` sin fila lanza `BacktestConfigError` con símbolo y lista | R5, R9 | E5.6, E9.1 |
+| 5. `Simulator` sin fila falla en `__init__` antes de la primera barra | R11 | E11.1-E11.5 |
+| 6. `load_costs_config` rechaza cada caso (un test por caso) | R3 | E3.1-E3.4 |
+| 7. `spread_for` conserva la rama de ticks y el fallback en ticks; golden MNQ | R6, R21 | E6.1-E6.4, E7.1 |
+| 8. `stress` es multiplicador final de las tres | R8 | E8.1, E8.2 |
+| 9. Contratos de `wfa.py`, `dsr_pbo.py`, `sensitivity.py` y scripts no cambian de firma | R14, R18, R24 | E14.5, E18.2, E24.1, E24.2 *(el runner sí cambia de cuerpo, §9)* |
+| 10. `mise run ci` en verde | R24 | E24.3 |
+| 11. Docs actualizados; cierre de PA-106-C dice «provisionales hasta B.4b» | R22 | E22.1-E22.7 |
+| Precondición: firma del dueño | R23 | E23.1-E23.3 |
+| **E1** (deslizamiento en las dos patas; sin rótulo «conservador») | R10, R7 | E10.1-E10.5 |
+| **E2** (`costs_hash` por símbolo en `trial_id` y `RunProvenance`) | R13-R18 | E13.*, E14.*, E15.*, E16.*, E17.*, E18.* |
+| **E3** (`CostsConfig` inmutable y hasheable) | R12 | E12.1-E12.4 |
+| Riesgo 1 de la propuesta (A7) | R20 | E20.1-E20.3 |
+| Plan de tests (fixture explícito) | R19 | E19.1-E19.3 |
+
+## 7. Riesgos
+
+1. **Rotura masiva de tests por la regla de falla (R19).** 35 archivos mencionan
+   `CostsConfig`/`load_costs_config`/`costs_config`; la mayoría llega por los dos conftest. Se rompen
+   a la vez, y no porque el cambio esté mal. Mitigación: tabla de test explícita (R19) y migración del
+   helper, no parche por test. Aparte, `RunProvenance` se construye a mano en 7 archivos de tests
+   (`tests/backtest/test_ledger.py:25`, `test_metrics.py:37`; `tests/validation/test_verdict.py:72`,
+   `test_dsr_pbo.py:34`, `test_slow_volume_j.py:46`, `fakes.py:139`, `fixtures/ledgers.py:25`).
+   En total, 27 sitios de 10 archivos de tests construyen o invocan alguno de los cuatro
+   (`RunProvenance`, `compute_trial_id`, `TrialIdentityContext`, `TrialRecord`), entre ellos
+   `tests/validation/test_trial_ledger.py` (13), `tests/strategy/genome/test_compiler.py` (3) y
+   `tests/validation/fakes.py` (3). Todos ganan el campo nuevo a propósito, sin default (R14, R15,
+   R16). Los dos tests que fijan `genesis-validation-j/3` y los que usan
+   `genesis-validation-trial-ledger/1` (`tests/validation/fakes.py:33`) se migran.
+2. **Cifras con firma pendiente (R23).** Se leyeron de una página que MFFU edita. Hasta la firma, el
+   JSON no se escribe. El alcance de «Total Cost Round Trip» (bolsa/clearing/NFA) y su uniformidad
+   entre plataformas son preguntas de un humano, no de esta fase.
+3. **Spread y deslizamiento son un piso provisional (E1).** Cerrar PA-106-C verifica la **comisión**,
+   no la fricción. Un GO emitido bajo `provisional_hasta_b4b` no dice «provisional» en ningún artefacto
+   legible por máquina (ver §8 H4).
+4. **El deslizamiento de salida se cobra también en las salidas por objetivo (límite).** En un mercado
+   real un objetivo suele ejecutarse al precio o mejor. Cobrar el piso en toda salida es **pesimista
+   para esa salida** (empuja hacia falsos negativos, el error barato de este proyecto) y evita decidir
+   un modelo de fill que es de B.4b. Ver §8 H3.
+5. **La ficha del símbolo no está en la identidad del ensayo.** Con costos en ticks, el dinero depende
+   de `figure.tick_value` (`USD = ticks · tick_value`), y la ficha (`SymbolFigure`) no entra a
+   `compute_trial_id`, que cubre barras, firma, geometría, regla de la casa y ahora costos. Es un
+   hueco **preexistente** (hoy ya dependía de `value_per_point`); en un contrato CME el `tick_value` es
+   una constante del contrato, así que el riesgo práctico es bajo. Queda anotado para B.2, que
+   construirá las fichas.
+6. **La identidad del ensayo es de la corrida, no del símbolo (hallazgo preexistente).**
+   `record_trial_completions` llama `build_record(candidate_id, symbol, candidate_config, ...)`
+   (`verdict.py:967-975`), pero `trial_id_for_config` ignora `symbol` (`trial_ledger.py:343-351`): un
+   bundle multi-símbolo daría un único `trial_id` para todos sus símbolos y `append_trial` descartaría
+   los siguientes. El único runner evalúa un símbolo por corrida, así que no se manifiesta hoy. Afecta
+   la lectura de E2: «cambiar MGC no cambia el `trial_id` de MNQ» vale **entre corridas de un símbolo**
+   (cada mapa cubre solo su símbolo); dentro de una corrida conjunta, el mapa de costos acopla a los
+   símbolos igual que ya lo hace `dataset_hash_by_symbol`. No se corrige acá; se anota para B.8/el
+   orquestador multi-símbolo.
+7. **`bench_simulator.py` y `run_pipeline.py` sobre el store actual fallan** (todo CFD). Es el efecto
+   buscado y está declarado en R11; el riesgo es que alguien lo lea como regresión.
+8. **Desfase de las specs vivas.** R2/R4 (#53), R98/R100 (#14) y R45 (#6) enumeran `risk_profile_hash`,
+   que #109 ya sustituyó. Este delta agrega su campo sin reescribir la enumeración; reparar esas
+   líneas es de otro change.
+9. **Líneas de docs movidas.** Roadmap y spec v1.5 cambiaron de líneas tras `94aba5a`; por eso R22 se
+   verifica por texto.
+10. ~~**`MES`/`MYM` en T1 aunque su compra se rechazó.**~~ Resuelto: fuera de T1 (§8 H1).
+
+## 8. Preguntas
+
+### Cerradas a nivel de spec (decisión y porqué)
+
+| # | Pregunta | Decisión | Porqué |
+|---|---|---|---|
+| C1 | ¿Redondeo a centavos por pata? (propuesta 3; idea 4) | **No.** | Rompería `pata + pata == ida y vuelta` y la linealidad del `stress`; MFFU publica el costo ida y vuelta, no el de cada fill. Cada pata es la mitad exacta. |
+| C2 | Formato de `read_on` y marca «provisional» (propuesta 4) | `read_on` = `YYYY-MM-DD` estricto (regex + fecha válida); marca = campo `friction_status` de conjunto cerrado `{provisional_hasta_b4b}`. | `date.fromisoformat` acepta `20261002` y `2026-W40-5` en 3.14.4 (verificado); un conjunto cerrado obliga a que B.4b amplíe el código a conciencia. |
+| C3 | Orden de validaciones en `__init__` (propuesta 5) | Proveedor → tipo de config → sesión → **fila de costos** → `house_rule`. | El chequeo nuevo solo agrega errores donde antes se arrancaba; ningún mensaje previo cambia. Detalle en R11. |
+| C4 | ¿Se tolera 0 tick de spread/deslizamiento en producción? (propuesta 6) | El cargador acepta `>= 0` sin distinguir producción de test; el **empaquetado** debe traer 1 y 1 (E2.1). | Un cargador no sabe en qué entorno corre; el test del paquete es el guardián. Los tests de «suma exacta = ida y vuelta» necesitan 0. |
+| C5 | Clave del símbolo en CME (idea 5) | Coincidencia exacta con el `symbol` convencional que recibe el `Simulator`. El mapeo contrato → raíz es de B.3. | Es lo que ya usan `SESSIONS` y `dataset_hash_by_symbol`. |
+| C6 | ¿Entra spread/deslizamiento por instrumento? (idea 6) | Sí, en ticks, con piso provisional; el deslizamiento en ambas patas (E1). | Corregir solo la comisión dejaría M6E en $18.750 de spread. |
+| C7 | ¿Costos en la procedencia? (idea 7) | Sí (E2): R13-R18. | El ledger está vacío: es el único momento en que cuesta cero. |
+| C8 | `source_url`/`read_on` en el hash (punto 6 del encargo) | **No entran.** | La cita no cambia lo que se simuló; contarla inflaría `n_trials`. Detalle en R13. |
+| C9 | ¿`spread_for` falla con ticks y sin fila? | **Sí**, la fila se resuelve siempre. | La falla no debe depender de la cobertura de ticks de cada día. Refina el criterio 7 de la propuesta (mismo valor cuando la fila existe). |
+| C10 | `MappingProxyType` vs tupla (E3) | Tupla ordenada de filas congeladas por defecto. | `hash(MappingProxyType({...}))` falla (verificado). La forma exacta queda en `design`. |
+| C11 | Scripts: ¿se tocan? (idea 8; propuesta «Alcance OUT») | `bench_simulator.py` no; `run_pipeline.py` **sí**, solo el cuerpo (R18). | E2 obliga a que el runner pase la huella a `TrialIdentityContext` y al manifiesto. |
+| C12 | Corrección del roadmap (idea 10) y memorias (idea 9) | Dentro del change (R22). | Vía rápida, pero la zona gris se resuelve a favor del gate. |
+| C13 | Versiones | `verdict` `/3 → /4`; `trial_ledger` `/1 → /2`; `genesis-backtest/1` **no** sube. | Cada cambio de manifiesto subió la versión (#109, #130); `RunProvenance` ganó campos sin subirla (#109) y un test la fija. |
+
+### Abiertas
+
+| # | Quién | Pregunta | Recomendación |
+|---|---|---|---|
+| **H1** | ~~Humano~~ **Resuelta por el orquestador** | ¿Mantener MES y MYM en T1 o recortar a cinco? | **Cinco.** Ver la nota bajo T1. |
+| **H2** | **Humano (gate de design)** | ¿La tabla de costos en capa 3 cumple «la ficha» del DoD, o exige `SymbolFigure`? (idea 1; propuesta 1) | **Recomendación: tabla en capa 3.** La comisión es de la firma, no del contrato, y así no se rompen los sidecars. La revisión independiente (agy) coincide. Si el dueño exige `SymbolFigure`, el dominio cambia a `data` y este spec se **reescribe**, no se parcha. Se aprueba con el design. |
+| **H3** | ~~Humano~~ **Resuelta por el orquestador** | ¿Se cobra el deslizamiento de salida también en salidas por objetivo? | **Sí**, como piso uniforme hasta B.4b (R10, riesgo 4). Se aprueba con el design. |
+| **H4** | ~~Humano / design~~ **Resuelta por el orquestador: entra** | ¿El manifiesto declara `friction_status` por símbolo? | **Sí.** Un veredicto tiene que decir por sí mismo que corrió con fricción provisional, sin que haya que abrir el JSON de costos: es el propósito del proyecto («dejar de creer que se sabe algo que no está validado»). Cuesta una clave más en el manifiesto, bajo el mismo `/4` (R17, E17.3). Se aprueba con el design. |
+| **H5** | **Humano** | Alcance de «Total Cost Round Trip» (bolsa/clearing/NFA) y uniformidad entre plataformas (idea 2). | No la cierra ningún agente: va en la firma (R23 (c)). «No confirmado» es una respuesta válida. |
+| D1 | Design | Nombres y forma de `InstrumentCosts`/`CostsConfig`; cómo se expone la consulta por símbolo y la lista de símbolos. | R12 fija solo el comportamiento. |
+| D2 | Design | Ubicación de la tabla de test (JSON de test con `load_costs_config(path)` vs módulo auxiliar). | El JSON ejercita el cargador real. |
+| D3 | Design | Redacción exacta de los mensajes de R9; si `costs_hash` se exporta en `genesis.backtest.__all__`. | Exportarlo sigue el precedente de `exit_geometry_hash`; obliga a tocar `test_public_api.py`. |
+| D4 | Design | Dónde vive la guarda de coherencia de claves de R16 (`__post_init__` de `TrialIdentityContext`). | Ahí. |
+
+## 9. Nota de verificación
+
+**Líneas de `src/`**: todas las que citan `idea.md` y `proposal.md` coinciden con `b0f2950`:
+`costs.py:24-30, 33-54 (:49 del; :50-51 ticks; :52-53 fallback), 57-59, 62-65, 68-85, 88-111`;
+`costs_config.json:2-4`; `simulator.py:26 (import), 241-249 (docstring), 251-267 (firma), 271-277
+(proveedor), 279-284 (tipo de config), 286-292 (sesión), 294-300 (house_rule), 328-336
+(RunProvenance), 646-669 (apertura: spread :657, slippage :665, comisión :666, costo :668-669),
+711-741 (cierre: comisión :717, swap :720-728, total :730)`; `ledger.py:96-111`;
+`errors.py:27-34`; `trial_ledger.py:32, 56-76, 115-147, 264-277, 300-310, 343-351`;
+`verdict.py:53, 949-977, 1335, 1411`; `wfa.py:433-462`; `symbols.py:35-47`.
+Los llamadores de las tres funciones son solo `Simulator` (`simulator.py:657, 665, 666, 717`).
+
+**Diferencias con la propuesta/idea (escritas contra `94aba5a`)**:
+
+1. **Docs movidas por los PR #134/#136.** Roadmap: B.4 está hoy en `:1207-1259` (propuesta
+   `:1202-1254`); «cuatro veces de más» en `:1221-1223` (propuesta `:1216-1218`); DoD de B.4a en
+   `:1255-1259` (propuesta `:1250-1254`); hay **una segunda** frase sobre «cuatro veces mayores» en
+   `:192-193` que la propuesta no listaba. Spec v1.5: PA-106-C en `:1530` (propuesta `:1491`); la fila
+   de comisiones en `:316` sigue igual.
+2. **Criterio 2 de la propuesta, mal formulado.** `rg` sobre `src/` por `slippage_points` encuentra la
+   variable local `slippage_points` de `simulator.py:665-667`; el patrón correcto está en E1.1.
+3. **`scripts/run_pipeline.py` sí se modifica** (E2 lo exige: el runner arma `TrialIdentityContext` en
+   `:493` y llama `write_verdict_artifacts` en `:539`). La propuesta daba los scripts por intactos y
+   su criterio 9 hablaba de «firmas»; las firmas se conservan, el cuerpo de `main()` cambia (R18).
+4. **MES/MYM.** El roadmap rechazó comprar sus datos el 2026-10-02 (`:1379-1383`), después de que
+   `idea.md` los incluyera «porque no cuestan nada». Va a H1.
+5. **R109/R111 de #24** prohíben modificar `simulator.py`/`costs.py::spread_for`; son restricciones de
+   alcance de ese change y se aclaran en §3.
+6. **Specs vivas desfasadas** (`risk_profile_hash` en R2, R4 de #53; R98, R100 de #14; R45 de #6).
+7. **Identidad de ensayo de la corrida y no del símbolo** (riesgo 6): matiza la motivación de E2.
+8. **Comportamientos de la biblioteca estándar verificados en Python 3.14.4** y que condicionan las
+   reglas de R3 y R12: `json.loads` acepta `NaN`/`Infinity` y resuelve claves duplicadas con el
+   último; `date.fromisoformat` acepta `20261002` y `2026-W40-5`; `float(True) == 1.0`; el hash de
+   `MappingProxyType` sobre un `dict` falla.
+
+**Lectura independiente de la fuente primaria.** El 2026-10-02 se descargó
+`https://help.myfundedfutures.com/en/articles/9735811` (solo lectura, sin guardar copia) y se
+extrajo la tabla de la página: título «Futures Instrument List», fecha de actualización «August 24,
+2026», columnas `Tick Size`, `Tick Value`, `Total Cost Round Trip`. Las siete cifras y los ticks de
+T1 coinciden con `idea.md` (MNQ $1,90; MGC $2,20; MCL $1,16; M6E $1,44; MBT $3,50; MES $1,90; MYM
+$1,90; NQ de referencia $4,68). **Esto es una segunda lectura de un agente; no sustituye la firma
+del dueño (R23).**
+
+**Aritmética verificada por cálculo**: `x/2 + x/2 == x` exacto para las siete cifras y para
+`sizing_hint ∈ {1, 2, 3, 7, 10}`; `0.25 * 1.0 * (0.5 / 0.25) == 0.5` exacto; el hash de referencia de
+E13.1 es el SHA-256 de la cadena canónica citada, calculado con la biblioteca estándar.
+
+**Sin contradicciones de fondo** entre `proposal.md` (con E1-E3) y el código verificado, salvo las
+diferencias 2, 3 y 7 de arriba.

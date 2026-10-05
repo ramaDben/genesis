@@ -29,8 +29,9 @@ _DEFAULT_DATASET_HASH_BY_SYMBOL: Mapping[str, str] = {"US500": "dataset-hash-fak
 _DEFAULT_FIRM_PROFILE_HASH = "firm-profile-hash-fake"
 _DEFAULT_EXIT_GEOMETRY_HASH = "exit-geometry-hash-fake"
 _DEFAULT_HOUSE_RULE_HASH = "house-rule-hash-fake"
+_DEFAULT_COSTS_HASH = "costs-hash-fake"
 _DEFAULT_GIT_COMMIT = "0000000000000000000000000000000000000fake"
-_DEFAULT_CONFIG_VERSION = "genesis-validation-trial-ledger/1"
+_DEFAULT_CONFIG_VERSION = "genesis-validation-trial-ledger/2"
 _DEFAULT_RECORDED_AT_UTC = "2026-01-01T00:00:00+00:00"
 
 
@@ -40,18 +41,29 @@ def make_trial_identity_context(
     firm_profile_hash: str = _DEFAULT_FIRM_PROFILE_HASH,
     exit_geometry_hash: str = _DEFAULT_EXIT_GEOMETRY_HASH,
     house_rule_hash: str = _DEFAULT_HOUSE_RULE_HASH,
+    costs_hash_by_symbol: Mapping[str, str] | None = None,
     git_commit: str = _DEFAULT_GIT_COMMIT,
 ) -> TrialIdentityContext:
-    """`TrialIdentityContext` determinista con defaults razonables para tests."""
+    """`TrialIdentityContext` determinista con defaults razonables para tests.
+
+    Sin `costs_hash_by_symbol`, cubre los mismos símbolos que el dataset resuelto con una
+    huella fija, para que ningún llamador dispare la guarda de R16 (Change #135).
+    """
+    resolved_dataset = (
+        dataset_hash_by_symbol
+        if dataset_hash_by_symbol is not None
+        else dict(_DEFAULT_DATASET_HASH_BY_SYMBOL)
+    )
     return TrialIdentityContext(
-        dataset_hash_by_symbol=(
-            dataset_hash_by_symbol
-            if dataset_hash_by_symbol is not None
-            else dict(_DEFAULT_DATASET_HASH_BY_SYMBOL)
-        ),
+        dataset_hash_by_symbol=resolved_dataset,
         firm_profile_hash=firm_profile_hash,
         exit_geometry_hash=exit_geometry_hash,
         house_rule_hash=house_rule_hash,
+        costs_hash_by_symbol=(
+            costs_hash_by_symbol
+            if costs_hash_by_symbol is not None
+            else {symbol: _DEFAULT_COSTS_HASH for symbol in resolved_dataset}
+        ),
         git_commit=git_commit,
     )
 
@@ -68,6 +80,7 @@ def make_trial_record(
     firm_profile_hash: str = _DEFAULT_FIRM_PROFILE_HASH,
     exit_geometry_hash: str = _DEFAULT_EXIT_GEOMETRY_HASH,
     house_rule_hash: str = _DEFAULT_HOUSE_RULE_HASH,
+    costs_hash_by_symbol: Mapping[str, str] | None = None,
     git_commit: str = _DEFAULT_GIT_COMMIT,
     recorded_at_utc: str = _DEFAULT_RECORDED_AT_UTC,
 ) -> TrialRecord:
@@ -91,6 +104,11 @@ def make_trial_record(
         firm_profile_hash=firm_profile_hash,
         exit_geometry_hash=exit_geometry_hash,
         house_rule_hash=house_rule_hash,
+        costs_hash_by_symbol=(
+            costs_hash_by_symbol
+            if costs_hash_by_symbol is not None
+            else {"US500": _DEFAULT_COSTS_HASH}
+        ),
         git_commit=git_commit,
         recorded_at_utc=recorded_at_utc,
     )
@@ -107,6 +125,7 @@ def make_discarded_trial_record(
     firm_profile_hash: str = _DEFAULT_FIRM_PROFILE_HASH,
     exit_geometry_hash: str = _DEFAULT_EXIT_GEOMETRY_HASH,
     house_rule_hash: str = _DEFAULT_HOUSE_RULE_HASH,
+    costs_hash_by_symbol: Mapping[str, str] | None = None,
     git_commit: str = _DEFAULT_GIT_COMMIT,
     recorded_at_utc: str = _DEFAULT_RECORDED_AT_UTC,
 ) -> TrialRecord:
@@ -128,6 +147,7 @@ def make_discarded_trial_record(
         firm_profile_hash=firm_profile_hash,
         exit_geometry_hash=exit_geometry_hash,
         house_rule_hash=house_rule_hash,
+        costs_hash_by_symbol=costs_hash_by_symbol,
         git_commit=git_commit,
         recorded_at_utc=recorded_at_utc,
     )
@@ -143,6 +163,7 @@ _BUNDLE_PROVENANCE = RunProvenance(
     firm_profile_hash=_DEFAULT_FIRM_PROFILE_HASH,
     exit_geometry_hash=_DEFAULT_EXIT_GEOMETRY_HASH,
     house_rule_hash=_DEFAULT_HOUSE_RULE_HASH,
+    costs_hash=_DEFAULT_COSTS_HASH,
     exhaustion_policy=ExhaustionPolicy.RECORD_AND_CONTINUE,
 )
 

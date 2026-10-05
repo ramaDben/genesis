@@ -17,7 +17,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from genesis.backtest.costs import CostsConfig, load_costs_config
+from genesis.backtest.costs import CostsConfig
 from genesis.backtest.exit_geometry import ExitGeometry, load_exit_geometry
 from genesis.backtest.simulator import (
     OpenPosition,
@@ -29,6 +29,7 @@ from genesis.data.symbols import SymbolFigure
 from genesis.strategy.common.timeframe import Timeframe
 from genesis.strategy.contract import Direction, EntryIntent, StrategyCandidate
 from genesis.strategy.inspector import InspectorFunnelConfig
+from tests.backtest.fakes import load_test_costs_config
 from tests.data.fakes import _default_symbol_figure
 from tests.strategy.fakes import make_annotated_bar
 
@@ -398,7 +399,7 @@ def test_criterio_a4_anti_anticipacion_del_stop(
             load_firm_profile(),
             load_exit_geometry(),
             _default_symbol_figure(_SYMBOL),
-            load_costs_config(),
+            load_test_costs_config(),
         )
         current_time = _warm_up_atr(sim, n_hours=15, base_price=100.0)
         pos = OpenPosition(
